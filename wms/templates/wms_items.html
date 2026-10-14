@@ -35,9 +35,10 @@
 <div class="card flush">
   {% if items %}
   <div class="table-wrap"><table>
-    <thead><tr><th class="num">#</th><th>显示编码</th><th>条码</th><th>货号</th>
-      {# 数量（2026-10-10）：一条货可以是多台 —— 现场最要紧的数字，摆在最前面 #}
-      <th class="num">数量</th><th>检修后码</th><th>产品名称</th><th>品类</th><th>等级</th><th>状态</th><th>所在仓</th>
+    <thead><tr><th class="num">#</th>
+      {# 2026-10-14 用户拍板：前四列 = 进货货号 / 条码 / 数量 / 渔货号，现场对单就靠这四样 #}
+      <th>进货货号</th><th>条码</th><th class="num">数量</th><th>渔货号</th><th>显示编码</th>
+      <th>检修后码</th><th>产品名称</th><th>品类</th><th>等级</th><th>状态</th><th>所在仓</th>
       <th class="num">成本</th><th class="num">售价</th><th class="num">残值</th><th>锁定</th>
       <th>操作</th></tr></thead>
     <tbody>
@@ -46,13 +47,15 @@
         {# 序号（2026-10-11 起带分页基准）：第几台是**全库第几行**，不再每页都从 1 开始 ——
            报数 / 对账时说的「第 300 行」永远指的是同一台货 #}
         <td class="num muted">{{ row_base + loop.index }}</td>
-        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
+        {# 进货货号（2026-10-14 提到第一列）：现场按货号对供应商清单 #}
+        <td class="mono">{{ it.sku_code or '—' }}</td>
         {# 条码（2026-10-13 用户拍板）：扫枪扫的就是这一串 #}
         <td class="mono">{{ it.barcode or '—' }}</td>
-        {# 货号（2026-10-13 加回来）：现场按货号对供应商清单，两个都要看得见 #}
-        <td class="mono">{{ it.sku_code or '—' }}</td>
+        {# 数量（2026-10-10）：一条货可以是多台 —— 现场最要紧的数字 #}
         <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}"
               title="这一个条码底下有几台">{{ it.qty or 1 }}</span></td>
+        <td class="mono">{% if it.fish_code %}<a href="/wms/goods/{{ it.fish_code }}">{{ it.fish_code }}</a>{% else %}—{% endif %}</td>
+        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
         <td class="mono">{{ it.own_barcode or '—' }}</td>
         {# 产品名称（供应商清单里「产品」那一列）：没有就退回品牌 + 型号 + 规格，别留空 #}
         <td class="wrap2" title="{{ it.title }}"><span class="clamp2">{{ it.product_name or it.title }}</span></td>

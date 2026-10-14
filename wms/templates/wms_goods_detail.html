@@ -31,17 +31,20 @@
   <div class="card">
     <h2>商品信息</h2>
     <div class="kv">
-      <b>渔货号</b><span class="mono">{{ fish_code }}</span>
+      {# 渔货号（2026-10-14）：这款货的身份证，重点高亮 #}
+      <b>渔货号</b><span class="mono fish-key">{{ fish_code }}</span>
       <b>商品名称</b><span>{{ head.product_name or head.title or '—' }}</span>
       <b>品牌</b><span>{{ head.brand or '—' }}</span>
       <b>品类</b><span>{{ wms_category_label(head.category) }}</span>
       <b>型号</b><span>{{ head.model or '—' }}</span>
       <b>规格</b><span>{{ head.spec or '—' }}</span>
-      <b>市场价（基准价）</b><span>¥{{ money(head.base_price) }}</span>
-      <b>建议售价</b><span>{% if head.suggest_price %}¥{{ money(head.suggest_price) }}
+      {# 价格（2026-10-14）：四个价重点展示，看款先看价 #}
+      <b class="price-hl">市场价（基准价）</b><span class="price-hl">¥{{ money(head.base_price) }}</span>
+      <b class="price-hl">建议售价</b><span class="price-hl">{% if head.suggest_price %}¥{{ money(head.suggest_price) }}
         <span class="muted" style="font-weight:400">（人工填过）</span>{% else %}—
         <span class="muted" style="font-weight:400">（按等级系数算）</span>{% endif %}</span>
-      <b>进货价（参考）</b><span>¥{{ money(head.purchase_cost) }}</span>
+      <b class="price-hl">渔货价</b><span class="price-hl">¥{{ money(head.selling_price) }}</span>
+      <b class="price-hl">进货价（参考）</b><span class="price-hl">¥{{ money(head.purchase_cost) }}</span>
       <b>涉及批次</b><span>{% if facts.batches %}{% for b in facts.batches %}<span class="mono">{{ b }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% else %}—{% endif %}</span>
       <b>建档时间</b><span>{{ head.created_at | dt }}</span>
     </div>
@@ -50,16 +53,10 @@
 
   <div class="card">
     <h2>库存分布</h2>
+    {# 2026-10-14 用户拍板：不再按等级 / 按状态分维度摆（多数款就一两台，分组全是 1 没意义），
+       只看每个仓放了几台 —— 一眼读完 #}
     <div class="kv">
       {% for w in facts.by_wh %}<b>{{ w.label }}</b><span class="num">{{ w.qty }} 台</span>{% endfor %}
-    </div>
-    <h3>按等级</h3>
-    <div class="kv">
-      {% for g in facts.by_grade %}<b>{{ g.label }}</b><span class="num">{{ g.qty }} 台</span>{% endfor %}
-    </div>
-    <h3>按状态</h3>
-    <div class="kv">
-      {% for s in facts.by_status %}<b>{{ s.label }}</b><span class="num">{{ s.qty }} 台</span>{% endfor %}
     </div>
     <p class="d">按<b>台数</b>算（一条百货可能自带好几台）；渔枢那边的商品库存只认「可售台数」。</p>
   </div>
@@ -129,5 +126,11 @@
   tbody td form.inline-form + form.inline-form{margin-left:6px}
   /* 库存分布：一格一项，右对齐的数字好看 */
   .card .kv .num{text-align:right;font-variant-numeric:tabular-nums}
+  /* 渔货号重点展示（2026-10-14）：这款货的身份证，一眼锁定 */
+  .fish-key{font-weight:700;color:var(--c-primary);font-size:15px;letter-spacing:.5px}
+  /* 价格行重点展示（2026-10-14）：看款先看价 */
+  .kv b.price-hl{color:var(--c-primary)}
+  .kv span.price-hl{font-weight:700;font-size:15px;color:var(--c-primary);
+    font-variant-numeric:tabular-nums}
 </style>
 {% endblock %}

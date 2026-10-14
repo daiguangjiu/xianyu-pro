@@ -50,6 +50,9 @@
   .zone { border:1px solid var(--c-border); border-radius:10px; padding:12px 14px;
     margin:10px 0 14px; background: var(--c-bg); }
   .zone-new { border-color: var(--c-primary); background: rgba(13,127,116,.06); }
+  /* 上架与贴码区块（2026-10-14）：检完顺手上架 / 贴码，绿色高亮跟「全新判定」一个分量 */
+  .zone-shelf { border-color: var(--c-primary); background: rgba(13,127,116,.06); }
+  .zone-shelf .bi { color: var(--c-primary); }
   .zone-hd { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; margin-bottom:10px; }
   .zone-hd b { font-size:14.5px; }
   .zone-hd .bi { color: var(--c-primary); }
@@ -298,15 +301,12 @@
             那属于「不影响使用」，检测项里判 × 会自行落到 B 档照常卖</span></div>
         <div class="repair-hint" id="repairHint"></div>
         <div class="checks">
+          {# 2026-10-14 用户拍板：「厂内可修」与「必须官方修」合并成一个勾 —— 现场不用再分；
+             勾了就是「故障要修」，提交后两个事实都记 true，档位照旧落 C、按档位自动进报修仓 #}
           <label class="big-check sm">
-            <input id="inhouse" type="checkbox">
-            <span class="bc-txt"><span class="bc-title">故障在「厂内可修清单」</span>
-              <span class="bc-sub">厂内自己能修 → 进维修仓</span></span>
-          </label>
-          <label class="big-check sm">
-            <input id="official" type="checkbox">
-            <span class="bc-txt"><span class="bc-title">故障在「必须官方修清单」</span>
-              <span class="bc-sub">只能官方修 → 进报修仓</span></span>
+            <input id="repairList" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">故障在「维修清单」</span>
+              <span class="bc-sub">厂内能修的进维修仓、得送厂家的进报修仓 —— 提交后按档位自动落位，不用再分</span></span>
           </label>
           <label class="big-check sm">
             <input id="missing" type="checkbox">
@@ -316,7 +316,11 @@
           </label>
         </div>
       </div>
-      <div class="field-row auto">
+      {# 2026-10-14 用户拍板：上架与贴码独立成高亮区块 —— 检完顺手要做的两件事，一眼锁定 #}
+      <div class="zone zone-shelf" id="zoneShelf">
+        <div class="zone-hd"><b><i class="bi bi-box-seam"></i> 上架与贴码（检完顺手做）</b>
+          <span class="zone-tip">这两项做完这台就能直接卖 —— 别留到最后一起补</span></div>
+        <div class="field-row auto">
         <div class="field"><label for="location">货架位置（检完顺手上架）</label>
           {# 库位只能从「仓库与货架」维护的表里选（2026-10-08）；
              2026-10-11 起换成搜索联想（短码 / 名称 / 拼音首字母 + 常用置顶），
@@ -340,6 +344,7 @@
           </details>
         </div>
         <div class="field"><label for="note">备注</label><input id="note" type="text" placeholder="选填"></div>
+        </div>
       </div>
       {# 拍照留档（2026-10-11 用户：要「多图上传 + 能删图」）：
          去掉 capture —— 手机上带 capture 只会开相机、一次一张；不带的话系统弹「拍照 / 相册」，
@@ -425,9 +430,10 @@
     <div class="pool">
       {% if pending %}
       <div class="table-wrap"><table>
-        <thead><tr><th>显示编码</th><th>品牌型号</th><th>入库</th></tr></thead>
+        <thead><tr><th>进货货号</th><th>品牌型号</th><th>入库</th></tr></thead>
         <tbody>{% for it in pending %}
-          <tr><td class="nowrap"><a href="/wms/inspect?code={{ it.barcode }}">{{ it.display_code }}</a></td>
+          {# 2026-10-14 用户拍板：待检池亮「进货货号」（对供应商清单用的就是它），不再亮显示编码 #}
+          <tr><td class="nowrap mono"><a href="/wms/inspect?code={{ it.barcode }}">{{ it.sku_code or it.display_code }}</a></td>
             <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td><td class="nowrap muted">{{ it.created_at | dt }}</td></tr>
         {% endfor %}</tbody>
       </table></div>
@@ -662,7 +668,7 @@ async function load(code) {
   $('sealed').checked = false; $('opened').checked = false;
   // 「缺件严重」的手动标记也清掉 —— 下一台判 D 时照旧自动勾（2026-10-13）
   $('missing').checked = false; delete $('missing').dataset.user;
-  $('inhouse').checked = false; $('official').checked = false;
+  $('repairList').checked = false;
   $('zoneFix').classList.remove('urge'); $('repairHint').innerHTML = '';
   // 上一台的「去开报修单」条不能带到下一台（只有这台判 C 才会再长出来）
   if ($('repairBar')) $('repairBar').style.display = 'none';
@@ -1055,10 +1061,10 @@ function setResult(key, value) {
   refresh();
 }
 
-// 维修方式二选一（2026-10-13 用户拍板）：厂内自修 / 官方报修互斥 ——
-// C 报修的货必须二选一，两个都勾没有意义
+// 「故障在维修清单」与「缺件报废」互斥（2026-10-14 用户拍板：厂内/官方合并成一个勾，
+// 勾了就是故障要修，提交后 inhouse_fixable 与 must_official 一起记 true，档位照旧落 C）
 function bindRepairExclusive() {
-  const a = $('inhouse'), b = $('official');
+  const a = $('repairList'), b = $('missing');
   a.addEventListener('change', () => { if (a.checked) b.checked = false; refresh(); });
   b.addEventListener('change', () => { if (b.checked) a.checked = false; refresh(); });
 }
@@ -1138,7 +1144,7 @@ async function refresh() {
   if (!CUR) return;
   const payload = {
     item_id: CUR.item.id, results: RESULTS,
-    inhouse_fixable: $('inhouse').checked, must_official: $('official').checked,
+    inhouse_fixable: $('repairList').checked, must_official: $('repairList').checked,
     missing_parts: $('missing').checked,
     sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
   };
@@ -1508,11 +1514,10 @@ async function submit() {
     if (firstErr) firstErr.focus();
     return;
   }
-  // ② 建议 C 报修：必须选一个维修方式（自修 / 官方二选一），
-  //    确实修不了就勾「缺件严重」人工判 D（2026-10-13 用户拍板）
+  // ② 建议 C 报修：必须勾「故障在维修清单」或人工判 D（2026-10-14 合并后口径）
   if (suggestGradeNow() === 'C' && !$('missing').checked
-      && !$('inhouse').checked && !$('official').checked) {
-    banner('这台建议 C 报修 —— 请先在「检修判定」里选一个维修方式（厂内自修 / 官方报修），'
+      && !$('repairList').checked) {
+    banner('这台建议 C 报修 —— 请先在「检修判定」里勾「故障在维修清单」，'
       + '确实修不了就勾「缺件严重 / 无维修价值」判 D 报废', 'err');
     $('zoneFix').classList.add('urge');
     return;
@@ -1522,7 +1527,7 @@ async function submit() {
     item_id: CUR.item.id, results: RESULTS, fail_descs: DESCS,
     final_grade: finalGrade, override_reason: $('override').value,
     uncertain: $('uncertain').checked,
-    inhouse_fixable: $('inhouse').checked, must_official: $('official').checked,
+    inhouse_fixable: $('repairList').checked, must_official: $('repairList').checked,
     missing_parts: $('missing').checked, note: $('note').value, photos: PHOTOS,
     sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
     location_code: $('location').value,

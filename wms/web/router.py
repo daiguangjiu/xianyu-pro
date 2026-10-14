@@ -79,6 +79,7 @@ from ..models import (
     REPAIR_CHANNEL_LABELS,
     REPAIR_STATUS_CHOICES,
     REPAIR_STATUS_LABELS,
+    repair_status_label,
     STATUS_CHOICES,
     STATUS_GRADED,
     STATUS_LABELS,
@@ -158,6 +159,7 @@ templates.env.globals.update(
         "wms_category_label": category_label,
         "wms_ledger_label": ledger_label,
         "wms_part_label": part_label,
+        "wms_repair_status_label": repair_status_label,
         "wms_audit_action": wms_audit.action_label,
         "wms_perm_label": wms_permissions.perm_label,
         "wms_conditions_text": grading.conditions_text,
@@ -2750,6 +2752,12 @@ def wms_repairs(request: Request, q: str = "", status: str = "", timeout: str = 
     rows = repairs_service.list_orders(
         db, q=q, status=status, only_timeout=(timeout == "1")
     )
+    # 2026-10-14：页头「所有报修状态」统计签要的数据 —— 每个状态多少单（不受当前筛选影响）
+    from ..models import WmsRepairOrder
+    status_counts = dict(
+        db.query(WmsRepairOrder.status, func.count(WmsRepairOrder.id))
+        .group_by(WmsRepairOrder.status).all()
+    )
     return render(
         "wms_repairs.html",
         request,
@@ -2757,6 +2765,8 @@ def wms_repairs(request: Request, q: str = "", status: str = "", timeout: str = 
         sub="C1 线上（京东 / 400）/ C2 线下（授权网点）双通道，超时未回自动预警",
         orders=rows,
         total=len(rows),
+        status_counts=status_counts,
+        total_all=sum(status_counts.values()),
         stats=repairs_service.stats(db),
         channels=list(REPAIR_CHANNEL_LABELS.items()),
         statuses=[[s, REPAIR_STATUS_LABELS[s]] for s in REPAIR_STATUS_CHOICES],

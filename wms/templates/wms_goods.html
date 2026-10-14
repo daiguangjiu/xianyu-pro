@@ -28,7 +28,7 @@
     <thead><tr><th class="num">#</th><th>渔货号</th><th>产品名称</th><th>品类</th>
       {# 条码商品数（2026-10-14）：这一款下面挂着几台物理的货 —— 台账的核心数字 #}
       <th class="num">条码商品</th><th class="num">合计台数</th><th class="num">可售台数</th>
-      <th class="num">进货价</th><th class="num">建议售价</th><th>操作</th></tr></thead>
+      <th class="num">进货价</th><th class="num">渔货价</th><th class="num">建议售价</th><th>操作</th></tr></thead>
     <tbody>
     {% for c in cards %}
       <tr>
@@ -43,6 +43,8 @@
         <td class="num"><span class="qty-pill {{ 'many' if c.qty > 1 }}">{{ c.qty }}</span></td>
         <td class="num">{{ c.sellable }}</td>
         <td class="num">{{ bits.money_cell(c.head.purchase_cost) if c.head else '—' }}</td>
+        {# 渔货价（2026-10-14）：卖给渔货栈的口径价，全系统统一用 selling_price 表达 #}
+        <td class="num">{{ bits.money_cell(c.head.selling_price) if c.head else '—' }}</td>
         <td class="num">{{ bits.money_cell(c.head.suggest_price or c.head.selling_price) if c.head else '—' }}</td>
         <td class="nowrap"><a class="btn sm" href="/wms/goods/{{ c.fish_code }}">明细</a></td>
       </tr>
