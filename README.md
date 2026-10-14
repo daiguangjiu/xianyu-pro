@@ -470,25 +470,42 @@ python -m app.cli import-orders 登记表.xlsx --sheet 付款 --apply    # 真�
 - 导入后按系统口径生成「公司自营应收 / 公司自营应付」两条结算流水，与群里归档的订单一致；
 - 同一份文件重复导入不会重复建单（按 日期 + 出单账号 + 产品 + 售价 + 成本 判重）。
 
+## 技术栈
+
+- **语言与运行时**：Python
+- **Web 框架**：FastAPI，使用 Uvicorn 提供 ASGI 服务
+- **数据访问**：SQLAlchemy ORM；默认使用 SQLite，也支持通过 `DATABASE_URL` 配置 PostgreSQL
+- **数据校验与配置**：Pydantic、环境变量配置及 PyYAML 解析规则
+- **页面与静态资源**：Jinja2 模板，配合项目内的静态资源
+- **文件与报表处理**：Pillow 用于图片处理，OpenPyXL 用于 Excel 导入导出；OCR 按配置使用相应引擎
+- **集成与后台处理**：飞书开放平台接口；应用内线程处理同步等后台任务
+- **部署**：支持直接运行，也提供 Dockerfile 和 Docker Compose 部署配置
+
 ## 目录结构
 
-```
-app/
-  config.py             配置（.env / 环境变量）
-  db.py                 数据库引擎、会话、新增列自动迁移、北京时间一次性平移
-  timeutil.py           时间口径：东八区 now() / 时间戳换算（全站统一入口）
-  models.py             原始消息 / 订单 / 截图 / 推单批次 / 供应商 / 同步水位
-  cli.py                命令行入口
-  main.py               FastAPI 应用（含 /feishu/event 回调、自动同步线程）
-  feishu/               消息拉取、资源下载、事件解密与归一化
-  parser/               规则加载、解析引擎、OCR 抽象
-  services/             入库归档、推单、统计
-  web/                  页面与 JSON API
-  templates/ static/    界面
-config/parse_rules.yaml 解析规则
-data/                   SQLite 数据库与截图归档
-examples/               真实模板与截图 OCR 示例
-tests/                  单元与端到端冒烟测试
+app/                      渔枢主应用
+  config.py               配置（.env / 环境变量）
+  db.py                   数据库引擎、会话与启动时补列
+  timeutil.py             东八区时间处理
+  models.py               消息、订单、截图、推单批次、供应商等数据模型
+  cli.py                  命令行入口
+  main.py                 FastAPI 应用与飞书事件回调
+  feishu/                 消息拉取、资源下载、事件处理
+  parser/                 规则加载、解析引擎与 OCR 抽象
+  services/               归档、推单、统计等业务服务
+  web/                    页面与 JSON API
+src/                      渔货栈相关实现
+wms/                      检测仓（WMS）业务模块
+config/                   解析规则等配置
+  parse_rules.yaml        群消息解析规则
+templates/                页面模板
+static/                   静态资源
+scripts/                  数据导入、修复与运维脚本
+data/                     本地数据库与截图归档（运行时数据）
+examples/                 消息模板与 OCR 示例
+tests/                    单元与端到端测试
+Dockerfile                容器镜像构建配置
+docker-compose.yml        Compose 部署配置
 ```
 
 ## 测试
