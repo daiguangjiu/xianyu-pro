@@ -404,7 +404,22 @@ class TimezoneMiddleware:
             timeutil.reset_current_tz(token)
 
 
-def _error_page_html(log_id: int | None) -> str:
+def _page_title_prefix(path: str) -> str:
+    """浏览器标签页要带的系统前缀（2026-10-14 用户拍板：三套系统各带各的）。
+
+    渔枢 / 渔集（检测仓）/ 渔货栈跑在同一个进程里，浏览器开着一堆标签时
+    光看标题认不出是哪套。错误页**刻意不走模板**（模板本身可能坏了），
+    所以前缀得自己拼 —— 按路径判断自己属于哪套。
+    """
+    p = str(path or "")
+    if p.startswith("/wms"):
+        return "【渔集】"
+    if p.startswith("/self") or p.startswith("/api/v1"):
+        return "【渔货栈】"
+    return "【渔枢】"
+
+
+def _error_page_html(log_id: int | None, prefix: str = "【渔枢】") -> str:
     """500 页面：**不依赖模板**（模板本身也可能坏），也不把堆栈甩给用户。
 
     给一句人话 + 一个编号 —— 编号就是「异常日志」里的那条记录，报给我时带上它，
@@ -414,7 +429,7 @@ def _error_page_html(log_id: int | None) -> str:
     return (
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        "<title>系统出了点问题</title></head>"
+        f"<title>{prefix}系统出了点问题</title></head>"
         "<body style=\"margin:0;font-family:-apple-system,'PingFang SC',sans-serif;"
         "background:#f6f7f9;color:#1f2933\">"
         "<div style=\"max-width:520px;margin:12vh auto;padding:28px 30px;background:#fff;"
@@ -430,7 +445,7 @@ def _error_page_html(log_id: int | None) -> str:
     )
 
 
-def _http_error_page_html(status: int, detail: str) -> str:
+def _http_error_page_html(status: int, detail: str, prefix: str = "【渔枢】") -> str:
     """400~599 的异常在**浏览器**里看到的人话页（不依赖模板，模板本身也可能坏）。
 
     文案就是异常自己的中文原因（例如「没有该页面的访问权限，请联系管理员…」），
@@ -441,7 +456,7 @@ def _http_error_page_html(status: int, detail: str) -> str:
     return (
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-        f"<title>{status} · {title}</title></head>"
+        f"<title>{prefix}{status} · {title}</title></head>"
         "<body style=\"margin:0;font-family:-apple-system,'PingFang SC',sans-serif;"
         "background:#f6f7f9;color:#1f2933\">"
         "<div style=\"max-width:520px;margin:12vh auto;padding:28px 30px;background:#fff;"
@@ -480,7 +495,8 @@ def _install_error_handler(app: FastAPI) -> None:
                 },
                 status_code=500,
             )
-        return HTMLResponse(_error_page_html(log_id), status_code=500)
+        return HTMLResponse(_error_page_html(log_id, _page_title_prefix(request.url.path)),
+                            status_code=500)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException):  # noqa: ANN202
@@ -509,7 +525,8 @@ def _install_error_handler(app: FastAPI) -> None:
                 media_type="application/json; charset=utf-8",
             )
         return HTMLResponse(
-            _http_error_page_html(status, detail), status_code=status, headers=headers
+            _http_error_page_html(status, detail, _page_title_prefix(request.url.path)),
+            status_code=status, headers=headers
         )
 
 

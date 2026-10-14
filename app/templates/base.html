@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#6366F1">
-  <title>{% block title %}数据总览{% endblock %} · {{ app_name }}</title>
+  {# 2026-10-14 用户拍板：浏览器标签页标题带系统前缀，开一堆标签时不至于认不出哪个是哪套 #}
+  <title>【渔枢】{% block title %}数据总览{% endblock %} · {{ app_name }}</title>
   <link rel="icon" href="/static/brand/favicon.png">
   {# 带版本号：升级后浏览器会重新拉样式，不会一直用着缓存里的旧版 #}
   <link rel="stylesheet" href="/static/vendor/bootstrap-icons.css?v={{ asset_v }}">
