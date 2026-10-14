@@ -194,7 +194,7 @@
               <span class="shot">
                 <a class="shot-link" href="{{ media_url(shot.local_path) }}" target="_blank" rel="noopener"
                    aria-label="查看该订单的订单截图原图">
-                  <img src="{{ media_url(shot.local_path) }}" alt="订单截图缩略图" loading="lazy">
+                  <img src="{{ thumb_url(shot.local_path, 240) }}" alt="订单截图缩略图" loading="lazy">
                 </a>
                 <span class="shot-preview">
                   <img src="{{ media_url(shot.local_path) }}" alt="订单截图原图">
@@ -210,7 +210,7 @@
               <span class="shot">
                 <a class="shot-link" href="{{ media_url(o.product_image_path) }}" target="_blank" rel="noopener"
                    aria-label="查看从订单截图里裁出的商品图">
-                  <img src="{{ media_url(o.product_image_path) }}" alt="商品图" loading="lazy">
+                  <img src="{{ thumb_url(o.product_image_path, 240) }}" alt="商品图" loading="lazy">
                 </a>
               </span>
             {% else %}

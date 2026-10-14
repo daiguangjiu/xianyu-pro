@@ -556,7 +556,7 @@
       {% if order.product_image_path %}
         <a href="{{ media_url(order.product_image_path) }}" target="_blank" rel="noopener"
            title="点击查看商品图原图">
-          <img src="{{ media_url(order.product_image_path) }}" alt="商品图">
+          <img src="{{ thumb_url(order.product_image_path, 320) }}" alt="商品图">
         </a>
       {% else %}
         <div class="muted">还没裁出商品图{% if not images %}（该订单还没有订单截图）{% endif %}</div>
@@ -574,7 +574,7 @@
           <span class="shot">
             <a class="shot-link" href="{{ media_url(img.local_path) }}" target="_blank" rel="noopener"
                aria-label="查看订单截图原图">
-              <img src="{{ media_url(img.local_path) }}" alt="订单截图" loading="lazy">
+              <img src="{{ thumb_url(img.local_path, 320) }}" alt="订单截图" loading="lazy">
             </a>
             <span class="shot-preview">
               <img src="{{ media_url(img.local_path) }}" alt="订单截图原图">

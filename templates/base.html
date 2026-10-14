@@ -2899,7 +2899,7 @@
               <div class="sy-cart-list">
                 {% for ln in _cart.lines %}
                 <a class="sy-cart-row" href="{{ ln.url }}" title="{{ ln.title }}">
-                  <img src="{{ ln.image or '/self/static/logo.png' }}" alt="" loading="lazy">
+                  <img src="{{ thumb_url(ln.image, 96) or '/self/static/logo.png' }}" alt="" loading="lazy">
                   <span class="ti">
                     <span class="t">{{ ln.title }}</span>
                     <span class="s">{{ ln.spec_text }}</span>

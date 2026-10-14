@@ -118,7 +118,7 @@ from ..services.notify import (
 )
 from ..services.settings_store import ENV_PATH, is_writable, mask_secret, write_updates
 from ..timeutil import now
-from ..utils import human_time, media_url, money
+from ..utils import human_time, media_url, money, thumb_url
 from ..feishu.client import get_client, reset_client
 from .auth import (
     ROLE_ADMIN,
@@ -156,6 +156,8 @@ if _SHARED_TEMPLATES.is_dir() and _SHARED_TEMPLATES != Path(templates.env.loader
 templates.env.globals.update(
     {
         "media_url": media_url,
+        # 缩略图（2026-10-15）：列表 / 购物车的小图用 /thumb/...?w=<宽度>，不拉原图
+        "thumb_url": thumb_url,
         "money": money,
         "human_time": human_time,
         "app_name": APP_NAME,

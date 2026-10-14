@@ -25,6 +25,7 @@ from .feishu.events import handle_event
 from .models import SyncState
 from .services.ingest import backfill_order_source, sync_chat
 from .services.notify import flush_held_notifications
+from .thumbs import install_thumb_route
 from .web.api import router as api_router
 from .web.auth import AuthMiddleware, HtmlNoCacheMiddleware, ensure_default_admin
 from .web.pages import router as pages_router
@@ -553,6 +554,8 @@ def create_app() -> FastAPI:
 
     settings.media_path.mkdir(parents=True, exist_ok=True)
     app.mount("/media", StaticFiles(directory=str(settings.media_path)), name="media")
+    # 按需缩略图（2026-10-15）：列表 / 购物车的小图不再拉 2MB 原图
+    install_thumb_route(app)
 
     app.include_router(api_router)
     app.include_router(pages_router)

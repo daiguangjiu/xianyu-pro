@@ -61,6 +61,7 @@ from src.merchant.security import (
 from src.version import APP_NAME, APP_TAGLINE
 from src.web import hub_shops
 from app.timeutil import to_iso, utc_now
+from app.utils import media_url, thumb_url
 
 try:  # 与渔枢系统同一个进程时才打通登录；独立部署（没有 app 包）时保持原样
     from app.hub_auth import hub_login_name as _hub_login_name
@@ -71,6 +72,9 @@ router = APIRouter(tags=["merchant-web"], include_in_schema=False)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 templates = Jinja2Templates(directory=str(_REPO_ROOT / "templates"))
+# 2026-10-15：渔货栈的列表 / 购物车里商品图只占几十像素，原来直接拉 2MB 原图 ——
+# 注册 thumb_url 让这些位置改用按需生成的缩略图（裁一次落盘缓存，之后几十 KB）
+templates.env.globals.update({"thumb_url": thumb_url, "media_url": media_url})
 
 
 # =====================================================================

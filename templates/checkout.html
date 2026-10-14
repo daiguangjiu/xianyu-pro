@@ -247,7 +247,7 @@
                       <td class="ck-cell-main">
                         <div class="d-flex gap-3">
                           {% if line.image %}
-                            <img src="{{ line.image }}" alt="" class="ck-thumb" loading="lazy">
+                            <img src="{{ thumb_url(line.image, 160) }}" alt="" class="ck-thumb" loading="lazy">
                           {% endif %}
                           <div style="min-width: 0;">
                             <div class="ck-title">{{ line.title }}</div>
@@ -294,7 +294,7 @@
                   <td class="ck-cell-main">
                     <div class="d-flex gap-3">
                       {% if line.image %}
-                        <img src="{{ line.image }}" alt="" class="ck-thumb" loading="lazy">
+                        <img src="{{ thumb_url(line.image, 160) }}" alt="" class="ck-thumb" loading="lazy">
                       {% endif %}
                       <div style="min-width: 0;">
                         <div class="ck-title">{{ line.title }}</div>
