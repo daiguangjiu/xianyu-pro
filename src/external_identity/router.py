@@ -34,6 +34,7 @@ def _verify_signature(
     signature: str | None,
     secret: str,
     raw_body: bytes,
+    signed_path: str | None = None,
 ) -> None:
     if not secret:
         raise HTTPException(status_code=503, detail="identity sync is not configured")
@@ -49,7 +50,8 @@ def _verify_signature(
         raise HTTPException(status_code=401, detail="expired request")
 
     body_digest = hashlib.sha256(raw_body).hexdigest()
-    message = "\n".join((request.method.upper(), request.url.path, timestamp, nonce, body_digest))
+    path = signed_path or request.url.path
+    message = "\n".join((request.method.upper(), path, timestamp, nonce, body_digest))
     expected = hmac.new(secret.encode(), message.encode(), hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature.lower()):
         raise HTTPException(status_code=401, detail="invalid service credentials")

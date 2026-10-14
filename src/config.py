@@ -100,8 +100,8 @@ class Settings(BaseSettings):
     # 预填包票据有效期（秒）——票据一次性、短期有效，防止链接被转发复用
     xianmou_ticket_ttl: int = 600
 
-    # 闲参谋服务端身份同步共享密钥；为空时同步接口保持关闭。
-    xianmou_identity_sync_secret: str = "Qq@21269932"
+    # 闲参谋服务端 OpenAPI 共享密钥；为空时身份同步与商品接口保持关闭。
+    xianmou_identity_sync_secret: str = ""
 
     # ----------------------------------------------------------------
     # 启动校验

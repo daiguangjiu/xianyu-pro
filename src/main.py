@@ -23,6 +23,7 @@ from src.merchant.service import ensure_platform_admin as svc_ensure_platform_ad
 from src.web.router import router as web_router
 from src.merchant.router import router as merchant_web_router
 from src.external_identity.router import router as external_identity_router
+from src.external_identity.products import router as external_products_router
 
 
 @asynccontextmanager
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
     # 详细子模块在 src/api/v1/__init__.py 中组装
     app.include_router(api_router, prefix="/api/v1")
     app.include_router(external_identity_router)
+    app.include_router(external_products_router)
 
     # ====== Web UI（HTML 模板，只读） ======
     # 详见 src/web/router.py；include_in_schema=True 已在路由内关闭，避免污染 Swagger
