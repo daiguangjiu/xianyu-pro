@@ -52,18 +52,22 @@
   <h2>本批货品（{{ stats.total }}）</h2>
   {% if items %}
   <div class="table-wrap"><table>
-    <thead><tr><th>显示编码</th><th>货号</th>{# 数量（2026-10-10）：一条货可以是多台 #}
-      <th class="num">数量</th><th>检修后码</th><th>条码</th><th>品牌型号</th><th>序列号</th><th>等级</th><th>状态</th>
+    {# 2026-10-14：跟「库存台账」同一套口径 —— 前四列 = 进货货号 / 条码 / 数量 / 渔货号，后续字段不变 #}
+    <thead><tr><th>进货货号</th><th>条码</th><th class="num">数量</th><th>渔货号</th><th>显示编码</th>
+      <th>检修后码</th><th>品牌型号</th><th>序列号</th><th>等级</th><th>状态</th>
       <th class="num">成本</th><th class="num">基准价</th><th>操作</th></tr></thead>
     <tbody>
     {% for it in items %}
       <tr>
-        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
         <td class="mono">{{ it.sku_code or '—' }}</td>
+        <td class="mono muted">{{ it.barcode }}</td>
+        {# 数量（2026-10-10）：一条货可以是多台 #}
         <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}"
               title="这一个条码底下有几台">{{ it.qty or 1 }}</span></td>
+        {# 渔货号：没发号的货不给空链接 #}
+        <td class="mono">{% if it.fish_code %}<a href="/wms/goods/{{ it.fish_code }}">{{ it.fish_code }}</a>{% else %}—{% endif %}</td>
+        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
         <td class="mono">{{ it.own_barcode or '—' }}</td>
-        <td class="mono muted">{{ it.barcode }}</td>
         <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td>
         <td class="mono muted">{{ it.serial_no or '—' }}</td>
         <td>{{ bits.grade_badge(it.grade) }}</td>
