@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% from "_charts.html" import pie_chart, bar_chart %}
+{% block title %}热销产品 TOP 榜单{% endblock %}
+{% block heading %}热销产品 TOP 榜单{% endblock %}
+{% block sub %}单品维度全量明细 · 图表分析 · 商品合并（仅统计口径，不动原始订单）{% endblock %}
+{% block actions %}
+  <a class="btn" href="/"><i class="bi bi-arrow-left" aria-hidden="true"></i> 返回数据总览</a>
+{% endblock %}
+
+{# 表头排序：服务端排序（整列数据一起排，不是只排当前屏）。
+   点一次降序、再点一次升序；整格都是链接，不用精准点到文字上。 #}
+{% macro sort_th(label, key, cls='num') %}
+{% set next_dir = 'asc' if sort == key and dir == 'desc' else 'desc' %}
+{% set active = sort == key %}
+<th class="{{ cls }} sortable{% if active %} sorted-{{ dir }}{% endif %}"
+    {% if active %}aria-sort="{{ 'ascending' if dir == 'asc' else 'descending' }}"{% endif %}>
+  <a href="/stats/products?sort={{ key }}&dir={{ next_dir }}"
+     title="按「{{ label }}」{{ '升序' if next_dir == 'asc' else '降序' }}排列（再点一次反向）">{{ label }}<span class="sort-arrow" aria-hidden="true"></span></a>
+</th>
+{% endmacro %}
+
+{% block content %}
+
+<div class="card">
+  <div class="row-between">
+    <h2 style="margin:0"><i class="bi bi-pie-chart" aria-hidden="true"></i> 统计分析图</h2>
+    <span class="chip">共 {{ total }} 个单品</span>
+  </div>
+  <div class="chart-row" style="margin-top:14px">
+    <div class="chart-box"><h4>销售额占比（TOP 8）</h4>{{ pie_chart(charts.sale) }}</div>
+    <div class="chart-box"><h4>毛利占比（TOP 8）</h4>{{ pie_chart(charts.profit) }}</div>
+    <div class="chart-box"><h4>销售额对比（TOP 10）</h4>{{ bar_chart(charts.sale_bar, label='销售额') }}</div>
+    <div class="chart-box"><h4>销量件数对比（TOP 10）</h4>{{ bar_chart(charts.qty_bar, label='件数') }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row-between">
+    <h2 style="margin:0"><i class="bi bi-arrow-repeat" aria-hidden="true"></i> 商品合并（仅统计口径）</h2>
+    <span class="chip">{{ merges|length }} 条规则</span>
+  </div>
+  {# 口径说明：拆成「小标题 + 说明」几行讲清四件事（为什么合并 / 怎么算 / 能不能撤 / 能不能再并），
+     以前一整段堆在一起，看的和写的都费劲 #}
+  <div class="rule-note">
+    <div class="rule-note-head">
+      <i class="bi bi-info-circle" aria-hidden="true"></i> 统计口径（只改统计，不动原始订单）
+    </div>
+    <ul class="rule-list">
+      <li>
+        <b>为什么要合并</b>
+        <span>同一个商品，大家取名往往不一致 —— 例如「倍思Q2充电宝 10000毫安」和「倍思Q2充电宝 20000毫安」
+          其实是同一款。不合并的话，榜单和占比会被拆成好几行，看不出真实销量。</span>
+      </li>
+      <li>
+        <b>合并后怎么算</b>
+        <span>这一组按<b>一个商品</b>汇总订单 / 件数 / 销售额 / 毛利（合并后的名字就是表格里显示的名字）。</span>
+      </li>
+      <li>
+        <b>影响范围</b>
+        <span>订单里的原始商品名一个字都不改，合并<b>只在统计里生效</b>，订单详情、推单、结算看到的还是原名。</span>
+      </li>
+      <li>
+        <b>可以反复合并</b>
+        <span>先把相近的几个写法并成一组；以后发现新的雷同商品，把带「合N」标记的那一组和新商品<b>一起勾选</b>、
+          填个新名字再并一次即可 —— 会一路归并到最后一组，数字不重复也不丢。</span>
+      </li>
+      <li>
+        <b>随时可撤销</b>
+        <span>点已合并列表里的「取消」，这条规则立刻作废，它下面那些写法马上恢复单独统计。</span>
+      </li>
+    </ul>
+  </div>
+
+  {% if suggests %}
+  <details open style="margin-top:10px">
+    <summary style="cursor:pointer"><b>系统推荐合并（{{ suggests|length }} 组）</b>：按商品名去掉空格 / 符号 / 数字后的主干判断</summary>
+    <div class="table-wrap" style="margin-top:8px">
+      <table class="list-nowrap">
+        <thead><tr><th class="num">序号</th><th>可能同一个商品</th><th class="num">合计订单</th><th class="num">合计销售额</th><th>合并为</th></tr></thead>
+        <tbody>
+        {% for sg in suggests %}
+          <tr>
+            <td class="num muted">{{ loop.index }}</td>
+            <td>{{ sg.names|join(' ／ ') }}</td>
+            <td class="num">{{ sg.count }}</td>
+            <td class="num">¥{{ money(sg.sale) }}</td>
+            <td class="nowrap">
+              <form method="post" action="/stats/products/merge" style="display:flex;gap:6px;align-items:center">
+                {% for n in sg.names %}<input type="hidden" name="members" value="{{ n }}">{% endfor %}
+                <input type="text" name="canonical" value="{{ sg.canonical }}" style="min-width:180px" aria-label="合并后的商品名">
+                <button class="btn sm primary" data-confirm="确认把这一组合并？仅影响统计，原始订单商品名不变">合并</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% else %}
+  <div class="note muted" style="margin-top:8px">暂时没有推荐：商品名都很清晰，或者已经都合并过了。</div>
+  {% endif %}
+
+  {% if merges %}
+  <details open style="margin-top:10px">
+    <summary style="cursor:pointer"><b>已合并的商品（{{ merges|length }} 组）</b></summary>
+    <div class="chips" style="margin-top:8px">
+      {% for m in merges %}
+        {% for d in m.details %}
+        <span class="chip chip-merge" title="{% if d.nested %}「{{ d.member }}」是上一轮合并出来的组，下面含：{{ d.leaves|join(' ／ ') }}{% else %}合并后显示名：{{ m.canonical }}{% endif %}">
+          {{ m.canonical }} ← {{ d.member }}
+          {% if d.nested %}<span class="muted">（含 {{ d.leaves|length }} 个写法）</span>{% endif %}
+          <form method="post" action="/stats/products/merge/delete" style="display:inline">
+            <input type="hidden" name="member" value="{{ d.member }}">
+            <button class="btn sm" data-confirm="取消「{{ d.member }}」的合并？{% if d.nested %}这一组会退回成上一轮的 {{ d.member }}{% else %}恢复按原名单独统计{% endif %}">取消</button>
+          </form>
+        </span>
+        {% endfor %}
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+<div class="card flush">
+  <div style="padding:12px 14px 0">
+    <div class="row-between">
+      <h2 style="margin:0"><i class="bi bi-list-ol" aria-hidden="true"></i> 单品明细</h2>
+      <span class="muted">勾选多个商品 → 在下方填名字合并；<b>带「合N」标记的行可以再次勾选</b>，和新的雷同商品继续并到一起（仅统计口径）</span>
+    </div>
+  </div>
+  {% if rows %}
+  <form method="post" action="/stats/products/merge">
+    <div class="table-wrap">
+      <table class="list-nowrap">
+        <thead>
+          <tr>
+            <th style="width:28px" aria-label="选择"></th>
+            <th class="num">序号</th>
+            {{ sort_th('商品', 'product', '') }}
+            {{ sort_th('订单', 'count') }}
+            {{ sort_th('件数', 'quantity') }}
+            {{ sort_th('销售额', 'sale') }}
+            {{ sort_th('成本', 'cost') }}
+            {{ sort_th('毛利', 'profit') }}
+            {{ sort_th('毛利率', 'margin') }}
+            {{ sort_th('退单', 'refund_count') }}
+            {{ sort_th('退款金额', 'refund_amount') }}
+            {{ sort_th('销售占比', 'sale_share') }}
+            {{ sort_th('毛利占比', 'profit_share') }}
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><input type="checkbox" name="members" value="{{ r.product }}" aria-label="选择 {{ r.product }}"></td>
+            <td class="num muted">{{ loop.index }}</td>
+            <td title="{% if r.members|length > 1 %}已合并：{{ r.members|join(' ／ ') }}{% endif %}">
+              {{ r.product }}{% if r.members|length > 1 %} <span class="chip" title="已合并 {{ r.members|length }} 个写法">合{{ r.members|length }}</span>{% endif %}
+            </td>
+            <td class="num">{{ r.count }}</td>
+            <td class="num">{{ r.quantity }}</td>
+            <td class="num">¥{{ money(r.sale) }}</td>
+            <td class="num">
+              {% if r.zero_cost %}<span class="cost-zero" title="{{ r.zero_cost }} 单成本未维护">¥{{ money(r.cost) }}</span>
+              {% else %}¥{{ money(r.cost) }}{% endif %}
+            </td>
+            <td class="num">¥{{ money(r.profit) }}</td>
+            <td class="num">{{ '%.1f'|format(r.margin) }}%</td>
+            <td class="num">{% if r.refund_count %}<span class="cost-zero">{{ r.refund_count }}</span>{% else %}0{% endif %}</td>
+            <td class="num">{% if r.refund_amount %}¥{{ money(r.refund_amount | abs) }}{% else %}-{% endif %}</td>
+            <td class="num">{{ '%.1f'|format((r.sale / total_sale * 100)) }}%</td>
+            <td class="num">{% if total_profit > 0 %}{{ '%.1f'|format((r.profit / total_profit * 100)) }}%{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="merge-form" style="padding:12px 14px">
+      {# 名字输入框单独占一行（并排时被说明文字挤得看不全长商品名，基线也对不齐） #}
+      <div class="merge-form-row">
+        <div class="field">
+          <label for="canonical">合并后的商品名</label>
+          <input type="text" id="canonical" name="canonical" placeholder="如：倍思Q2充电宝（合并）">
+        </div>
+        <button class="btn primary" data-confirm="确认把勾选的商品合并到这个名字下？仅影响统计，原始订单商品名不变">合并所选商品</button>
+      </div>
+      <p class="merge-hint">
+        <i class="bi bi-info-circle" aria-hidden="true"></i>
+        <span>勾选上面表格里的商品后在这里填名字即可；<b>带「合N」标记的行可以再勾选</b>
+          —— 把已合并的那一组和新商品一起选上，填个新名字就能继续并。</span>
+      </p>
+    </div>
+  </form>
+  {% else %}
+  <div class="empty">还没有商品数据。</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,1970 @@
+{# 发布自营商品：结构与样式照 supply-chain-xiaoyu 的 goods_new（7 步分组 + 右栏实时预览 + SKU 矩阵） #}
+{% extends "base.html" %}
+{% block title %}{{ '编辑商品' if is_edit else '发布商品' }}{% endblock %}
+{% block heading %}{{ '编辑商品' if is_edit else '发布商品' }}{% endblock %}
+{% block sub %}{% if is_edit %}改完点右上角「保存修改」；保存后最新资料（标题 / 图片 / 详情 / 规格 / 渔货价）会自动回传渔货栈，历史订单不受影响{% else %}先选商品属性（供应链商品 / 自营商品），再按上架闲鱼需要的字段一次填完；商品标题与成本价必填{% endif %}{% endblock %}
+{% block actions %}
+  <a class="btn" href="{% if is_edit %}/products/{{ product.id }}{% else %}/products{% endif %}">{% if is_edit %}返回详情{% else %}返回列表{% endif %}</a>
+  {% if is_edit %}
+  <button type="button" class="btn primary" onclick="submitForm('save')">保存修改</button>
+  {% else %}
+  <button type="button" class="btn" onclick="submitForm('draft')">保存草稿</button>
+  <button type="button" class="btn" onclick="submitForm('audit')">提交审核</button>
+  <button type="button" class="btn primary" onclick="submitForm('publish')">立即上架</button>
+  {% endif %}
+{% endblock %}
+{% block content %}
+
+<div class="publish-layout">
+  <form id="publishForm" class="publish-main" method="post"
+        action="{% if is_edit %}/products/{{ product.id }}/edit{% else %}/products{% endif %}" autocomplete="off">
+    <input type="hidden" name="status" value="{{ product.status if is_edit else 'draft' }}">
+    <input type="hidden" name="submit_action" id="submitAction" value="draft">
+    <input type="hidden" name="spec_input" id="specInput" value="">
+    <input type="hidden" name="skus_json" id="skusJson" value="[]">
+    <input type="hidden" name="image_path" id="mainImageField" value="">
+    <input type="hidden" name="images" id="imagesField" value="">
+    <input type="hidden" name="category" id="categoryField" value="">
+    {# 详情描述是多组文案：[{title, content}]，后端再拼回 detail_html #}
+    <input type="hidden" name="detail_blocks_json" id="detailBlocksJson" value="[]">
+    {# 详情图单独提交（一行一个地址），后端拼在文案后面 #}
+    <input type="hidden" name="detail_images" id="detailImagesField" value="">
+
+    {# —— 步骤 0 · 商品属性（供应链商品 / 自营商品）—— #}
+    <section class="form-section">
+      <header>
+        <span class="step">0</span> 商品属性
+        <span class="hint">先定这款货从哪来：供应链商品要指定是哪家供应链</span>
+      </header>
+      <div class="section-body">
+        <div class="field-row">
+          <div class="field">
+            <label>商品属性 <span class="req">*</span></label>
+            <div class="attr-pick">
+              <label class="attr-opt">
+                <input type="radio" name="source_type" value="third_party" onchange="onSourceChange()">
+                <span class="attr-body">
+                  <span class="attr-title"><i class="bi bi-truck"></i> 供应链商品</span>
+                  <span class="attr-sub">由供应链供货，需指定对应供应链</span>
+                </span>
+              </label>
+              <label class="attr-opt">
+                <input type="radio" name="source_type" value="self_operated" checked onchange="onSourceChange()">
+                <span class="attr-body">
+                  <span class="attr-title"><i class="bi bi-patch-check-fill"></i> 自营商品</span>
+                  <span class="attr-sub">自己供货，不涉及供应链</span>
+                </span>
+              </label>
+            </div>
+          </div>
+          <div class="field" id="supplierField" style="display:none">
+            {% if supplier_options %}
+            <label for="supplierSelect">对应供应链 <span class="req">*</span></label>
+            <select id="supplierSelect" name="supplier_id" onchange="syncPreview(); refreshShippingDefaults()">
+              <option value="">请选择供应链</option>
+              {% for s in supplier_options %}
+                <option value="{{ s.id }}">{{ s.name }}{% if s.code %}（{{ s.code }}）{% endif %}</option>
+              {% endfor %}
+            </select>
+            <p class="help">供应链在「供应链 · 供应商管理」里维护；选好后列表与统计都按它归类</p>
+            {% else %}
+            <label for="supplierName">对应供应链 <span class="req">*</span></label>
+            <input id="supplierName" type="text" name="supplier_name" placeholder="供应链名称（建议先去供应商管理建档）">
+            <p class="help">还没有供应链档案：先去「供应链 · 供应商管理」建一家，建好后这里就能下拉选</p>
+            {% endif %}
+          </div>
+          {# 商品条码（2026-10-10 / 10-10 二改）：自营商品在这里认出渔集（检测仓）的那台货 ——
+             三条路都行：扫码枪扫（扫完敲回车）、手打、或者点「选渔集货品」从下拉里挑一条
+             （跟「供应链商品选供应链」一个心思，不用背条码）。
+             带出：商品名称 / 品牌 / **类目** / 渔货价 / 建议售价 / 市场价（= 渔集基准价）/
+             库存（= 渔集数量）；商家编码直接复用这个条码（锁死不可改，SKU 编码 = 条码-01）。 #}
+          <div class="field" id="wmsCodeField">
+            <label for="wmsCode">商品条码（扫 / 选渔集货品，自动带出资料与类目）</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <input id="wmsCode" type="text" autocomplete="off" list="wmsCodeOptions"
+                     style="flex:1 1 240px"
+                     placeholder="扫码枪扫一下，或点右边「选渔集货品」挑一条">
+              <button type="button" class="btn btn-sm btn-primary" onclick="wmsSuggest(true)">
+                <i class="bi bi-upc-scan"></i> 选渔集货品
+              </button>
+              <button type="button" class="btn btn-sm" onclick="wmsClear()">清除</button>
+            </div>
+            <datalist id="wmsCodeOptions"></datalist>
+            <p class="help" id="wmsCodeHelp">
+              扫 / 选之后，商品名称、品牌、<b>类目</b>、渔货价、建议售价、市场价（渔集基准价）、
+              库存（渔集数量）会一起带过来，<b>商家编码直接用这个条码</b>（锁死不可改）。
+              不扫不选就是普通新增商品。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 1 · 商品图片（主图）—— #}
+    <section class="form-section">
+      <header>
+        <span class="step">1</span> 商品图片
+        <span class="hint">建议 1:1、800×800 以上，第一张为封面；最多 9 张，可拖拽换顺序</span>
+      </header>
+      <div class="section-body">
+        <div class="image-grid" id="mainImageGrid"></div>
+        <div class="image-add">
+          <input type="text" id="mainImageInput" placeholder="粘贴主图 URL 后回车添加">
+          <input type="file" id="mainImageFile" accept="image/*" multiple hidden
+                 onchange="uploadMainFiles(this.files)">
+          <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('mainImageFile').click()">
+            <i class="bi bi-upload"></i> 本地上传主图
+          </button>
+          <span class="help" style="margin:0">单张 ≤ {{ upload_max_mb | default(5, true) }}MB，支持 png / jpg / webp / gif · 按住图片拖动可换顺序（第一张是封面）</span>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 2 · 商品类目 —— #}
+    <section class="form-section">
+      <header><span class="step">2</span> 商品类目</header>
+      <div class="section-body">
+        <div class="field-row three">
+          <div class="field">
+            <label for="cat1">一级类目 <span class="req">*</span></label>
+            {# 一级 → 二级 → 三级联动：选项来自「货源 · 类目管理」里维护的那份类目，不用自己憋词 #}
+            <select id="cat1" onchange="onCat1Change()">
+              <option value="">请选择一级类目</option>
+              {% for cat in category_tree %}
+                <option value="{{ cat.n }}">{{ cat.n }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="cat2">二级类目</label>
+            <select id="cat2" onchange="onCat2Change()" disabled>
+              <option value="">请先选一级类目</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="cat3">三级类目</label>
+            <select id="cat3" onchange="onCat3Change()" disabled>
+              <option value="">请先选二级类目</option>
+            </select>
+          </div>
+        </div>
+        <p class="help" id="catHint">选择类目后会按该类目自动套用推荐规格模板</p>
+        {# 类目经营提示：来自「类目管理 → 类目特性规则」，上架时把经验提示给运营 #}
+        <div class="cat-rules" id="catRulesBox" hidden></div>
+      </div>
+    </section>
+
+    {# —— 步骤 3 · 商品信息 —— #}
+    <section class="form-section">
+      <header><span class="step">3</span> 商品信息</header>
+      <div class="section-body">
+        <div class="field">
+          <label>商品标题 <span class="req">*</span> <span class="counter" id="titleCnt">0 / 100</span></label>
+          <div class="title-row">
+            {# 2026-10-11：标题按 60–100 字设计（商品名的口径），用两行文本框，长标题一眼看全；
+               AI 生成的候选仍按闲鱼上限 30 字给（发布到闲鱼时超长由闲鱼端截断） #}
+            <textarea name="name" id="titleInput" rows="2" maxlength="100"
+                      placeholder="品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词（建议 60 - 100 字）"
+                      oninput="syncPreview()" required></textarea>
+            <button type="button" class="btn ghost ai-btn" id="aiTitleBtn" onclick="suggestTitles()">
+              <i class="bi bi-magic"></i> AI 生成渔货商品标题
+            </button>
+          </div>
+          <p class="help">
+            品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词，建议写满 60 - 100 字（按汉字计）——
+            词库来自「类目管理 → 类目特性规则」；发布到闲鱼时标题上限 30 字，超出部分闲鱼端会截断
+          </p>
+          <div class="ai-title-box" id="aiTitleBox" hidden></div>
+        </div>
+        <div class="field">
+          <label>卖点（消费者展示）</label>
+          <textarea name="selling_points" id="sellingInput" rows="2" maxlength="200"
+                    placeholder="3 - 5 个短句，每行一句" oninput="syncPreview()"></textarea>
+        </div>
+        <div class="field-row three">
+          <div class="field">
+            <label>品牌</label>
+            <input type="text" name="brand" id="brandInput" placeholder="选填，如 苹果 / 罗技 / 蕉内" oninput="syncPreview()">
+            <p class="help">可以不填；填了会带进商品筛选、标题生成与闲鱼发布包</p>
+          </div>
+          <div class="field">
+            <label>商家编码（内部编号 / SKU 前缀）</label>
+            {# 2026-10-13 改：系统出号但**允许手改**（改成自有编号 / 渔集条码都行）。
+               唯一的例外是从渔集扫码带出来的条码 —— 那是渔集与渔枢的关联键，由 JS 锁死 #}
+            <input type="text" name="code" id="codeInput" placeholder="选完类目自动生成" maxlength="64"
+                   title="系统自动生成，也可以手改成自己的编号（如渔集条码）">
+            <p class="help">系统自动生成：<code>XYSK</code> + 日期 + 4 位序号（全局累计，如 <code>XYSK202610030015</code>）<br>
+              可以手改成自己的编号（比如渔集条码 <code>QCHA26100366</code>）；改完规格的 SKU 编码
+              （商家编码 + <code>-01</code> / <code>-02</code>）会跟着重排，已上架到渔货栈的会同步过去<br>
+              当前编码 <code id="codePreview">—（选完类目后显示）</code></p>
+          </div>
+          <div class="field">
+            <label>承诺发货时效</label>
+            <select name="delivery_days" id="deliveryInput" onchange="syncPreview()">
+              <option value="24 小时内发货">24 小时内发货</option>
+              <option value="48 小时内发货" selected>48 小时内发货</option>
+              <option value="72 小时内发货">72 小时内发货</option>
+              <option value="7 天内发货">7 天内发货</option>
+            </select>
+          </div>
+        </div>
+        {# 商品标签（固定标签）：勾选后存进商品资料，上架到渔货栈时一并同步；
+           「直降 x 元 / 高毛利 x%」这类动态标签由渔货栈按数据当场算，不在这里勾 #}
+        <div class="field">
+          <label>商品标签
+            <a class="btn ghost sm" href="/product-tags" target="_blank">
+              <i class="bi bi-tags"></i> 维护标签
+            </a>
+          </label>
+          <div class="tag-pick" id="tagPick">
+            {% for t in tag_options %}
+              <label class="tag-opt" title="{{ t.hint }}">
+                <input type="checkbox" value="{{ t.name }}" onchange="syncTagField()">
+                <span class="ftag {{ t.kind }}">{{ t.name }}</span>
+              </label>
+            {% else %}
+              <span class="help">标签字典是空的：先去「货源 · 商品标签」新增一个</span>
+            {% endfor %}
+          </div>
+          <input type="hidden" name="tags" id="tagsField"
+                 value="{{ edit_fields.tags if is_edit else '' }}">
+          <p class="help">
+            固定标签是人工认定的事实（源头工厂 / 现货速发 …），会随「上架到渔货栈」同步过去；
+            动态标签（直降 x 元 / 高毛利 x% / 今日上新）由渔货栈按数据自动算，不用勾。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 4 · 商品详情（多组文案 + 详情图）—— #}
+    <section class="form-section">
+      <header>
+        <span class="step">4</span> 商品详情
+        <span class="hint">可以写好几版文案，按顺序排列；详情图接在文案后面一起展示</span>
+      </header>
+      <div class="section-body">
+        <div class="field">
+          <label>
+            详情描述
+            <span class="chip" id="detailBlockCount">0/20</span>
+            <button type="button" class="btn ghost sm" id="addDetailBlockBtn" onclick="addDetailBlock()">
+              <i class="bi bi-plus-lg"></i> 新建商品文案
+            </button>
+          </label>
+          <div id="detailBlocks"></div>
+          <p class="help">
+            <i class="bi bi-info-circle"></i>
+            看到的排版就是你输入的排版（换行 / 空行 / 图标都原样保留）；想更精细再写 HTML。
+            多组文案按顺序一起进闲鱼描述与渔货栈（最多 20 组）。
+          </p>
+        </div>
+        <div class="field">
+          <label>
+            <i class="bi bi-images"></i> 图文详情图（最多 100 张，可选）
+            <span class="chip" id="detailImageCount">0/100</span>
+            <span class="text-secondary" id="detailImageLeft" style="font-size:12px;"></span>
+          </label>
+          <div class="image-grid" id="detailImageGrid"
+               style="grid-template-columns: repeat(4, minmax(0,1fr));"></div>
+          <div class="image-add mt-2">
+            <input type="text" id="detailImageInput" placeholder="粘贴图片 URL 后回车添加">
+            <input type="file" id="detailImageFile" accept="image/*" multiple hidden
+                   onchange="uploadDetailFiles(this.files)">
+            <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('detailImageFile').click()">
+              <i class="bi bi-upload"></i> 本地上传详情图
+            </button>
+            <span class="help" style="margin:0">单张 ≤ {{ upload_max_mb | default(5, true) }}MB · 点图可以改图 / 删除，也可以拖拽换顺序</span>
+          </div>
+          {# 点图片打开的编辑条：改地址、换一张、调顺序、删掉 #}
+          <div class="image-editor" id="detailImageEditor" hidden>
+            <img id="detailImageEditorPreview" src="" alt="">
+            <input type="text" id="detailImageEditorUrl" placeholder="图片地址（可直接改）">
+            <input type="file" id="detailImageEditorFile" accept="image/*" hidden
+                   onchange="replaceDetailImageFile(this.files)">
+            <button type="button" class="btn btn-sm btn-outline-secondary"
+                    onclick="document.getElementById('detailImageEditorFile').click()">
+              <i class="bi bi-arrow-repeat"></i> 换一张
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveDetailImage(-1)" title="前移">
+              <i class="bi bi-arrow-left"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveDetailImage(1)" title="后移">
+              <i class="bi bi-arrow-right"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-primary" onclick="saveDetailImageEditor()">
+              <i class="bi bi-check-lg"></i> 保存
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="closeDetailImageEditor()">取消</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteDetailImage()">
+              <i class="bi bi-trash"></i> 删除
+            </button>
+          </div>
+          <p class="help">
+            <i class="bi bi-info-circle"></i>
+            详情图会按上面的顺序接在详情文案后面（闲鱼描述里就是文案 + 图片）。
+          </p>
+        </div>
+        <div class="field">
+          <label>供应商友情提示 <span class="chip">渔货栈特色</span></label>
+          <textarea name="supplier_tip" id="supplierTipInput" rows="3"
+                    placeholder="写给自营团队选品 / 经营的提醒，例如：&#10;档口周一到周五发货，急单慎拍&#10;同款别家能压 5 元，量小不建议做"></textarea>
+          <p class="help">只在渔货栈展示，给自营团队选品与经营做参考；不会进闲鱼商品描述</p>
+          {# 上架带出（2026-10-12）：扫渔集货号，把检测时填的「外观瑕疵描述」带过来 #}
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap">
+            <input type="text" id="wmsCodeInput" autocomplete="off" style="flex:1 1 220px;min-width:0"
+                   placeholder="扫渔集货号（如 QC-HA-2610-0017），带出检测时填的瑕疵描述">
+            <button type="button" class="btn sm" id="wmsPullBtn">带出</button>
+            <span class="help" id="wmsPullState"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 5 · 规格 · 价格 · 库存（价格与库存跟着 SKU 走，所以合成一块）—— #}
+    <section class="form-section">
+      <header>
+        <span class="step">5</span> 规格 · 价格 · 库存
+        <span class="hint">上面先批量设置（默认套用到全部规格），再在规格表里逐行微调；渔货价与建议售价必填</span>
+      </header>
+      <div class="section-body">
+        {# 批量设置：填一次套到全部规格；也是商品级的默认值（规格行留空时用它） #}
+        <div class="sku-batch">
+          <div class="sku-block-title" style="margin-top:0; padding-top:0; border-top:0;">
+            <i class="bi bi-sliders"></i> 批量设置
+            <span class="help">填一次 → 点右边按钮套用到全部规格（新加规格也默认带这套值）</span>
+            <button type="button" class="btn btn-sm btn-ghost" style="margin-left:auto;" onclick="batchFillSku()">
+              <i class="bi bi-magic"></i> 批量设置到全部规格
+            </button>
+          </div>
+          <div class="field-row five">
+            <div class="field">
+              <label>成本价</label>
+              <input type="number" name="cost_amount" id="costInput" min="0" step="0.01"
+                     placeholder="对供应链的采购价" oninput="autoPrice();syncPreview()">
+            </div>
+            <div class="field">
+              <label>渔货价 <span class="req">*</span></label>
+              <input type="number" name="fish_price" id="fishInput" min="0" step="0.01"
+                     placeholder="默认 = 成本 × 1.15" oninput="autoPrice();syncPreview()">
+            </div>
+            <div class="field">
+              <label>建议售价 <span class="req">*</span></label>
+              <input type="number" name="price" id="saleInput" min="0" step="0.01"
+                     placeholder="默认 = 渔货价 × 1.35" oninput="autoPrice();syncPreview()">
+            </div>
+            <div class="field">
+              <label>市场价</label>
+              <input type="number" name="original_price" id="marketInput" min="0" step="0.01"
+                     placeholder="划线价，用于展示原价" oninput="syncPreview()">
+            </div>
+            <div class="field">
+              <label>库存</label>
+              <input type="number" name="stock" id="stockInput" min="0" step="1"
+                     placeholder="留空 = 按单采购" oninput="syncPreview()">
+            </div>
+          </div>
+        </div>
+
+        {# 规格维度 + SKU 矩阵：成本 / 渔货价 / 建议售价 / 市场价 / 库存 / SKU 编码都在这张表里 #}
+        <div class="sku-block-title">
+          <i class="bi bi-diagram-3"></i> 规格与 SKU
+          <span class="help">添加规格并填上候选值 → 点「按照规则生成 SKU」出组合矩阵，逐行填价与库存；留空的字段详情页不显示</span>
+        </div>
+        <div id="specEditor"></div>
+        <div class="d-flex gap-2 flex-wrap mt-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addSpecRow()">
+            <i class="bi bi-plus-lg"></i> 添加规格
+          </button>
+          {# 按规则生成 SKU（2026-10-12 用户要求）：把上面手填的规格维度做组合，重建 SKU 矩阵。
+             已填过的行按「规格组合」原地保留，价格 / 库存不会被冲掉。 #}
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="genSkuMatrix()">
+            <i class="bi bi-diagram-3"></i> 按照规则生成 SKU
+          </button>
+          {# 应用类目规格模板（2026-10-12）：没选类目时置灰；点它仍给一句提醒（不用 disabled，
+             不然点不动、也没法提示「请先选择商品所属类目！」） #}
+          <button type="button" class="btn btn-sm btn-ghost" id="tplBtn" onclick="applyTemplate()"
+                  style="opacity:.45;cursor:not-allowed" aria-disabled="true">
+            <i class="bi bi-stars"></i> 应用类目规格模板
+          </button>
+        </div>
+        <div class="sku-table-wrap" style="margin-top: var(--s-3);">
+          <table class="sku-table" id="skuTable">
+            <thead>
+              <tr>
+                <th>规格组合</th>
+                <th style="width: 120px;">成本价</th>
+                <th style="width: 120px;">渔货价 <span class="req">*</span></th>
+                <th style="width: 120px;">建议售价 <span class="req">*</span></th>
+                <th style="width: 120px;">市场价</th>
+                <th style="width: 100px;">库存</th>
+                <th style="width: 190px;">SKU 编码</th>
+                <th style="width: 32px;"></th>
+              </tr>
+            </thead>
+            <tbody id="skuTableBody"></tbody>
+          </table>
+        </div>
+        <div class="sku-empty" id="skuEmpty">
+          添加规格、填上候选值后点「按照规则生成 SKU」，组合会在这里列出来；留空则自动使用「默认规格」一条
+        </div>
+        <p class="help" style="margin:var(--s-3) 0 0">
+          <i class="bi bi-info-circle"></i>
+          渔货价 = 渔货栈看到的成本价（必填）；建议售价 = 闲鱼发布价（必填）；
+          成本价 / 市场价 / 库存留空就行，详情页不会显示假数据。<br>
+          SKU 编码由商家编码派生（商家编码 + <code>-01</code> / <code>-02</code>…），系统自动生成、不用手填。
+        </p>
+      </div>
+    </section>
+
+    {# —— 步骤 6 · 物流与售后 —— #}
+    <section class="form-section">
+      <header><span class="step">6</span> 物流与售后</header>
+      <div class="section-body">
+        <div class="field-row four">
+          <div class="field">
+            <label>运费模板</label>
+            <select name="freight_template" id="freightInput" onchange="onFreightChange()">
+              <option value="">（按规则自动套用）</option>
+              {% for tpl in freight_templates %}<option value="{{ tpl }}">{{ tpl }}</option>{% endfor %}
+            </select>
+            <p class="help" id="freightHint">留「自动」时按 供应商 + 类目 的规则套用</p>
+          </div>
+          <div class="field">
+            <label>发货方式</label>
+            <select name="shipping_mode" id="shippingModeInput" onchange="onShippingModeChange()">
+              <option value="">（按规则自动套用）</option>
+              {% for value, text in shipping_choices %}
+                <option value="{{ value }}">{{ text }}</option>
+              {% endfor %}
+            </select>
+            <p class="help" id="shippingModeHint">闲鱼发货方式：邮寄包邮 / 按距离 / 固定收费 / 买家自提</p>
+          </div>
+          <div class="field">
+            <label>默认运费</label>
+            <input type="number" name="shipping_fee" id="shippingFeeInput" min="0" step="0.01" placeholder="0.00">
+            <p class="help">按件运费 / 偏远加收时才填；包邮填 0（按规则套用时会自动带上模板的金额）</p>
+          </div>
+          <div class="field">
+            <label>售后政策</label>
+            <select name="after_sale">
+              {% for opt in after_sale_options %}<option{% if loop.first %} selected{% endif %}>{{ opt }}</option>{% endfor %}
+            </select>
+          </div>
+        </div>
+        <p class="help">
+          <i class="bi bi-info-circle"></i>
+          模板与发货方式都在「货源 · 运费模板」里维护（全局默认 + 关联供应商 + 关联类目）；
+          这里留「自动」时，按当前供应商与类目命中的规则套用。
+        </p>
+      </div>
+    </section>
+
+  </form>
+
+  {# —— 右侧实时预览 —— #}
+  <aside class="publish-side">
+    <div class="preview-card">
+      <header><i class="bi bi-phone"></i> 实时预览</header>
+      <div class="preview-phone">
+        <div class="preview-main" id="previewMain"><i class="bi bi-image"></i></div>
+      </div>
+      <div class="preview-body">
+        <div class="preview-title empty" id="previewTitle">填写商品标题后会在这里显示</div>
+        <div class="preview-price">
+          <span class="cur">¥</span>
+          <span id="previewPriceVal">—</span>
+          <span class="market" id="previewMarket"></span>
+        </div>
+        <div class="preview-selling" id="previewSelling" style="display:none;"></div>
+        <div class="preview-tags" id="previewTags"></div>
+        <div class="preview-kv" style="margin-top: var(--s-2);">
+          <div class="row"><span>成本</span><b id="previewCost">¥—</b></div>
+          <div class="row"><span>库存</span><b id="previewStock">—</b></div>
+          <div class="row"><span>发货</span><b id="previewDelivery">48 小时内发货</b></div>
+          <div class="row"><span>类目</span><b id="previewCategory">—</b></div>
+          <div class="row"><span>商品属性</span><b id="previewSource" style="color: #6D28D9;">自营商品</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="margin-tip" id="marginTip" style="display:none;">
+      <span>建议毛利</span><span class="m" id="marginVal">—</span>
+    </div>
+
+    <div class="card" style="padding: var(--s-4);">
+      <div class="publish-note-title">
+        <i class="bi bi-info-circle" style="color: var(--c-primary);"></i> 发布说明
+      </div>
+      <p class="note">
+        <span class="src-badge self">自营</span> 商品由本站录入。
+        「立即上架」会直接标为在售；「提交审核」进入待审核队列，由管理员在列表页通过或驳回。
+      </p>
+    </div>
+  </aside>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<style>
+  /* AI 生成标题 / 类目经营提示 / 类目特性规则的局部样式 */
+  .title-row { display: flex; gap: 8px; align-items: flex-start; }
+  .title-row input, .title-row textarea { flex: 1; min-width: 0; }
+  .title-row textarea { resize: vertical; line-height: 1.5; }
+  .ai-btn { white-space: nowrap; }
+  .ai-title-box { margin-top: 8px; border: 1px solid #e3e6ea; border-radius: 8px; padding: 8px; background: #fbfcfe; }
+  .ai-title-head { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+  .ai-title-item { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 6px 10px; margin-bottom: 4px; border: 1px solid #e3e6ea; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+  .ai-title-item:hover { border-color: #3b82f6; background: #f4f8ff; }
+  .ai-title-item .len { color: #9ca3af; font-size: 12px; white-space: nowrap; }
+  .ai-loading, .ai-empty { font-size: 12px; color: #6b7280; }
+  .cat-rules { margin-top: 8px; border-left: 3px solid #f59e0b; background: #fffbeb; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+  .cat-rules-head { font-weight: 600; margin-bottom: 4px; }
+  .cat-rules-words { color: #374151; margin-bottom: 4px; }
+  .cat-rules-tip { color: #4b5563; }
+  .chip { font-size: 11px; padding: 1px 6px; border-radius: 999px; background: #eff6ff; color: #2563eb; }
+  /* 商品标签的勾选 chips */
+  .tag-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .tag-opt { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+  .tag-opt input { accent-color: var(--c-primary, #2563eb); }
+</style>
+<script type="application/json" id="catTree">{{ category_tree | tojson }}</script>
+<script>
+  // 规格模板由后端下发（口径见 services/product.py 的 SPEC_TEMPLATES）：
+  // 类目不同，规格维度就不同 —— 数码看「型号 / 成色」，服饰看「尺码 / 颜色」，重货看「重量」。
+  // 都是**推荐项**，用户自己挑、自己填候选值，规格名也能改。
+  var SPEC_TEMPLATES = {{ spec_templates | tojson }};
+  var SPEC_TEMPLATES_CAT2 = {{ spec_templates_cat2 | tojson }};
+  var DEFAULT_SPEC = {{ default_spec_template | tojson }};
+  // 一级 → 二级 → 三级：数据来自后端「货源 · 类目管理」（结构 [{n: 名称, c: [子节点]}]）
+  var CATEGORY_TREE = JSON.parse(document.getElementById('catTree').textContent || '[]');
+  var MAIN_IMAGE_MAX = 9;
+  // 单张图片大小上限（MB）：与后端 settings.upload_image_max_mb 同一份口径，
+  // 选完图**在本地就先过一遍**，不用等传完才知道超了
+  var UPLOAD_MAX_MB = {{ upload_max_mb | default(5, true) }};
+  // 图文详情图上限：运营经常一口气传几十张，原来 20 张不够用
+  var DETAIL_IMAGE_MAX = 100;
+  // 详情文案最多 20 组（组的顺序就是排序：新增的排最后，标题按「文案一 / 文案二 …」）
+  var DETAIL_BLOCK_MAX = 20;
+  var CN_NUM = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十',
+    '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十'];
+  // 编辑模式：同一套表单，区别只是资料预填 + 提交到 /products/{id}/edit
+  var IS_EDIT = {{ 'true' if is_edit else 'false' }};
+  var EDIT_STATE = {{ (edit_state or {}) | tojson }};
+  var EDIT_FIELDS = {{ (edit_fields or {}) | tojson }};
+  var EDIT_CATEGORY = {{ (edit_category or []) | tojson }};
+
+  var state = {
+    mainImages: (EDIT_STATE.mainImages || []).slice(),
+    detailImages: (EDIT_STATE.detailImages || []).slice(),
+    detailBlocks: (EDIT_STATE.detailBlocks || []).slice(),
+    specDefs: (EDIT_STATE.specDefs || []).slice(),
+    skus: (EDIT_STATE.skus || []).slice()
+  };
+  // 详情描述至少给一组（「文案一」），没填就空着，不再让运营自己先点一下才有输入框
+  if (!state.detailBlocks.length) {
+    state.detailBlocks.push({ title: '文案一', content: '' });
+  }
+
+  // ---------------- 类目（一级 / 二级 / 三级联动）----------------
+  function catValue(level) {
+    var sel = document.getElementById('cat' + level);
+    return ((sel && sel.value) || '').trim();
+  }
+  function cat1Value() { return catValue(1); }
+  function cat2Value() { return catValue(2); }
+  function cat3Value() { return catValue(3); }
+
+  // 商品上存的类目文本："一级 / 二级 / 三级"（没选的层级跳过）
+  function catPath() {
+    return [catValue(1), catValue(2), catValue(3)].filter(Boolean).join(' / ');
+  }
+
+  // 顺着已选的路径找到第 level 层的候选节点
+  function catNodes(level) {
+    var nodes = CATEGORY_TREE || [];
+    for (var depth = 1; depth < level; depth++) {
+      var name = catValue(depth);
+      if (!name) { return []; }
+      var hit = null;
+      for (var i = 0; i < nodes.length; i++) {
+        if (nodes[i].n === name) { hit = nodes[i]; break; }
+      }
+      if (!hit) { return []; }
+      nodes = hit.c || [];
+    }
+    return nodes;
+  }
+
+  // 重建某一层的下拉（没有子项就置灰，而不是给个空框）
+  function fillCat(level, placeholder) {
+    var sel = document.getElementById('cat' + level);
+    if (!sel) { return; }
+    var items = catNodes(level);
+    sel.innerHTML = '';
+    if (!items.length) {
+      sel.disabled = true;
+      sel.appendChild(new Option(placeholder, ''));
+      return;
+    }
+    sel.disabled = false;
+    sel.appendChild(new Option('不细分', ''));
+    items.forEach(function (item) { sel.appendChild(new Option(item.n, item.n)); });
+  }
+
+  // 一级换了：二级、三级选项跟着重建（上一级的残留值一并清掉）
+  function onCat1Change() {
+    fillCat(2, '请先选一级类目');
+    fillCat(3, '请先选二级类目');
+    updateCatHint();
+    afterCategoryChange();
+  }
+
+  function onCat2Change() {
+    fillCat(3, '请先选二级类目');
+    updateCatHint();
+    afterCategoryChange();
+  }
+
+  function onCat3Change() { updateCatHint(); afterCategoryChange(); }
+
+  // ---------------- 类目驱动的联动（编码预览 / 经营提示 / 运费模板与发货方式）----------------
+  var shippingTouched = { freight: false, mode: false };
+
+  function afterCategoryChange() {
+    refreshCodePreview();
+    refreshCatRules();
+    refreshShippingDefaults();
+  }
+
+  function apiGet(url) {
+    return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (resp) {
+      return resp.ok ? resp.json() : null;
+    }).catch(function () { return null; });
+  }
+
+  function apiPost(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload || {}),
+    }).then(function (resp) {
+      return resp.ok ? resp.json() : null;
+    }).catch(function () { return null; });
+  }
+
+  // 商品流水 ID（商家编码）：XYSK + 日期 + 序号，选完类目即出号并锁定，SKU 编码按它派生
+  function refreshCodePreview() {
+    var box = document.getElementById('codePreview');
+    if (!box) { return; }
+    var input = document.getElementById('codeInput');
+    // 编辑页已经有号（系统生成、不可改），不要再申请一个新号把老号顶掉
+    if (input && input.value.trim()) {
+      box.textContent = input.value.trim();
+      return;
+    }
+    var category = catPath();
+    box.textContent = '计算中…';
+    apiGet('/products/next-code?category=' + encodeURIComponent(category)).then(function (data) {
+      var code = (data && data.code) ? data.code : '';
+      box.textContent = code || '—（选完类目后显示）';
+      if (code && input) {
+        input.value = code;
+        renderSkuTable();   // SKU 编码 = 商家编码-01，编码一变就重排
+      }
+    });
+  }
+
+  // SKU 编码由商家编码派生（商家编码-01 / -02…），系统生成、页面只读
+  function skuCodeText(idx) {
+    var base = (document.getElementById('codeInput') && document.getElementById('codeInput').value || '').trim();
+    if (!base) { return ''; }
+    return base + '-' + (idx + 1 < 10 ? '0' : '') + (idx + 1);
+  }
+
+  // 类目经营提示（来自「类目管理 → 类目特性规则」）
+  function refreshCatRules() {
+    var box = document.getElementById('catRulesBox');
+    if (!box) { return; }
+    var category = catPath();
+    if (!category) { box.hidden = true; box.innerHTML = ''; return; }
+    apiGet('/products/category-rules?category=' + encodeURIComponent(category)).then(function (data) {
+      var tips = (data && data.tips) || [];
+      var words = (data && data.words) || {};
+      if (!tips.length && !Object.keys(words).length) { box.hidden = true; box.innerHTML = ''; return; }
+      var html = '<div class="cat-rules-head"><i class="bi bi-lightbulb"></i> 类目特性规则'
+        + (data.category ? '（' + escapeHtml(data.category) + '）' : '') + '</div>';
+      var wordLine = Object.keys(words).filter(function (k) { return words[k] && words[k].length; })
+        .map(function (k) { return '<b>' + escapeHtml(k) + '</b>：' + escapeHtml(words[k].join('、')); }).join('；');
+      if (wordLine) { html += '<div class="cat-rules-words">' + wordLine + '</div>'; }
+      tips.forEach(function (tip) { html += '<div class="cat-rules-tip">· ' + escapeHtml(tip) + '</div>'; });
+      box.innerHTML = html;
+      box.hidden = false;
+    });
+  }
+
+  // 运费模板 / 发货方式：按「供应商 + 类目」规则预选（运营手动改过就不覆盖）
+  function refreshShippingDefaults() {
+    var supplier = document.getElementById('supplierSelect');
+    var params = '?category=' + encodeURIComponent(catPath())
+      + '&supplier_id=' + encodeURIComponent(supplier ? supplier.value : '');
+    apiGet('/products/shipping-default' + params).then(function (data) {
+      if (!data) { return; }
+      var freight = document.getElementById('freightInput');
+      var mode = document.getElementById('shippingModeInput');
+      var fee = document.getElementById('shippingFeeInput');
+      var freightHint = document.getElementById('freightHint');
+      var modeHint = document.getElementById('shippingModeHint');
+      if (freight && !shippingTouched.freight) {
+        freight.value = data.freight_template || '';
+        if (fee && !fee.value && data.freight_fee) { fee.value = data.freight_fee; }
+      }
+      if (mode && !shippingTouched.mode) { mode.value = data.shipping_mode || ''; }
+      if (freightHint) {
+        freightHint.textContent = data.freight_rule && data.freight_rule.name
+          ? '已命中规则「' + data.freight_rule.name + '」（' + data.freight_rule.scope + '）'
+          : '留「自动」时按 供应商 + 类目 的规则套用';
+      }
+      if (modeHint) {
+        modeHint.textContent = data.method_rule && data.method_rule.name
+          ? '已命中规则「' + data.method_rule.name + '」（' + data.method_rule.scope + '）'
+          : '闲鱼发货方式：邮寄包邮 / 按距离 / 固定收费 / 买家自提';
+      }
+    });
+  }
+
+  function onFreightChange() {
+    shippingTouched.freight = true;
+    var freight = document.getElementById('freightInput');
+    var fee = document.getElementById('shippingFeeInput');
+    var hint = document.getElementById('freightHint');
+    if (hint) {
+      hint.textContent = freight && freight.value
+        ? '已手动选择「' + freight.value + '」' : '留「自动」时按 供应商 + 类目 的规则套用';
+    }
+    if (fee && freight && freight.value && freight.value.indexOf('包邮') >= 0) { fee.value = '0'; }
+  }
+
+  function onShippingModeChange() {
+    shippingTouched.mode = true;
+    var mode = document.getElementById('shippingModeInput');
+    var hint = document.getElementById('shippingModeHint');
+    if (hint) {
+      var text = mode && mode.selectedIndex >= 0 ? mode.options[mode.selectedIndex].text : '';
+      hint.textContent = mode && mode.value ? '已手动选择「' + text + '」' : '按规则自动套用';
+    }
+  }
+
+  // ---------------- AI 生成渔货商品标题（按类目特性规则的词库拼装，满 30 字）----------------
+  function suggestTitles() {
+    var box = document.getElementById('aiTitleBox');
+    var btn = document.getElementById('aiTitleBtn');
+    if (!box) { return; }
+    box.hidden = false;
+    box.innerHTML = '<div class="ai-loading"><i class="bi bi-hourglass-split"></i> 正在按「品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词」生成…</div>';
+    if (btn) { btn.disabled = true; }
+    var payload = {
+      name: (document.getElementById('titleInput') || {}).value || '',
+      brand: (document.getElementById('brandInput') || {}).value || '',
+      category: catPath(),
+      selling_points: (document.getElementById('sellingInput') || {}).value || '',
+    };
+    apiPost('/products/suggest-title', payload).then(function (data) {
+      if (btn) { btn.disabled = false; }
+      var titles = (data && data.titles) || [];
+      if (!titles.length) {
+        box.innerHTML = '<div class="ai-empty">还没法生成：先填「商品标题」或「品牌」，并选好类目'
+          + '（词库在「类目管理 → 类目特性规则」里维护）</div>';
+        return;
+      }
+      var html = '<div class="ai-title-head">'
+        + (data.has_rule ? '<i class="bi bi-stars"></i> 按类目规则生成' : '<i class="bi bi-info-circle"></i> 该一级类目还没有特性规则，先用商品信息拼的候选')
+        + '（点一条填入标题，可再改）</div>';
+      titles.forEach(function (item) {
+        html += '<button type="button" class="ai-title-item" onclick="useTitle(this)" data-title="'
+          + escapeHtml(item.title) + '">'
+          + '<span class="t">' + escapeHtml(item.title) + '</span>'
+          + '<span class="len">' + item.length + '/30</span></button>';
+      });
+      box.innerHTML = html;
+    });
+  }
+
+  function useTitle(el) {
+    var input = document.getElementById('titleInput');
+    if (!input) { return; }
+    input.value = el.getAttribute('data-title') || '';
+    input.dispatchEvent(new Event('input'));
+    syncPreview();
+  }
+
+  // 规格模板：三级命中优先，其次二级，再一级，最后兜底
+  function specTemplate() {
+    var cat3 = cat3Value(), cat2 = cat2Value();
+    if (cat3 && SPEC_TEMPLATES_CAT2[cat3]) { return SPEC_TEMPLATES_CAT2[cat3]; }
+    if (cat2 && SPEC_TEMPLATES_CAT2[cat2]) { return SPEC_TEMPLATES_CAT2[cat2]; }
+    return SPEC_TEMPLATES[cat1Value()] || DEFAULT_SPEC;
+  }
+
+  function updateCatHint() {
+    var hint = document.getElementById('catHint');
+    var cat1 = cat1Value();
+    syncTplBtn();   // 类目一变就刷新「应用类目规格模板」的可用状态
+    if (!cat1) {
+      hint.textContent = '一级 → 二级 → 三级依次选，选完会按类目套用推荐规格模板（类目在「货源 · 类目管理」里维护）';
+      return;
+    }
+    var cat2 = cat2Value(), cat3 = cat3Value();
+    var tpl = specTemplate();
+    hint.innerHTML = '<i class="bi bi-stars"></i> 当前类目：<b>'
+      + escapeHtml([cat1, cat2, cat3].filter(Boolean).join(' / '))
+      + '</b>，已为「' + tpl.map(function (t) { return t.name; }).join(' / ')
+      + '」准备规格，<a href="#" onclick="applyTemplate(); return false;">一键应用</a>';
+    syncPreview();
+  }
+
+  // 应用类目规格模板（2026-10-12 用户要求）：先选商品所属类目，再按该类目的既定模板铺规格维度
+  function applyTemplate() {
+    if (!cat1Value()) {
+      toast('请先选择商品所属类目！', 'err');
+      return;
+    }
+    var tpl = specTemplate();
+    state.specDefs = tpl.map(function (t) { return { name: t.name, values: t.values.slice() }; });
+    renderSpecEditor();
+    rebuildSkus();
+    toast('已应用类目规格模板');
+  }
+
+  // 按规则生成 SKU（2026-10-12 用户要求）：基于上面手动构建的规格做组合出 SKU 矩阵。
+  // 规格名或候选值还没填完就先提示 —— 空组合生成不出东西，别让人对着空表发呆。
+  function genSkuMatrix() {
+    var defs = state.specDefs.filter(function (d) { return d.name && d.values.length; });
+    if (!defs.length) {
+      toast('先填好规格名与候选值（如 颜色 → 黑 / 白），再生成 SKU', 'err');
+      return;
+    }
+    rebuildSkus();
+    if (!state.skus.length) {
+      toast('规格候选值还没填，生成不出 SKU', 'err');
+      return;
+    }
+    toast('已按规格生成 ' + state.skus.length + ' 个 SKU');
+  }
+
+  // 类目没选时「应用类目规格模板」置灰；点击仍能给出提醒，所以不用 disabled 属性
+  function syncTplBtn() {
+    var btn = document.getElementById('tplBtn');
+    if (!btn) { return; }
+    var on = !!cat1Value();
+    btn.style.opacity = on ? '' : '.45';
+    btn.style.cursor = on ? '' : 'not-allowed';
+    btn.setAttribute('aria-disabled', on ? 'false' : 'true');
+    btn.title = on ? '按当前类目的推荐规格铺规格维度' : '请先选择商品所属类目！';
+  }
+  // 编辑页回填的类目不会触发 onchange，加载完自己校一次按钮状态
+  window.addEventListener('load', syncTplBtn);
+
+  // ---------------- 规格编辑器 ----------------
+  function addSpecRow() {
+    state.specDefs.push({ name: '', values: [] });
+    renderSpecEditor();
+  }
+
+  function renderSpecEditor() {
+    var box = document.getElementById('specEditor');
+    box.innerHTML = '';
+    if (!state.specDefs.length) {
+      var tip = document.createElement('p');
+      tip.className = 'note';
+      tip.textContent = '还没有规格。点下方「添加规格」自己加，或按类目点「应用类目规格模板」，例如：颜色 → 黑 / 白。';
+      box.appendChild(tip);
+      return;
+    }
+    state.specDefs.forEach(function (def, idx) {
+      var row = document.createElement('div');
+      row.className = 'spec-row';
+
+      var nameInput = document.createElement('input');
+      nameInput.type = 'text';   // 显式声明：全局输入框样式靠 input[type=text] 匹配，不写就套不上
+      nameInput.className = 'spec-name';
+      nameInput.placeholder = '规格名，如 颜色';
+      nameInput.value = def.name || '';
+      nameInput.oninput = function () { def.name = this.value; rebuildSkus(); };
+      row.appendChild(nameInput);
+
+      var tags = document.createElement('div');
+      tags.className = 'tag-input';
+      def.values.forEach(function (value, vi) {
+        var tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.innerHTML = escapeHtml(value) + ' <i class="bi bi-x"></i>';
+        tag.querySelector('i').onclick = function () {
+          def.values.splice(vi, 1);
+          renderSpecEditor();
+          rebuildSkus();
+        };
+        tags.appendChild(tag);
+      });
+      var valueInput = document.createElement('input');
+      valueInput.type = 'text';   // 同上（容器 .tag-input 里另有自己的样式覆盖）
+      valueInput.placeholder = '输入候选值后回车，如 黑色';
+      valueInput.onkeydown = function (event) {
+        if (event.key === 'Enter' || event.key === ',') {
+          event.preventDefault();
+          var v = (this.value || '').trim().replace(/,$/, '');
+          if (!v) { return; }
+          if (def.values.indexOf(v) === -1) { def.values.push(v); }
+          this.value = '';
+          renderSpecEditor();
+          rebuildSkus();
+          var boxes = document.querySelectorAll('.spec-row .tag-input input');
+          if (boxes[idx]) { boxes[idx].focus(); }
+        }
+      };
+      tags.appendChild(valueInput);
+      row.appendChild(tags);
+
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn btn-sm btn-ghost';
+      del.innerHTML = '<i class="bi bi-trash"></i>';
+      del.onclick = function () {
+        state.specDefs.splice(idx, 1);
+        renderSpecEditor();
+        rebuildSkus();
+      };
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+  }
+
+  // ---------------- SKU 矩阵 ----------------
+  function cartesian(defs) {
+    var out = [];
+    function walk(i, prefix) {
+      if (i >= defs.length) { out.push(prefix); return; }
+      var d = defs[i];
+      if (!d.name || !d.values.length) { walk(i + 1, prefix); return; }
+      d.values.forEach(function (v) {
+        walk(i + 1, prefix ? prefix + ' / ' + v : v);
+      });
+    }
+    walk(0, '');
+    return out;
+  }
+
+  // 批量设置：字段名 → 输入框 id（成本 / 渔货价 / 建议售价 / 市场价 / 库存）
+  var BATCH_INPUTS = { cost: 'costInput', fish: 'fishInput', price: 'saleInput', market: 'marketInput', stock: 'stockInput' };
+  var SKU_FIELDS = ['cost', 'fish', 'price', 'market', 'stock'];
+
+  function batchValues() {
+    var out = {};
+    SKU_FIELDS.forEach(function (key) {
+      var el = document.getElementById(BATCH_INPUTS[key]);
+      out[key] = el ? (el.value || '').trim() : '';
+    });
+    return out;
+  }
+
+  function rebuildSkus() {
+    var keep = {};
+    state.skus.forEach(function (s) { keep[s.spec] = s; });
+    // 过滤掉空组合：模板刚套上时只有规格名、值还没填，这时不该蹦出一条空白 SKU
+    var combos = cartesian(state.specDefs.filter(function (d) { return d.name && d.values.length; }))
+      .filter(function (spec) { return spec; });
+    var batch = batchValues();
+    state.skus = combos.map(function (spec) {
+      var old = keep[spec] || {};
+      var row = { spec: spec, code: old.code || '' };
+      // 默认就把批量设置里的值带上（没单独填过的规格行不用一个个手工抄）
+      SKU_FIELDS.forEach(function (key) { row[key] = old[key] || batch[key] || ''; });
+      return row;
+    });
+    renderSkuTable();
+    syncPreview();
+  }
+
+  function renderSkuTable() {
+    var body = document.getElementById('skuTableBody');
+    var table = document.getElementById('skuTable');
+    var empty = document.getElementById('skuEmpty');
+    body.innerHTML = '';
+    if (!state.skus.length) {
+      table.style.display = 'none';
+      empty.style.display = 'block';
+      return;
+    }
+    table.style.display = '';
+    empty.style.display = 'none';
+    var batch = batchValues();
+    state.skus.forEach(function (sku, idx) {
+      var tr = document.createElement('tr');
+      var tdSpec = document.createElement('td');
+      tdSpec.innerHTML = '<b>' + escapeHtml(sku.spec) + '</b>';
+      tr.appendChild(tdSpec);
+
+      // 成本价 / 渔货价 / 建议售价 / 市场价 / 库存（留空的占位显示批量设置里的值）
+      SKU_FIELDS.forEach(function (key) {
+        var td = document.createElement('td');
+        var input = document.createElement('input');
+        input.type = 'number';
+        input.placeholder = batch[key] ? ('批量 ' + batch[key]) : (key === 'stock' ? '不限' : '待填');
+        input.value = sku[key] === '' ? '' : sku[key];
+        input.min = '0';
+        input.step = key === 'stock' ? '1' : '0.01';
+        input.oninput = function () { sku[key] = this.value; };
+        td.appendChild(input);
+        tr.appendChild(td);
+      });
+
+      var tdCode = document.createElement('td');
+      var codeInput = document.createElement('input');
+      // SKU 编码 = 商家编码 + 两位序号，系统派生、只读
+      codeInput.type = 'text';
+      codeInput.readOnly = true;
+      codeInput.title = '系统自动生成（商家编码 + 序号）';
+      codeInput.value = skuCodeText(idx);
+      tdCode.appendChild(codeInput);
+      tr.appendChild(tdCode);
+
+      var tdDel = document.createElement('td');
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'btn btn-sm btn-ghost';
+      del.innerHTML = '<i class="bi bi-x"></i>';
+      del.onclick = function () {
+        state.skus.splice(idx, 1);
+        renderSkuTable();
+        syncPreview();
+      };
+      tdDel.appendChild(del);
+      tr.appendChild(tdDel);
+      body.appendChild(tr);
+    });
+  }
+
+  // 规格行里还是空着的字段，用批量设置的值补上（不覆盖已经填过的行）
+  function applyBatchDefaults() {
+    var batch = batchValues();
+    state.skus.forEach(function (sku) {
+      SKU_FIELDS.forEach(function (key) { if (!sku[key] && batch[key]) { sku[key] = batch[key]; } });
+    });
+  }
+
+  // 批量设置：把上面五个输入框的值套到全部规格（填了的才覆盖；空的不动，保留逐行微调的结果）
+  function batchFillSku() {
+    if (!state.skus.length) { toast('先添加规格生成 SKU 再批量设置', 'err'); return; }
+    var batch = batchValues();
+    if (!batch.cost && !batch.fish && !batch.price && !batch.market && !batch.stock) {
+      toast('批量设置里还是空的：先填一个值（比如渔货价 / 建议售价）', 'err');
+      return;
+    }
+    state.skus.forEach(function (sku) {
+      SKU_FIELDS.forEach(function (key) { if (batch[key]) { sku[key] = batch[key]; } });
+    });
+    renderSkuTable();
+    toast('已把批量设置套用到 ' + state.skus.length + ' 条规格');
+  }
+
+  // ---------------- 图片 ----------------
+  // 拖拽换顺序：把图拖到别的位置就插过去（空槽等于挪到最后）
+  var dragPayload = null;
+
+  function attachDrag(slot, list, index, rerender, draggable) {
+    slot.classList.add('image-slot-drag');
+    if (draggable) {
+      slot.draggable = true;
+      slot.addEventListener('dragstart', function (e) {
+        dragPayload = { list: list, index: index };
+        slot.classList.add('dragging');
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move';
+          try { e.dataTransfer.setData('text/plain', String(index)); } catch (err) { /* 老浏览器 */ }
+        }
+      });
+      slot.addEventListener('dragend', function () {
+        dragPayload = null;
+        slot.classList.remove('dragging');
+        clearDropTargets();
+      });
+    }
+    slot.addEventListener('dragover', function (e) {
+      if (!dragPayload || dragPayload.list !== list) { return; }
+      e.preventDefault();
+      if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; }
+      slot.classList.add('drop-target');
+    });
+    slot.addEventListener('dragleave', function () { slot.classList.remove('drop-target'); });
+    slot.addEventListener('drop', function (e) {
+      e.preventDefault();
+      slot.classList.remove('drop-target');
+      if (!dragPayload || dragPayload.list !== list) { return; }
+      var from = dragPayload.index;
+      dragPayload = null;
+      if (from === index) { return; }
+      var moved = list.splice(from, 1)[0];
+      list.splice(index, 0, moved);
+      rerender();
+    });
+  }
+
+  function clearDropTargets() {
+    Array.prototype.forEach.call(document.querySelectorAll('.image-slot.drop-target'), function (el) {
+      el.classList.remove('drop-target');
+    });
+  }
+
+  function renderMainImages() {
+    var grid = document.getElementById('mainImageGrid');
+    grid.innerHTML = '';
+    for (var i = 0; i < MAIN_IMAGE_MAX; i++) {
+      var url = state.mainImages[i];
+      var slot = document.createElement('div');
+      slot.className = 'image-slot' + (url ? ' filled' : '');
+      // 有图的能拖、空格子能接：拖到空格子就是挪到队尾
+      attachDrag(slot, state.mainImages, i, renderMainImages, !!url);
+      if (url) {
+        var img = document.createElement('img');
+        img.src = url;
+        img.onerror = function () { this.style.display = 'none'; };
+        slot.appendChild(img);
+        if (i === 0) {
+          var cover = document.createElement('div');
+          cover.className = 'slot-cover';
+          cover.textContent = '封面';
+          slot.appendChild(cover);
+        }
+        var del = document.createElement('button');
+        del.type = 'button';
+        del.className = 'slot-del';
+        del.innerHTML = '<i class="bi bi-x"></i>';
+        del.onclick = (function (idx) {
+          return function () { state.mainImages.splice(idx, 1); renderMainImages(); };
+        })(i);
+        slot.appendChild(del);
+      } else {
+        var hint = document.createElement('div');
+        hint.className = 'slot-hint';
+        hint.innerHTML = '<i class="bi bi-image"></i>主图 ' + (i + 1);
+        slot.appendChild(hint);
+      }
+      grid.appendChild(slot);
+    }
+    syncPreview();
+  }
+
+  // 详情图计数：标题上直接标「已用 x/100 · 还能再传 N 张」，上传时按剩余额度截取
+  function updateDetailCount() {
+    var used = state.detailImages.length;
+    var box = document.getElementById('detailImageCount');
+    if (box) { box.textContent = used + '/' + DETAIL_IMAGE_MAX; }
+    var left = document.getElementById('detailImageLeft');
+    if (left) {
+      var rest = DETAIL_IMAGE_MAX - used;
+      left.textContent = rest > 0 ? ('还能再传 ' + rest + ' 张') : '已经到上限了';
+    }
+  }
+
+  function renderDetailImages() {
+    updateDetailCount();
+    var grid = document.getElementById('detailImageGrid');
+    grid.innerHTML = '';
+    if (!state.detailImages.length) {
+      var slot = document.createElement('div');
+      slot.className = 'image-slot';
+      slot.innerHTML = '<div class="slot-hint"><i class="bi bi-image"></i>详情图</div>';
+      grid.appendChild(slot);
+      return;
+    }
+    state.detailImages.forEach(function (url, idx) {
+      var slot = document.createElement('div');
+      slot.className = 'image-slot filled' + (idx === detailEditIndex ? ' editing' : '');
+      // 点整张图 = 编辑这张（改地址 / 换一张 / 调顺序 / 删除）；按住拖 = 换顺序
+      slot.onclick = (function (i) {
+        return function () { openDetailImageEditor(i); };
+      })(idx);
+      // 拖完顺序变了，编辑条上记的下标会错位，直接收起来最稳
+      attachDrag(slot, state.detailImages, idx, function () {
+        if (detailEditIndex >= 0) { closeDetailImageEditor(); return; }
+        renderDetailImages();
+      }, true);
+      var img = document.createElement('img');
+      img.src = url;
+      img.onerror = function () { this.style.display = 'none'; };
+      slot.appendChild(img);
+      var tip = document.createElement('div');
+      tip.className = 'slot-edit-tip';
+      tip.textContent = '编辑';
+      slot.appendChild(tip);
+      var del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'slot-del';
+      del.innerHTML = '<i class="bi bi-x"></i>';
+      del.onclick = (function (i) {
+        return function (e) {
+          e.stopPropagation();
+          state.detailImages.splice(i, 1);
+          closeDetailImageEditor();
+          renderDetailImages();
+        };
+      })(idx);
+      slot.appendChild(del);
+      grid.appendChild(slot);
+    });
+  }
+
+  // ---------------- 详情图编辑（点图片打开） ----------------
+  var detailEditIndex = -1;
+
+  function openDetailImageEditor(idx) {
+    if (idx < 0 || idx >= state.detailImages.length) { return; }
+    detailEditIndex = idx;
+    var box = document.getElementById('detailImageEditor');
+    document.getElementById('detailImageEditorPreview').src = state.detailImages[idx];
+    document.getElementById('detailImageEditorUrl').value = state.detailImages[idx];
+    box.hidden = false;
+    renderDetailImages();
+  }
+
+  function closeDetailImageEditor() {
+    detailEditIndex = -1;
+    document.getElementById('detailImageEditorFile').value = '';
+    document.getElementById('detailImageEditor').hidden = true;
+    renderDetailImages();
+  }
+
+  function saveDetailImageEditor() {
+    var idx = detailEditIndex;
+    if (idx < 0) { return; }
+    var url = (document.getElementById('detailImageEditorUrl').value || '').trim();
+    if (!url) { toast('图片地址不能为空', 'err'); return; }
+    if (!isValidImageUrl(url)) { toast('请填 http(s):// 或 /media/ 开头的图片地址', 'err'); return; }
+    if (state.detailImages.indexOf(url) !== -1 && state.detailImages.indexOf(url) !== idx) {
+      toast('这张图已经在详情里了', 'err'); return;
+    }
+    state.detailImages[idx] = url;
+    closeDetailImageEditor();
+    toast('已更新这张详情图');
+  }
+
+  function replaceDetailImageFile(files) {
+    var idx = detailEditIndex;
+    if (idx < 0 || !files || !files.length) { return; }
+    var why = checkFile(files[0]);
+    if (why) { toast(why, 'err'); return; }
+    var fd = new FormData();
+    fd.append('file', files[0]);
+    // 走 fetchJson：非 JSON 响应（500 / 网关页）会给一句人话并记进「异常日志」
+    fetchJson('/products/upload-image', { method: 'POST', body: fd, where: '发布商品 · 换详情图' })
+      .then(function (res) {
+        if (!(res.ok && res.data && res.data.url)) {
+          toast((res.data && res.data.error) || '上传失败', 'err');
+          return;
+        }
+        state.detailImages[idx] = res.data.url;
+        openDetailImageEditor(idx);
+        toast('已换好这张详情图');
+      })
+      .catch(function (err) {
+        reportUploadIssue(files[0], (err && err.message) || '请求没发出去或中途断了');
+        toast(err && err.message ? err.message : '上传失败，请重试', 'err');
+      });
+  }
+
+  function moveDetailImage(step) {
+    var idx = detailEditIndex;
+    if (idx < 0) { return; }
+    var next = idx + step;
+    if (next < 0 || next >= state.detailImages.length) { return; }
+    var moved = state.detailImages.splice(idx, 1)[0];
+    state.detailImages.splice(next, 0, moved);
+    openDetailImageEditor(next);
+  }
+
+  function deleteDetailImage() {
+    var idx = detailEditIndex;
+    if (idx < 0) { return; }
+    state.detailImages.splice(idx, 1);
+    closeDetailImageEditor();
+    toast('已删除这张详情图', 'warn');
+  }
+
+  // ---------------- 多组详情文案 ----------------
+  function blockTitle(i) { return '文案' + (CN_NUM[i] || String(i + 1)); }
+
+  function iconBtn(icon, title, handler, danger) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'icon-btn' + (danger ? ' danger' : '');
+    b.title = title;
+    b.innerHTML = '<i class="bi ' + icon + '"></i>';
+    b.onclick = handler;
+    return b;
+  }
+
+  // 把页面上正在编辑的内容写回 state（改顺序 / 删组之前必须先同步，否则会串行）
+  function syncBlocksFromDom() {
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#detailBlocks .detail-block'),
+      function (node, i) {
+        if (!state.detailBlocks[i]) { return; }
+        var area = node.querySelector('.block-content');
+        if (area) { state.detailBlocks[i].content = area.value; }
+      }
+    );
+  }
+
+  function renderDetailBlocks() {
+    var box = document.getElementById('detailBlocks');
+    if (!box) { return; }
+    box.innerHTML = '';
+    state.detailBlocks.forEach(function (b, i) {
+      var wrap = document.createElement('div');
+      wrap.className = 'detail-block';
+      var head = document.createElement('div');
+      head.className = 'detail-block-head';
+      var no = document.createElement('span');
+      no.className = 'block-no';
+      no.innerHTML = '<i class="bi bi-file-text"></i> ' + blockTitle(i);
+      head.appendChild(no);
+      var acts = document.createElement('span');
+      acts.className = 'block-acts';
+      if (i > 0) {
+        acts.appendChild(iconBtn('bi-arrow-up', '上移', function () { moveDetailBlock(i, -1); }));
+      }
+      if (i < state.detailBlocks.length - 1) {
+        acts.appendChild(iconBtn('bi-arrow-down', '下移', function () { moveDetailBlock(i, 1); }));
+      }
+      acts.appendChild(iconBtn('bi-trash', '删除这组文案', function () { removeDetailBlock(i); }, true));
+      head.appendChild(acts);
+      var area = document.createElement('textarea');
+      area.className = 'block-content';
+      area.rows = 5;
+      area.placeholder = '直接粘文字就行：换行就是换行、空行就是分段；会写 HTML 也支持 <p>…</p>';
+      area.value = b.content || '';
+      // 边打字边写回 state：否则「新建商品文案」重建 DOM 时，已填的内容会跟着旧节点一起没了
+      area.oninput = (function (i) {
+        return function (e) { state.detailBlocks[i].content = e.target.value; };
+      })(i);
+      wrap.appendChild(head);
+      wrap.appendChild(area);
+      box.appendChild(wrap);
+    });
+    var count = document.getElementById('detailBlockCount');
+    if (count) { count.textContent = state.detailBlocks.length + '/' + DETAIL_BLOCK_MAX; }
+    var btn = document.getElementById('addDetailBlockBtn');
+    if (btn) {
+      btn.disabled = state.detailBlocks.length >= DETAIL_BLOCK_MAX;
+      btn.title = btn.disabled ? ('最多 ' + DETAIL_BLOCK_MAX + ' 组文案') : '再加一组文案';
+    }
+  }
+
+  function addDetailBlock() {
+    if (state.detailBlocks.length >= DETAIL_BLOCK_MAX) {
+      toast('详情文案最多 ' + DETAIL_BLOCK_MAX + ' 组', 'err');
+      return;
+    }
+    syncBlocksFromDom();
+    state.detailBlocks.push({ title: blockTitle(state.detailBlocks.length), content: '' });
+    renderDetailBlocks();
+    var areas = document.querySelectorAll('#detailBlocks .block-content');
+    if (areas && areas.length) { areas[areas.length - 1].focus(); }
+  }
+
+  function removeDetailBlock(i) {
+    syncBlocksFromDom();
+    state.detailBlocks.splice(i, 1);
+    // 至少留一组：删完了运营还得重新点「新建商品文案」才有地方填，没必要
+    if (!state.detailBlocks.length) { state.detailBlocks.push({ title: '文案一', content: '' }); }
+    renderDetailBlocks();
+  }
+
+  function moveDetailBlock(i, step) {
+    var next = i + step;
+    if (next < 0 || next >= state.detailBlocks.length) { return; }
+    syncBlocksFromDom();
+    var moved = state.detailBlocks.splice(i, 1)[0];
+    state.detailBlocks.splice(next, 0, moved);
+    renderDetailBlocks();
+  }
+
+  function collectDetailBlocks() {
+    var out = [];
+    Array.prototype.forEach.call(
+      document.querySelectorAll('#detailBlocks .detail-block'),
+      function (node) {
+        var content = (node.querySelector('.block-content').value || '').trim();
+        if (!content) { return; }   // 空组不提交
+        out.push({ title: blockTitle(out.length), content: content });
+      }
+    );
+    return out;
+  }
+
+  function isValidImageUrl(s) { return /^(https?:\/\/|\/media\/)\S+$/i.test(s); }
+
+  function addMainImage() {
+    var input = document.getElementById('mainImageInput');
+    var url = (input.value || '').trim();
+    if (!url) { return; }
+    if (!isValidImageUrl(url)) { toast('请粘贴 http(s):// 或 /media/ 开头的图片地址', 'err'); input.focus(); return; }
+    if (state.mainImages.indexOf(url) !== -1) { toast('这张图已添加过', 'err'); input.focus(); return; }
+    if (state.mainImages.length >= MAIN_IMAGE_MAX) { toast('主图最多 ' + MAIN_IMAGE_MAX + ' 张', 'err'); return; }
+    state.mainImages.push(url);
+    input.value = '';
+    renderMainImages();
+  }
+
+  function addDetailImage() {
+    var input = document.getElementById('detailImageInput');
+    var url = (input.value || '').trim();
+    if (!url) { return; }
+    if (!isValidImageUrl(url)) { toast('请粘贴 http(s):// 或 /media/ 开头的图片地址', 'err'); input.focus(); return; }
+    if (state.detailImages.indexOf(url) !== -1) { toast('这张图已添加过', 'err'); input.focus(); return; }
+    if (state.detailImages.length >= DETAIL_IMAGE_MAX) { toast('详情图最多 ' + DETAIL_IMAGE_MAX + ' 张', 'err'); return; }
+    state.detailImages.push(url);
+    input.value = '';
+    renderDetailImages();
+  }
+
+  function humanSize(n) {
+    n = Number(n) || 0;
+    if (n < 1024) { return n + ' B'; }
+    if (n < 1024 * 1024) { return Math.round(n / 1024) + ' KB'; }
+    return (n / 1024 / 1024).toFixed(1) + ' MB';
+  }
+
+  // 浏览器侧就被拦下的上传**也要报一条**（2026-10-09）：
+  // 这类失败请求**根本发不出去** —— 服务端 access log 与「异常日志」都是空的，
+  // 只剩一句 toast，只能靠猜。典型的「别人的电脑传不了、我的能传」就卡在这一层
+  // （图太大 / 格式不对 / 网络传一半断了）。
+  function reportUploadIssue(file, why) {
+    if (typeof window.reportClientError !== 'function') { return; }
+    var f = file || {};
+    window.reportClientError({
+      url: '/products/upload-image',
+      status: 0,
+      body: '文件=' + (f.name || '(未知)') + ' 大小=' + (f.size || 0) +
+            'B 类型=' + (f.type || '') + ' 上限=' + UPLOAD_MAX_MB + 'MB · ' + navigator.userAgent,
+      message: '上传图片没成功（浏览器侧）：' + why
+    });
+  }
+
+  // 选完**在本地就先过一遍**（不等服务端拒）：直连 8000 时没有 nginx 那层限制，
+  // 手机原图动辄十几 MB，传一半断了就是一句说不清的「上传失败」（2026-10-09）
+  function checkFile(file) {
+    if (!file) { return '没有拿到文件'; }
+    var why = '';
+    if (UPLOAD_MAX_MB > 0 && file.size > UPLOAD_MAX_MB * 1024 * 1024) {
+      why = '「' + file.name + '」' + humanSize(file.size) + '，超过单张 ' + UPLOAD_MAX_MB +
+        'MB 上限 —— 用手机自带的编辑裁一下，或先发到微信再存（会自动压缩）';
+    } else if (!/\.(png|jpe?g|webp|gif)$/i.test(file.name || '')) {
+      // 苹果的照片 / 隔空投送默认是 HEIC，Windows 也认不出 —— 给一条当场能做的办法
+      why = '「' + file.name + '」不是 png / jpg / webp / gif' +
+        (/\.hei[cf]$/i.test(file.name || '')
+          ? '（苹果的 HEIC 传不了：在「照片」里导出成 JPEG，或先发到微信再存回来）'
+          : '');
+    }
+    if (why) { reportUploadIssue(file, why); }
+    return why;
+  }
+
+  function uploadFiles(files, target, rerender) {
+    if (!files || !files.length) { return; }
+    // 按剩余额度截取：详情图最多 100 张，一次选多了就只传还放得下的那几张
+    var max = target === state.detailImages ? DETAIL_IMAGE_MAX : MAIN_IMAGE_MAX;
+    var rest = max - target.length;
+    if (rest <= 0) { toast('最多 ' + max + ' 张，已经到上限了', 'err'); return; }
+    var bad = [];
+    var queue = Array.prototype.slice.call(files, 0, rest).filter(function (file) {
+      var why = checkFile(file);
+      if (why) { bad.push(why); return false; }
+      return true;
+    });
+    if (bad.length) { toast(bad[0] + (bad.length > 1 ? '（还有 ' + (bad.length - 1) + ' 张同样不合格）' : ''), 'err'); }
+    if (!queue.length) { return; }
+    if (queue.length < files.length) {
+      toast('最多 ' + max + ' 张，这次只上传前 ' + queue.length + ' 张', 'err');
+    }
+    var pending = queue.length;
+    Array.prototype.forEach.call(queue, function (file) {
+      var fd = new FormData();
+      fd.append('file', file);
+      fetchJson('/products/upload-image', { method: 'POST', body: fd, where: '发布商品 · 上传图片' })
+        .then(function (res) {
+          if (res.ok && res.data && res.data.url) {
+            if (target.indexOf(res.data.url) === -1) { target.push(res.data.url); }
+          } else {
+            var msg = (res.data && res.data.error) || '上传失败';
+            reportUploadIssue(file, 'HTTP ' + res.status + ' ' + msg);
+            toast(msg, 'err');
+          }
+        })
+        .catch(function (err) {
+          // 走到这里多半是**请求没发出去 / 传到一半断了**（服务端日志里不会有记录）
+          reportUploadIssue(file, (err && err.message) || '请求没发出去或中途断了');
+          toast(err && err.message ? err.message : '上传失败，请重试', 'err');
+        })
+        .finally(function () {
+          pending -= 1;
+          if (pending <= 0) { rerender(); toast('图片已上传'); }
+        });
+    });
+  }
+
+  function uploadMainFiles(files) { uploadFiles(files, state.mainImages, renderMainImages); }
+  function uploadDetailFiles(files) { uploadFiles(files, state.detailImages, renderDetailImages); }
+
+  // ---------------- 价格口径 ----------------
+  // 渔货价 = 成本价 × 1.15，建议售价 = 渔货价 × 1.35（只补留空的，手填过的不动）
+  var FISH_RATE = 1.15, SALE_RATE = 1.35;
+  function autoPrice() {
+    var costEl = document.getElementById('costInput');
+    var fishEl = document.getElementById('fishInput');
+    var saleEl = document.getElementById('saleInput');
+    if (!costEl || !fishEl || !saleEl) { return; }
+    var cost = parseFloat(costEl.value || '0') || 0;
+    var fish = parseFloat(fishEl.value || '0') || 0;
+    if (cost > 0 && !String(fishEl.value || '').trim()) {
+      fish = Math.round(cost * FISH_RATE * 100) / 100;
+      fishEl.value = fish.toFixed(2);
+    }
+    if (fish > 0 && !String(saleEl.value || '').trim()) {
+      saleEl.value = (Math.round(fish * SALE_RATE * 100) / 100).toFixed(2);
+    }
+  }
+
+  // ---------------- 预览 ----------------
+  function syncPreview() {
+    var title = (document.getElementById('titleInput').value || '').trim();
+    var cost = parseFloat(document.getElementById('costInput').value || '0') || 0;
+    var sale = parseFloat(document.getElementById('saleInput').value || '0') || 0;
+    var market = parseFloat(document.getElementById('marketInput').value || '0') || 0;
+    var stock = (document.getElementById('stockInput').value || '').trim();
+    var delivery = document.getElementById('deliveryInput').value;
+    var selling = (document.getElementById('sellingInput').value || '').trim();
+
+    document.getElementById('titleCnt').textContent = title.length + ' / 100';
+    var titleBox = document.getElementById('previewTitle');
+    titleBox.textContent = title || '填写商品标题后会在这里显示';
+    titleBox.classList.toggle('empty', !title);
+
+    document.getElementById('previewPriceVal').textContent = sale ? sale.toFixed(2) : '—';
+    document.getElementById('previewMarket').textContent = market ? '¥' + market.toFixed(2) : '';
+    document.getElementById('previewCost').textContent = cost ? '¥' + cost.toFixed(2) : '¥—';
+    var skuStock = state.skus.reduce(function (sum, s) { return sum + (parseInt(s.stock || '0', 10) || 0); }, 0);
+    document.getElementById('previewStock').textContent = stock ? stock : (skuStock || '—');
+    document.getElementById('previewDelivery').textContent = delivery;
+    // 类目：一级 / 二级 / 三级，跟提交时拼进 category 字段的写法一致
+    document.getElementById('previewCategory').textContent = catPath() || '—';
+
+    var sellingBox = document.getElementById('previewSelling');
+    if (selling) {
+      sellingBox.style.display = '';
+      sellingBox.textContent = selling.split('\n').slice(0, 2).join(' · ');
+    } else {
+      sellingBox.style.display = 'none';
+    }
+
+    var tags = document.getElementById('previewTags');
+    tags.innerHTML = '';
+    state.skus.slice(0, 6).forEach(function (sku) {
+      var span = document.createElement('span');
+      span.className = 'preview-tag';
+      span.textContent = sku.spec;
+      tags.appendChild(span);
+    });
+
+    var main = document.getElementById('previewMain');
+    main.innerHTML = state.mainImages.length
+      ? '<img src="' + state.mainImages[0] + '" alt="">'
+      : '<i class="bi bi-image"></i>';
+
+    var tip = document.getElementById('marginTip');
+    if (cost && sale) {
+      tip.style.display = '';
+      document.getElementById('marginVal').textContent = '¥' + (sale - cost).toFixed(2)
+        + '（' + (((sale - cost) / sale) * 100).toFixed(0) + '%）';
+    } else {
+      tip.style.display = 'none';
+    }
+  }
+
+  // ---------------- 商品属性（供应链商品 / 自营商品）----------------
+  function currentSource() {
+    var picked = document.querySelector('input[name="source_type"]:checked');
+    return picked ? picked.value : 'self_operated';
+  }
+
+  function onSourceChange() {
+    var isSupply = currentSource() === 'third_party';
+    var box = document.getElementById('supplierField');
+    if (box) { box.style.display = isSupply ? '' : 'none'; }
+    // 商品条码只给自营商品用（供应链商品走上面的供应链下拉）
+    var wmsBox = document.getElementById('wmsCodeField');
+    if (wmsBox) { wmsBox.style.display = isSupply ? 'none' : ''; }
+    var label = document.getElementById('previewSource');
+    if (label) {
+      var text = isSupply ? '供应链商品' : '自营商品';
+      if (isSupply) {
+        var select = document.getElementById('supplierSelect');
+        var picked = select ? select.options[select.selectedIndex] : null;
+        if (picked && picked.value) { text += ' · ' + picked.textContent.trim(); }
+      }
+      label.textContent = text;
+    }
+    syncPreview();
+  }
+
+  // ---------------- 商品条码：把渔集（检测仓）那台货带过来（2026-10-10）----------------
+  // 三条输入路径：扫码枪（扫完敲回车）、手打、点「选渔集货品」从下拉候选里挑（像选供应链一样）。
+  // 带出来的东西：商品名称 / 品牌 / 类目三级 / 渔货价 / 建议售价 / 市场价 / 库存。
+  var WMS_LAST = '';
+  var WMS_TIP_IDLE = '扫 / 选之后，商品名称、品牌、类目、渔货价、建议售价、市场价（渔集基准价）、'
+    + '库存（渔集数量）会一起带过来，商家编码直接用这个条码（锁死不可改）。不扫不选就是普通新增商品。';
+
+  // 类目三级：渔集报上来的路径（优先 1688 对标名，其次渔集自己的中文名）直接落到三个下拉上；
+  // 对不上的那层用 ensureCatOption 补成「（原类目）」选项，跟编辑页回填一个做法。
+  function wmsSetCategory(levels) {
+    if (!levels || !levels.length) { return false; }
+    var s1 = document.getElementById('cat1');
+    if (s1 && levels[0]) { ensureCatOption(1, levels[0]); s1.value = levels[0]; }
+    onCat1Change();
+    var s2 = document.getElementById('cat2');
+    if (s2 && levels[1]) { ensureCatOption(2, levels[1]); s2.value = levels[1]; }
+    onCat2Change();
+    var s3 = document.getElementById('cat3');
+    if (s3 && levels[2]) { ensureCatOption(3, levels[2]); s3.value = levels[2]; }
+    onCat3Change();
+    return !!(s1 && s1.value);
+  }
+
+  function wmsApply(it) {
+    var set = function (id, value) {
+      var target = document.getElementById(id);
+      if (target && value !== '' && value !== null && value !== undefined) { target.value = value; }
+    };
+    set('titleInput', it.product_name);      // 商品名称 ← 渔集的产品名
+    set('brandInput', it.brand);             // 品牌 ← 渔集建档填的品牌
+    set('fishInput', it.fish_price);         // 渔货价 ← 渔集定级后的售价
+    set('saleInput', it.suggest_price);      // 建议售价 ← 渔集的建议售价（基准价 × 建议售价系数）
+    set('marketInput', it.market_price);     // 市场价 ← 渔集的基准价
+    set('stockInput', it.qty);               // 库存 ← 渔集的数量（一条货可以带 N 台）
+    var levels = (it.category_levels && it.category_levels.length)
+      ? it.category_levels : (it.category_1688 || it.category_local || []);
+    var matched = wmsSetCategory(levels);
+    // 商家编码直接复用渔集条码（终身唯一）：**锁死不可改** —— 它是渔集与渔枢之间的唯一关联键，
+    // 改了以后出库就没法把库存同步回这款商品了。SKU 编码跟着变成「条码-01」。
+    var codeInput = document.getElementById('codeInput');
+    if (codeInput && it.barcode) {
+      codeInput.value = it.barcode;
+      // 渔集带出来的条码锁死：它是两边唯一的关联键，改了库存就同步不回这款商品
+      codeInput.setAttribute('readonly', 'readonly');
+      codeInput.setAttribute('title', '渔集条码（关联键，不可手改）');
+      var preview = document.getElementById('codePreview');
+      if (preview) { preview.textContent = it.barcode; }
+      if (typeof renderSkuTable === 'function') { renderSkuTable(); }
+    }
+    syncPreview();
+    var help = document.getElementById('wmsCodeHelp');
+    if (help) {
+      help.innerHTML = '已带出渔集 <b>' + (it.display_code || it.barcode) + '</b>：'
+        + (it.product_name ? it.product_name + ' · ' : '')
+        + '渔货价 ¥' + it.fish_price + ' · 建议售价 ¥' + it.suggest_price
+        + ' · 市场价 ¥' + it.market_price + ' · 库存 ' + it.qty + ' 台'
+        + (matched ? ' · <b>类目已带入</b>' : ' · <b>类目没对上门，请手动选</b>')
+        + '；商家编码用条码 ' + it.barcode;
+    }
+  }
+
+  // 扫码枪扫完会敲一个回车；同一个码不重复请求。
+  function wmsLookup() {
+    var el = document.getElementById('wmsCode');
+    var help = document.getElementById('wmsCodeHelp');
+    if (!el || !help) { return; }
+    var code = (el.value || '').trim();
+    if (!code || code === WMS_LAST) { return; }
+    WMS_LAST = code;
+    help.textContent = '正在查渔集…';
+    apiGet('/products/wms-item?code=' + encodeURIComponent(code)).then(function (data) {
+      if (!data || !data.ok) {
+        WMS_LAST = '';                       // 查不到就允许再扫一次重试
+        help.innerHTML = '<b style="color:var(--c-error)">'
+          + ((data && data.error) || '没查到这台货') + '</b>';
+        return;
+      }
+      wmsApply(data.item || {});
+    });
+  }
+
+  // 「选渔集货品」/ 聚焦时：把渔集在库货品拉成下拉候选（点开就能挑，不用记条码）
+  function wmsSuggest(force) {
+    var el = document.getElementById('wmsCode');
+    var box = document.getElementById('wmsCodeOptions');
+    if (!el || !box) { return; }
+    var keyword = (el.value || '').trim();
+    apiGet('/products/wms-items?q=' + encodeURIComponent(keyword) + '&limit=20').then(function (data) {
+      var items = (data && data.items) || [];
+      box.innerHTML = '';
+      items.forEach(function (row) {
+        var opt = document.createElement('option');
+        opt.value = row.barcode;
+        opt.label = (row.product_name || row.display_code) + ' · ' + row.qty + ' 台'
+          + (row.market_price ? ' · 市场价 ¥' + row.market_price : '');
+        box.appendChild(opt);
+      });
+      if (!items.length) {
+        var help = document.getElementById('wmsCodeHelp');
+        if (help) { help.innerHTML = '渔集里没查到在库货品（换个关键词试试，或直接扫码枪扫）。'; }
+        return;
+      }
+      if (force) {
+        el.focus();
+        if (typeof el.showPicker === 'function') { try { el.showPicker(); } catch (err) {} }
+      }
+    });
+  }
+
+  function wmsClear() {
+    var el = document.getElementById('wmsCode');
+    var help = document.getElementById('wmsCodeHelp');
+    if (el) { el.value = ''; }
+    WMS_LAST = '';
+    if (help) { help.textContent = WMS_TIP_IDLE; }
+  }
+
+  (function () {
+    var el = document.getElementById('wmsCode');
+    if (!el) { return; }
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); wmsLookup(); }
+    });
+    el.addEventListener('change', wmsLookup);      // 从下拉候选里挑了一个
+    el.addEventListener('blur', function () { if (el.value) { wmsLookup(); } });
+    el.addEventListener('focus', function () { wmsSuggest(false); });
+  })();
+
+  // 把「库里已有、但下拉里没有」的类目补成一个选项（老商品类目与现在的类目树对不上时用得上）
+  function ensureCatOption(level, value) {
+    var sel = document.getElementById('cat' + level);
+    if (!sel || !value) { return; }
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === value) { return; }
+    }
+    sel.appendChild(new Option(value + '（原类目）', value));
+  }
+
+  // ---------------- 编辑模式：把商品现有资料回填到表单 ----------------
+  function applyEditFields() {
+    if (!IS_EDIT) { return; }
+    Object.keys(EDIT_FIELDS).forEach(function (name) {
+      var el = document.querySelector('#publishForm [name="' + name + '"]');
+      if (!el) { return; }
+      if (el.type === 'radio' || el.type === 'checkbox') {
+        el.checked = String(el.value) === String(EDIT_FIELDS[name]);
+      } else {
+        el.value = EDIT_FIELDS[name];
+      }
+    });
+    // 类目三级级联：先按已填路径把各级下拉建出来，再把值选上。
+    // 老商品的类目可能不在现在的类目树里（口径调过），这时把原值补成一个选项 ——
+    // 否则保存时 catPath() 是空的，会把商品上的类目洗掉。
+    if (EDIT_CATEGORY && EDIT_CATEGORY.length) {
+      var s1 = document.getElementById('cat1');
+      if (s1 && EDIT_CATEGORY[0]) { ensureCatOption(1, EDIT_CATEGORY[0]); s1.value = EDIT_CATEGORY[0]; }
+      onCat1Change();
+      var s2 = document.getElementById('cat2');
+      if (s2 && EDIT_CATEGORY[1]) { ensureCatOption(2, EDIT_CATEGORY[1]); s2.value = EDIT_CATEGORY[1]; }
+      onCat2Change();
+      var s3 = document.getElementById('cat3');
+      if (s3 && EDIT_CATEGORY[2]) { ensureCatOption(3, EDIT_CATEGORY[2]); s3.value = EDIT_CATEGORY[2]; }
+      onCat3Change();
+    }
+    // 运费模板 / 发货方式：已经有值了，别让「按规则自动套用」把它们冲掉
+    shippingTouched.freight = true;
+    shippingTouched.mode = true;
+    onSourceChange();
+    // 商品标签：按商品上已存的标签把勾选状态补上（字典里没有的老标签也带着走）
+    initTags();
+  }
+
+  // —— 商品标签（固定标签）——
+  // 勾选的是 chips，真正的提交值在 hidden 的 tags 字段（一行一个），存进 products.tags
+  function syncTagField() {
+    var pick = document.getElementById('tagPick');
+    var field = document.getElementById('tagsField');
+    if (!pick || !field) { return; }
+    var picked = Array.prototype.slice
+      .call(pick.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(function (x) { return x.value; });
+    field.value = picked.join('\n');
+  }
+
+  function initTags() {
+    var pick = document.getElementById('tagPick');
+    var field = document.getElementById('tagsField');
+    if (!pick || !field) { return; }
+    var want = (field.value || '').split(/[\n,，、]/)
+      .map(function (s) { return s.trim(); })
+      .filter(function (s) { return s; });
+    if (!want.length) { return; }
+    var known = {};
+    Array.prototype.slice.call(pick.querySelectorAll('input[type="checkbox"]')).forEach(function (cb) {
+      known[cb.value] = true;
+      if (want.indexOf(cb.value) >= 0) { cb.checked = true; }
+    });
+    // 商品上可能有字典里已经删掉的标签（老数据）：补一个勾选项带着走，保存时不被清掉
+    want.forEach(function (name) {
+      if (known[name]) { return; }
+      var label = document.createElement('label');
+      label.className = 'tag-opt';
+      label.title = '标签字典里已经没有这个标签了（老数据），保存时原样留着';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = name;
+      cb.checked = true;
+      cb.addEventListener('change', syncTagField);
+      var chip = document.createElement('span');
+      chip.className = 'ftag warn';
+      chip.textContent = name;
+      label.appendChild(cb);
+      label.appendChild(chip);
+      pick.appendChild(label);
+    });
+    syncTagField();
+  }
+
+  // ---------------- 提交 ----------------
+  function submitForm(action) {
+    var title = (document.getElementById('titleInput').value || '').trim();
+    if (!title) { toast('请先填商品标题', 'err'); document.getElementById('titleInput').focus(); return; }
+    // 一级类目是必填：统计与筛选都按类目归类，空着后面没法归堆
+    if (!cat1Value()) { toast('请先选一级类目', 'err'); document.getElementById('cat1').focus(); return; }
+    // 供应链商品必须选到具体供应链：否则列表里归不了类、对账也对不上
+    if (currentSource() === 'third_party') {
+      var select = document.getElementById('supplierSelect');
+      var free = document.getElementById('supplierName');
+      var picked = select ? (select.value || '') : (free ? (free.value || '').trim() : '');
+      if (!picked) {
+        toast('供应链商品请选择对应的供应链', 'err');
+        if (select) { select.focus(); } else if (free) { free.focus(); }
+        return;
+      }
+    }
+
+    // 规格矩阵：渔货价与建议售价必填 —— 行里空就先套批量设置的值，还是空就拦住说清是哪一行
+    var batch = batchValues();
+    state.skus.forEach(function (sku) {
+      SKU_FIELDS.forEach(function (key) { if (!sku[key] && batch[key]) { sku[key] = batch[key]; } });
+    });
+    var gaps = [];
+    state.skus.forEach(function (sku, idx) {
+      if (!sku.fish) { gaps.push('第 ' + (idx + 1) + ' 行「' + sku.spec + '」的渔货价'); }
+      if (!sku.price) { gaps.push('第 ' + (idx + 1) + ' 行「' + sku.spec + '」的建议售价'); }
+    });
+    if (!state.skus.length) {
+      if (!batch.fish) { gaps.push('渔货价'); }
+      if (!batch.price) { gaps.push('建议售价'); }
+    }
+    if (gaps.length) {
+      renderSkuTable();
+      toast('还差：' + gaps.slice(0, 3).join('、') + (gaps.length > 3 ? ' 等' : '')
+        + '（渔货价与建议售价必填）', 'err');
+      return;
+    }
+
+    // 规格定义（可被详情页再解析）+ 外部 SKU 矩阵 + 图片
+    var defs = state.specDefs.filter(function (d) { return d.name && d.values.length; });
+    document.getElementById('specInput').value = defs.map(function (d) {
+      return d.name + ': ' + d.values.join(', ');
+    }).join('\n');
+    document.getElementById('skusJson').value = JSON.stringify(state.skus.filter(function (s) {
+      return s.spec;
+    }).map(function (s) {
+      return {
+        spec: s.spec, cost: s.cost, fish: s.fish, price: s.price,
+        market: s.market, stock: s.stock, code: s.code
+      };
+    }));
+    document.getElementById('mainImageField').value = state.mainImages[0] || '';
+    document.getElementById('imagesField').value = state.mainImages.join('\n');
+
+    // 详情描述（多组文案）与详情图分开提交：后端把图按顺序拼在文案后面
+    document.getElementById('detailBlocksJson').value = JSON.stringify(collectDetailBlocks());
+    document.getElementById('detailImagesField').value = state.detailImages.join('\n');
+
+    // 一级 / 二级 / 三级类目拼成一个分类字段（与后端 category_service.text 同一口径）；
+    // 编辑老商品时若类目压根选不出来（不在类目树里），保留原值，别把类目洗没了
+    document.getElementById('categoryField').value = catPath()
+      || (IS_EDIT ? (EDIT_FIELDS.category || '') : '');
+
+    document.getElementById('submitAction').value = action;
+    document.getElementById('publishForm').submit();
+  }
+
+  // ---------------- 小工具 ----------------
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function toast(message, kind) {
+    var box = document.getElementById('pageToast');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'pageToast';
+      box.className = 'page-toast';
+      document.body.appendChild(box);
+    }
+    box.textContent = message;
+    box.className = 'page-toast show' + (kind === 'err' ? ' err' : '');
+    clearTimeout(box._timer);
+    box._timer = setTimeout(function () { box.className = 'page-toast'; }, 2200);
+  }
+
+  // 主图 URL 输入框回车即添加
+  document.getElementById('mainImageInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addMainImage(); }
+  });
+  document.getElementById('detailImageInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addDetailImage(); }
+  });
+
+  // 上架带出（2026-10-12）：扫渔集货号，把检测时填的「外观瑕疵描述」带进「供应商友情提示」
+  async function pullWmsTip() {
+    const el = document.getElementById('wmsCodeInput');
+    const st = document.getElementById('wmsPullState');
+    const box = document.getElementById('supplierTipInput');
+    const code = (el.value || '').trim();
+    if (!code) { st.textContent = '先扫 / 填渔集货号'; return; }
+    st.textContent = '查…';
+    const d = await (await fetch('/api/wms-flaw?code=' + encodeURIComponent(code))).json();
+    if (!d.ok) { st.textContent = d.message || '没查到'; return; }
+    const old = box.value.trim();
+    box.value = old ? old + String.fromCharCode(10) + d.tip : d.tip;
+    st.textContent = '已带出（' + (d.grade || '') + ' 档' + (d.title ? ' · ' + d.title : '') + '）';
+    if (typeof syncPreview === 'function') { syncPreview(); }
+  }
+  document.getElementById('wmsPullBtn').addEventListener('click', pullWmsTip);
+  document.getElementById('wmsCodeInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); pullWmsTip(); }
+  });
+
+  // 编辑模式：先把现有资料与类目回填，再渲染（否则渲染出来是一片空）
+  applyEditFields();
+  // 规格行上留空的字段，默认套批量设置的值（跟「批量设置到全部规格」一个口径）
+  applyBatchDefaults();
+  renderSpecEditor();
+  renderMainImages();
+  renderDetailImages();
+  renderDetailBlocks();
+  renderSkuTable();
+  onSourceChange();
+  if (!IS_EDIT) { onCat1Change(); }
+  syncPreview();
+  // 类目 / 供应商驱动的联动（编码预览、类目经营提示、运费与发货方式自动套用）
+  afterCategoryChange();
+</script>
+{% endblock %}

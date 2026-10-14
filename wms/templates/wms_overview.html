@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}货品检测入库出库{% endblock %}
+
+{% block content %}
+{% set s = data.summary %}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">在库总数</div><div class="value">{{ data.on_hand }}</div>
+    <div class="hint">不含在外报修（货不在手上）</div></div>
+  <div class="stat ok"><div class="label">可售库存</div><div class="value">{{ data.sellable }}</div>
+    <div class="hint">S / A 档，可上架</div></div>
+  <div class="stat accent"><div class="label">待检</div><div class="value">{{ data.pending }}</div>
+    <div class="hint">检测员今天的活</div></div>
+  <div class="stat {{ 'danger' if data.repair_timeout else '' }}"><div class="label">报修超时</div>
+    <div class="value">{{ data.repair_timeout }}</div>
+    <div class="hint">钱垫着、货在别人手里</div></div>
+</div>
+
+<div class="grid grid-4">
+  <div class="stat"><div class="label">在途报修</div><div class="value">{{ s.buckets.out_repair.qty }}</div>
+    <div class="hint">垫付 ¥{{ money(data.repair_stats.paid_transit) }}</div></div>
+  <div class="stat"><div class="label">拆机件</div><div class="value">{{ s.buckets.parts.qty }}</div>
+    <div class="hint">理论残值 ¥{{ money(data.recovery.est) }}</div></div>
+  <div class="stat {{ 'warn' if data.recovery.rate < 0.5 and data.recovery.est else 'ok' }}">
+    <div class="label">残值回收率</div><div class="value">{{ (data.recovery.rate * 100) | round(1) }}%</div>
+    <div class="hint">已变现 ¥{{ money(data.recovery.actual) }}</div></div>
+  <div class="stat {{ 'danger' if data.negative else '' }}"><div class="label">负库存 / 待复检</div>
+    <div class="value">{{ data.negative }} / {{ data.recheck }}</div>
+    <div class="hint">负库存说明流程走漏了</div></div>
+</div>
+
+<div class="card">
+  <h2>库存口径（报表统一按这套算法）</h2>
+  <p class="d">在库总数<b>不含</b>在外报修，但<b>要含</b>拆机件 —— 财务口径与实物口径不同，不要合并成一个数。</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>口径</th><th class="num">数量</th><th class="num">成本货值</th><th class="num">售价货值</th><th>是否可上架</th></tr></thead>
+      <tbody>
+      {% for key in ['pending','sellable','locked','repair','rework','out_repair','parts','hazard','sold'] %}
+        {% set b = s.buckets[key] %}
+        <tr>
+          <td>{{ bits.status_badge(b.status) }} <span class="muted">{{ b.label }}</span></td>
+          <td class="num">{{ b.qty }}</td>
+          <td class="num">¥{{ money(b.cost) }}</td>
+          <td class="num">¥{{ money(b.price) }}</td>
+          <td>{% if b.status == 'SELLABLE' %}<span class="badge done">可</span>
+              {% elif b.status == 'PARTS' %}<span class="badge pending">走拆机件渠道</span>
+              {% else %}<span class="badge muted">禁</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>快捷入口</h2>
+    <div class="btn-row">
+      {# 前三个就是入库分拣主线，序号与侧栏菜单一致：1 → 2 → 3 走完货就上架了 #}
+      <a class="btn primary" href="/wms/batches"><i class="bi bi-box-arrow-in-down"></i> 1 批次与建档</a>
+      <a class="btn primary" href="/wms/inspect"><i class="bi bi-upc-scan"></i> 2 扫码检测</a>
+      <a class="btn primary" href="/wms/labels"><i class="bi bi-tag"></i> 3 标签打印与贴标复核</a>
+      <a class="btn" href="/wms/items"><i class="bi bi-boxes"></i> 库存台账</a>
+      <a class="btn" href="/wms/outbound"><i class="bi bi-box-arrow-up"></i> 出库管理</a>
+      <a class="btn" href="/wms/repairs"><i class="bi bi-wrench"></i> 报修工单</a>
+      <a class="btn" href="/wms/parts"><i class="bi bi-cpu"></i> 拆机件残值</a>
+      <a class="btn" href="/wms/stocktake"><i class="bi bi-clipboard-check"></i> 盘点</a>
+      <a class="btn" href="/wms/ledger"><i class="bi bi-journal-text"></i> 库存账本</a>
+      <a class="btn" href="/wms/rules"><i class="bi bi-sliders"></i> 分级规则</a>
+      <a class="btn" href="/wms/reports"><i class="bi bi-bar-chart"></i> 报表中心</a>
+    </div>
+  </div>
+  <div class="card">
+    <h2>最近建档的货品</h2>
+    {% if recent_ledgers %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>条码</th><th>品牌型号</th><th>等级</th><th>状态</th></tr></thead>
+      <tbody>
+      {% for it in recent_ledgers %}
+        <tr>
+          <td>{{ bits.barcode_cell(it) }}</td>
+          <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td>
+          <td>{{ bits.grade_badge(it.grade) }}</td>
+          <td>{{ bits.status_badge(it.status) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}{{ bits.empty('还没有货品，先去「批次与建档」建一批') }}{% endif %}
+  </div>
+</div>
+{% endblock %}

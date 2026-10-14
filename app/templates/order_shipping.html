@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{# 订单「发货」详情：只讲发货这一件事 —— 运单号 / 物流公司 / 物流轨迹 / 发货操作日志。
+   订单本身（价格、图片、推单文案）在「订单详情」里，右上角有入口。 #}
+{% block title %}发货详情 · {{ order.order_no }}{% endblock %}
+{% block heading %}订单发货详情{% endblock %}
+{% block sub %}订单 {{ order.order_no }} · {{ order.product_name or '-' }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/orders/{{ order.id }}">订单详情</a>
+  <a class="btn" href="/batches">返回供应链发货</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>发货信息</h2>
+  <div class="kv">
+    <div class="k">订单号</div>
+    <div class="v"><a href="/orders/{{ order.id }}">{{ order.order_no }}</a>{% if order.is_closed %} <span class="badge closed">已关闭完成</span>{% endif %}</div>
+    <div class="k">收货人</div>
+    <div class="v">{{ order.receiver_name or '-' }}{% if order.receiver_phone %} · {{ order.receiver_phone }}{% endif %}</div>
+    <div class="k">供应商</div>
+    <div class="v">{{ order.supplier_name or '未指定' }}</div>
+    <div class="k">运单号</div>
+    <div class="v">{% if mail_no %}<span class="mono">{{ mail_no }}</span>{% else %}<span class="muted">未填写</span>{% endif %}</div>
+    <div class="k">物流公司</div>
+    <div class="v">
+      {% if company %}<span class="badge">{{ company }}</span> <span class="muted">按单号自动识别</span>
+      {% else %}<span class="muted">未识别（单号规则没对上，不影响发货与查轨迹）</span>{% endif %}
+    </div>
+    <div class="k">订单状态</div>
+    <div class="v"><span class="badge state-{{ order.order_state }}">{{ order.order_state_label }}</span></div>
+    <div class="k">轨迹状态</div>
+    <div class="v">{{ tracking_labels.get(order.tracking_status, '未查询') }}</div>
+    <div class="k">同步到群</div>
+    <div class="v">{% if order.tracking_synced_at %}{{ human_time(order.tracking_synced_at) }}{% else %}<span class="muted">未同步</span>{% endif %}</div>
+  </div>
+
+  {% if can_edit %}
+  <form class="tracking-form" method="post" action="/batches/tracking/{{ order.id }}" style="margin-top:10px">
+    <input type="hidden" name="back" value="/orders/{{ order.id }}/shipping">
+    <div class="tracking-row">
+      <input type="text" name="tracking_no" value="{{ mail_no }}" placeholder="运单号" aria-label="物流单号">
+      <button class="btn sm primary">保存</button>
+    </div>
+    <div class="tracking-row">
+      <label class="check" title="保存后自动在飞书群里 @ 订单发送人同步物流单号">
+        <input type="checkbox" name="sync" value="1" checked> 同步到群
+      </label>
+    </div>
+    <div class="muted">
+      {% if mail_no %}还能再改 {{ tracking_max_edit - (order.tracking_edit_count or 0) }} 次，改完自动锁定
+      {% else %}填好后按单号自动认物流公司{% endif %}
+    </div>
+  </form>
+  {% else %}
+  <div class="muted" style="margin-top:8px">物流单号已改过 {{ order.tracking_edit_count or 0 }} 次，不能再改（填错请联系管理员）</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>物流轨迹</h2>
+  {% if result.nodes %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:170px">时间</th><th style="width:200px">地点</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for node in result.nodes %}
+          <tr>
+            <td class="mono">{{ node.time or '-' }}</td>
+            <td>{{ node.station or '-' }}</td>
+            <td>{{ node.desc }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif result.ok %}
+    <div class="muted">这次没返回轨迹节点（单号可能有误，或该接口还没在菜鸟控制台订阅）。</div>
+  {% else %}
+    <div class="note danger" role="alert"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> {{ result.msg }}</div>
+  {% endif %}
+  <div class="btn-row" style="margin-top:10px">
+    <a class="btn" href="/orders/{{ order.id }}/shipping">刷新轨迹</a>
+    {% if order.return_tracking_no %}
+      <a class="btn" href="/orders/{{ order.id }}/tracking?on_return=1">查退回件轨迹</a>
+    {% endif %}
+    {% if result.status and result.status != order.tracking_status %}
+      <form method="post" action="/orders/{{ order.id }}/tracking/apply" style="display:inline">
+        <input type="hidden" name="status" value="{{ result.status }}">
+        <input type="hidden" name="on_return" value="0">
+        <button class="btn primary">同步为「{{ tracking_labels.get(result.status, result.status) }}」</button>
+      </form>
+      <span class="muted">同步只补事实（比如已签收 → 已收货），人工标记过的不覆盖。</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>发货操作日志</h2>
+  {% if logs %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:160px">时间</th><th style="width:120px">动作</th><th>说明</th><th style="width:120px">操作人</th></tr></thead>
+        <tbody>
+        {% for row in logs %}
+          <tr>
+            <td class="mono nowrap">{{ human_time(row.created_at) }}</td>
+            <td>{{ row.action }}</td>
+            <td>{{ row.detail or '-' }}</td>
+            <td class="muted">{{ operator_label(row) if operator_label else (row.operator or '系统') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="muted">还没有发货相关的操作记录（推单、回填 / 修改物流单号会出现在这里）。</div>
+  {% endif %}
+</div>
+{% endblock %}

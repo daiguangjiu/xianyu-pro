@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}退单待办{% endblock %}
+{% block heading %}退单待办{% endblock %}
+{% block sub %}还没关闭的退单：按「这一步还没做」分组，一组一个动作{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="chips">
+    <span class="chip big">未关闭退单：<b>{{ total }}</b></span>
+    <span class="chip big">涉及金额：<b>¥{{ money(total_amount) }}</b></span>
+    <span class="chip big {% if closable %}warn{% else %}ok{% endif %}">可以关了：<b>{{ closable }}</b></span>
+  </div>
+  <div class="note muted">
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    <span>分组按「这条路径上第一个还没做的步骤」排 —— 先要做的排在前面。
+      能一键做的步骤这里直接点按钮（会记上时间与操作人），要填金额或备注的点订单号进详情。</span>
+  </div>
+</div>
+
+{% for g in groups %}
+<div class="card">
+  <h2>{{ loop.index }}. {{ g.title }}（{{ g.count }} 笔 · ¥{{ money(g.amount) }}）</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>订单号</th>
+          <th>客户</th>
+          <th>金额</th>
+          <th>路径</th>
+          <th>识别时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in g.rows %}
+        <tr>
+          <td class="src"><a href="/orders/{{ r.id }}#refund">{{ r.order_no }}</a></td>
+          <td>{{ r.customer }}{% if r.phone %} <span class="muted">{{ r.phone }}</span>{% endif %}</td>
+          <td>¥{{ money(r.amount) }}</td>
+          <td class="muted">{{ r.path_label }}</td>
+          <td class="muted">{% if r.at %}{{ human_time(r.at) }}{% else %}-{% endif %}</td>
+          <td>
+            {% if g.key == 'stopped' %}
+            <form method="post" action="/orders/{{ r.id }}/refund/stopped" class="inline-form">
+              <input type="text" name="note" placeholder="备注（可选）">
+              <button class="btn primary sm" data-confirm="确认已经叫停了？">标记已叫停</button>
+            </form>
+            {% elif g.key == 'return_received' %}
+            <form method="post" action="/orders/{{ r.id }}/refund/return-received" class="inline-form">
+              <button class="btn primary sm" data-confirm="确认已经收到客户寄回的货？">标记已收到退回件</button>
+            </form>
+            {% elif g.key == 'closable' %}
+            <a class="btn primary sm" href="/orders/{{ r.id }}#refund">去关闭完成</a>
+            {% else %}
+            <a class="btn sm" href="/orders/{{ r.id }}#refund">去处理</a>
+            {% endif %}
+            {% if r.missing %}
+            <div class="muted" style="font-size:12px">还缺：{{ r.missing | join('、') }}</div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endfor %}
+
+{% if not groups %}
+<div class="card">
+  <div class="note muted"><i class="bi bi-check2-circle" aria-hidden="true"></i>
+    <span>没有待处理的退单：所有退单都关闭完成了。</span></div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="btn-row">
+    <a class="btn" href="/refund-health"><i class="bi bi-heart-pulse" aria-hidden="true"></i> 退单数据体检</a>
+    <a class="btn" href="/orders?refund=pending">去看待拦截的退单</a>
+    <a class="btn" href="/orders">返回订单管理</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,612 @@
+{# 商品详情：以「新增商品」的字段为基准 —— 商品属性 / 图片 / 类目 / 详情 / 商品信息 / 规格库存 /
+   价格库存 / 物流售后 一共 8 组，未填的显示「—」，不再混入新建时没有的字段（那些收进「其它信息」折叠区）。 #}
+{% extends "base.html" %}
+{% block title %}{{ product.name }}{% endblock %}
+{% block heading %}{{ product.name }}{% endblock %}
+{% block sub %}{{ product.code or product.id }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/products">返回商品列表</a>
+{% endblock %}
+{% block content %}
+
+{# 商品名下面只留这一行：来源 / 类目 / 审核 / 上架 / 编码 #}
+<div class="detail-page-head">
+  <div class="chip-row">
+    {% if (product.source_type or 'self_operated') == 'self_operated' %}
+      <span class="src-badge self"><i class="bi bi-patch-check-fill"></i> 自营商品</span>
+    {% else %}
+      <span class="src-badge third"><i class="bi bi-truck"></i> 供应链商品{% if product.supplier_name %} · {{ product.supplier_name }}{% endif %}</span>
+    {% endif %}
+    {% if product.category %}<span class="badge bg-light" title="类目"><i class="bi bi-tag"></i> {{ product.category }}</span>{% endif %}
+    {% if product.audit_status == 'approved' %}<span class="badge badge-audit-approved">已通过</span>
+    {% elif product.audit_status == 'pending' %}<span class="badge badge-audit-pending">待审核</span>
+    {% elif product.audit_status == 'rejected' %}<span class="badge badge-audit-rejected" title="{{ product.audit_note }}">已驳回</span>
+    {% else %}<span class="badge badge-audit-draft">草稿</span>{% endif %}
+    {% if product.status == 'on_sale' %}<span class="badge badge-status-on">在售</span>
+    {% elif product.status == 'off_sale' %}<span class="badge badge-status-off">已下架</span>
+    {% else %}<span class="badge bg-light">未上架</span>{% endif %}
+    <span class="mono-sm text-secondary">{{ product.code or ('#' + product.id | string) }}</span>
+  </div>
+</div>
+
+<div class="detail-grid">
+  {# ==================== 左栏 ==================== #}
+  <div>
+    {# —— 0 商品属性（自营 / 供应链）+ 类目 + 编码 + 上架状态 —— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-diagram-2"></i> 商品属性</div>
+        <div class="kv-grid">
+          <div class="kv"><span class="k">商品属性</span><span class="v">{{ source_label(product) or '自营商品' }}</span></div>
+          <div class="kv"><span class="k">对应供应链</span><span class="v">{{ product.supplier_name or '—' }}</span></div>
+          <div class="kv"><span class="k">商品类目</span><span class="v">{{ product.category or '—' }}</span></div>
+          <div class="kv"><span class="k">商家编码</span><span class="v mono-sm">{{ product.code or '—' }}</span></div>
+          <div class="kv"><span class="k">上架状态</span><span class="v">{{ status_label(product) or '未上架' }}</span></div>
+          <div class="kv"><span class="k">审核状态</span><span class="v">{{ audit_label(product) or '草稿' }}{% if product.audit_note %}（{{ product.audit_note }}）{% endif %}</span></div>
+          {# 在售闲鱼号是**统计值**（这款货铺在几个闲鱼号上卖），不是手填字段 #}
+          <div class="kv"><span class="k">在售闲鱼号</span>
+            <span class="v">
+              {% if stat.live_shops.on_sale %}
+                <b>{{ stat.live_shops.count }}</b> 个
+                {% if stat.live_shops.names %}
+                  <span class="text-secondary small">{{ stat.live_shops.names | join('、') }}{% if stat.live_shops.count > stat.live_shops.names | length %} 等{% endif %}</span>
+                {% endif %}
+              {% else %}
+                <span class="text-secondary">0 个（未上架）</span>
+              {% endif %}
+            </span>
+          </div>
+          <div class="kv"><span class="k">最近上架</span><span class="v">{{ human_time(product.listed_at) if product.listed_at else '—' }}</span></div>
+        </div>
+        <p class="help" style="margin-top:var(--s-2)">
+          <i class="bi bi-info-circle"></i>
+          在售闲鱼号按「近 {{ stat.live_shops.days }} 天出过这款商品订单的闲鱼号」统计（不含已撤回订单）。
+        </p>
+      </div>
+    </section>
+
+    {# —— 1 商品图片（主图 + 图集）—— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-images"></i> 商品图片
+          {% if gallery %}<span class="sub">共 {{ gallery | length }} 张（主图 + 图集）</span>{% endif %}
+        </div>
+        {% if gallery %}
+        <div class="detail-gallery">
+          {# 主图默认取第一张（主图没维护时自动用图集第一张），点下面的缩略图可切换；
+             大图右下角带「第几张 / 共几张」角标，切到哪张一眼看得出 #}
+          <div class="detail-main-img" id="galleryMain">
+            <img src="{{ gallery[0] }}" alt="{{ product.name }}" onerror="this.parentNode.classList.add('is-broken')">
+            <span class="img-index" id="galleryIndex">1/{{ gallery | length }}</span>
+          </div>
+          {% if gallery | length > 1 %}
+          <div class="detail-thumbs" id="galleryThumbs">
+            {% for url in gallery %}
+              <img src="{{ url }}" alt="" loading="lazy" data-src="{{ url }}"
+                   class="{{ 'active' if loop.first }}" title="点击切换主图"
+                   onclick="switchMainImage(this)" onerror="this.style.display='none'">
+            {% endfor %}
+          </div>
+          {% endif %}
+        </div>
+        {% else %}
+        <div class="note muted" style="margin:0">
+          <i class="bi bi-image"></i> 还没有图片：在下面「编辑商品资料 → 商品图片」里上传或贴图片地址。
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    {# —— 4 商品信息（标题 / 卖点 / 编码 / 发货时效）—— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-card-text"></i> 商品信息</div>
+        {# 字段与「新建商品 → 商品信息」一一对应：标题 / 卖点 / 品牌 / 商家编码 / 承诺发货时效 #}
+        <div class="kv-grid">
+          <div class="kv"><span class="k">商品标题</span><span class="v">{{ product.name }}</span></div>
+          <div class="kv"><span class="k">品牌</span><span class="v">{{ product.brand or '—' }}</span></div>
+          <div class="kv"><span class="k">商家编码</span><span class="v mono-sm">{{ product.code or '—' }}</span></div>
+          <div class="kv"><span class="k">承诺发货时效</span><span class="v">{{ product.delivery_days or '—' }} 天</span></div>
+        </div>
+        <div class="detail-extra" style="margin-top:var(--s-3)">
+          <span class="k text-secondary small">卖点</span>
+          {% if product.selling_point_list %}
+            {% for point in product.selling_point_list %}<span class="ftag info">{{ point }}</span>{% endfor %}
+          {% else %}<span class="text-secondary">—</span>{% endif %}
+        </div>
+        {# 商品标签：固定标签（发布时勾选，上架到渔货栈时同步过去） #}
+        <div class="detail-extra" style="margin-top:var(--s-2)">
+          <span class="k text-secondary small">商品标签</span>
+          {% if product.tag_list %}
+            {% for tag in product.tag_list %}<span class="ftag {{ tag_kinds.get(tag, 'info') }}">{{ tag }}</span>{% endfor %}
+          {% else %}<span class="text-secondary">—</span>{% endif %}
+        </div>
+        <p class="help" style="margin-top:6px;">
+          固定标签由人工在发布 / 编辑页勾选，上架到渔货栈时同步过去；
+          「直降 x 元 / 高毛利 x% / 今日上新」这类动态标签由渔货栈按商品数据自动算，不进商品资料。
+        </p>
+      </div>
+    </section>
+
+    {# —— 规格 · 价格 · 库存（价格与库存跟着 SKU 走，合成一块展示）—— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-box-seam"></i> 规格 · 价格 · 库存
+          <span class="sub">共 {{ sku_count }} 个规格 · 价格与库存跟着 SKU 走</span>
+        </div>
+        {# 商品级价格：SKU 行没单独填时的默认值；**留空的不显示**（不显示 ¥0.00 这种假数据） #}
+        <div class="kv-grid">
+          {% if product.cost_amount %}<div class="kv"><span class="k">成本价</span><span class="v">¥{{ money(product.cost_amount) }}</span></div>{% endif %}
+          {% if product.fish_price %}<div class="kv"><span class="k">渔货价</span><span class="v"><b>¥{{ money(product.fish_price) }}</b></span></div>{% endif %}
+          {% if product.price %}<div class="kv"><span class="k">建议售价</span><span class="v"><b>¥{{ money(product.price) }}</b></span></div>{% endif %}
+          {% if product.original_price %}<div class="kv"><span class="k">市场价（划线价）</span><span class="v">¥{{ money(product.original_price) }}</span></div>{% endif %}
+          {# 总库存 = 各规格库存之和；一个都没填（0）就不显示 #}
+          {% if product.stock and product.stock > 0 %}<div class="kv"><span class="k">总库存</span><span class="v">{{ product.stock }}</span></div>{% endif %}
+        </div>
+        {% if not (product.cost_amount or product.fish_price or product.price or product.original_price) %}
+        <p class="note muted" style="margin:var(--s-3) 0 0">商品级价格还没填 —— 价格都跟着规格走，下面规格表里逐行填。</p>
+        {% endif %}
+        <p class="help" style="margin:var(--s-3) 0 0">
+          <i class="bi bi-info-circle"></i>
+          成本口径统一走渔货价：毛利 = 售价 − 渔货价（没填渔货价时回落成本价）。
+        </p>
+        {% if product.spec_def_list %}
+        <div class="detail-extra" style="margin-top:var(--s-3)">
+          {% for d in product.spec_def_list %}
+            {# 用 d['values'] 取值：d.values 在 Jinja 里会命中 dict 的 values 方法 #}
+            <span class="ftag info">{{ d.name }}：{{ d['values'] | join(' / ') }}</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if skus %}
+        <div class="table-responsive" style="margin-top:var(--s-3)">
+          <table class="table">
+            <thead>
+              <tr><th>规格</th><th>SKU 编码</th><th class="text-end">成本价</th><th class="text-end">渔货价</th>
+                  <th class="text-end">建议售价</th><th class="text-end">市场价</th><th class="text-end">库存</th></tr>
+            </thead>
+            <tbody>
+            {% for s in skus %}
+              <tr>
+                <td><b>{{ s.spec }}</b></td>
+                <td class="mono-sm">{{ s.sku_code or '—' }}</td>
+                <td class="text-end mono-sm">{{ ('¥' + money(s.cost_amount)) if s.cost_amount else '—' }}</td>
+                <td class="text-end mono-sm">{{ ('¥' + money(s.fish_price)) if s.fish_price else '—' }}</td>
+                <td class="text-end mono-sm">{{ ('¥' + money(s.price)) if s.price else '—' }}</td>
+                <td class="text-end mono-sm">{{ ('¥' + money(s.market_price)) if s.market_price else '—' }}</td>
+                <td class="text-end mono-sm">{% if s.stock >= 0 %}{{ s.stock }}{% else %}—{% endif %}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <p class="note muted" style="margin-top:var(--s-3)">还没有规格。可以按「颜色: 黑, 白」这种写法一次生成组合，也可以单独加一条。</p>
+        {% endif %}
+        <p class="help" style="margin:var(--s-3) 0 0">
+          <i class="bi bi-info-circle"></i>
+          规格只在编辑页里维护（点右下角「编辑商品资料」）—— 这里是查看页，只做展示；
+          SKU 编码由商家编码派生（<code>{{ product.code or '—' }}</code>-01 / -02…）。
+        </p>
+        <div class="stat-row" style="margin-top:var(--s-3)">
+          {# 空的价格不显示（不显示 ¥0.00），下面几项只在有值时才出现 #}
+          {% if product.cost_amount %}
+          <div class="stat-box" title="成本价：对供应链的采购价（内部对账用）"><span class="l">成本价</span><b class="n">¥{{ money(product.cost_amount) }}</b></div>
+          {% endif %}
+          {% if product.cost_amount or product.fish_price %}
+          <div class="stat-box" title="毛利 = 售价 − 渔货价（没填渔货价时回落成本价）"><span class="l">单件毛利</span><b class="n">¥{{ money(stat.unit_profit) }}</b></div>
+          <div class="stat-box"><span class="l">利润率</span><b class="n">{{ '%.0f' | format(stat.unit_rate * 100) }}%</b></div>
+          {% endif %}
+          <div class="stat-box"><span class="l">累计毛利</span><b class="n">¥{{ money(stat.profit) }}</b></div>
+        </div>
+        <div class="stat-row" style="margin-top:var(--s-2)">
+          <div class="stat-box"><span class="l">已预占</span><b class="n">{{ stat.reserved }}</b></div>
+          <div class="stat-box"><span class="l">可售</span><b class="n">{% if stat.available is not none %}{{ stat.available }}{% else %}—{% endif %}</b></div>
+        </div>
+        <div class="note muted" style="margin:var(--s-3) 0 0">
+          <i class="bi bi-graph-up"></i>
+          已成交 <b>{{ stat.orders }}</b> 单 / <b>{{ stat.quantity }}</b> 件{% if stat.last_at %} · 最近一单 {{ human_time(stat.last_at) }}{% endif %}
+          · 累计销售额 ¥{{ money(stat.sale) }} · 累计成本 ¥{{ money(stat.cost) }}
+        </div>
+      </div>
+    </section>
+
+    {# —— 6 物流与售后 —— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-truck"></i> 物流与售后
+          <span class="sub">字段与「新建商品 → 运费与售后」一致</span>
+        </div>
+        <div class="kv-grid">
+          <div class="kv"><span class="k">运费模板</span><span class="v">{{ product.freight_template or '—' }}</span></div>
+          <div class="kv"><span class="k">发货方式</span><span class="v">{{ shipping_label(product) or '—' }}</span></div>
+          <div class="kv"><span class="k">默认运费</span><span class="v">{% if product.shipping_fee %}¥{{ money(product.shipping_fee) }}{% else %}<span class="text-secondary">包邮 / 未填</span>{% endif %}</span></div>
+          <div class="kv"><span class="k">售后政策</span><span class="v">{{ product.after_sale or '—' }}</span></div>
+        </div>
+      </div>
+    </section>
+
+    {# —— 3 商品详情（多组文案分段 + 详情图每 9 张一组）—— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-file-richtext"></i> 商品详情
+          <span class="sub">
+            {% if detail_block_count %}文案 {{ detail_block_count }} 组{% else %}还没填文案{% endif %}
+            {% if detail_image_count %} · 详情图 {{ detail_image_count }} 张{% if detail_image_groups | length > 1 %}（每 {{ detail_image_group_size }} 张一组，共 {{ detail_image_groups | length }} 组）{% endif %}{% endif %}
+          </span>
+        </div>
+        {% for block in detail_blocks %}
+        <div class="detail-group">
+          <div class="detail-group-hd"><i class="bi bi-file-text"></i> {{ block.title }}</div>
+          {# 详情排版：纯文本按录入的换行 / 空行 / 图标展示，写了 HTML 标签才按 HTML 渲染 #}
+          <div class="detail-html">{{ block.content | detail_rich | safe }}</div>
+        </div>
+        {% endfor %}
+        {% for group in detail_image_groups %}
+        {# 详情图一组 = 一张居中大图（右下角 x/x 角标）+ 下面一排缩略图，与「商品图片」同一套看法 #}
+        <div class="detail-group">
+          <div class="detail-group-hd"><i class="bi bi-images"></i> 详情图 第 {{ loop.index }} 组
+            <span class="sub">共 {{ group | length }} 张 · 点下面的缩略图切换</span>
+          </div>
+          <div class="detail-gallery">
+            <div class="detail-main-img" id="detailMain{{ loop.index }}">
+              <img src="{{ group[0] }}" alt="详情图 第 {{ loop.index }} 组" loading="lazy"
+                   onerror="this.parentNode.classList.add('is-broken')">
+              <span class="img-index">1/{{ group | length }}</span>
+            </div>
+            {% if group | length > 1 %}
+            <div class="detail-thumbs" id="detailThumbs{{ loop.index }}">
+              {% for url in group %}
+                <img src="{{ url }}" alt="" loading="lazy" data-src="{{ url }}"
+                     class="{{ 'active' if loop.first }}" title="第 {{ loop.index }} 张"
+                     onclick="switchGroupImage(this, 'detailMain{{ loop.index }}')" onerror="this.style.display='none'">
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endfor %}
+        {% if not detail_blocks and not detail_image_groups %}
+        <div class="note muted" style="margin:0"><i class="bi bi-file-richtext"></i> 还没填详情描述：点右下角「编辑商品资料」补上（支持纯文本换行排版，也支持 HTML，可写好几组文案）。</div>
+        {% endif %}
+      </div>
+    </section>
+
+    {# —— 供应商友情提示（渔货栈特色：给自营团队选品 / 经营做参考）—— #}
+    <section class="card detail-section">
+      <div class="card-body">
+        <div class="sec-title">
+          <i class="bi bi-chat-left-quote"></i> 供应商友情提示
+          <span class="sub">渔货栈特色信息 · 给自营团队选品与经营做参考</span>
+        </div>
+        {% if product.supplier_tip %}
+        <div class="supplier-tip" style="white-space:pre-wrap;line-height:1.75;background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 12px;border-radius:6px;">{{ product.supplier_tip }}</div>
+        {% else %}
+        <div class="note muted" style="margin:0">
+          <i class="bi bi-chat-left-quote"></i>
+          还没填供应商友情提示：在「编辑商品资料 → 商品详情」里补上，
+          比如档口发货时间、同款比价、量小不划算这类经验。
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    {# —— 历史字段：口径调整前填过的值，只读留档，页面已不再维护（有值才显示这块） —— #}
+    {% if product.model or product.weight or product.listing_id or product.listing_url or product.shop_name %}
+    <section class="card detail-section">
+      <details>
+        <summary class="sec-title" style="cursor:pointer;margin:0;">
+          <i class="bi bi-archive"></i> 历史字段（已不再维护）
+          <span class="sub">型号 / 重量 / 闲鱼商品 ID 与链接 / 在售闲鱼号（单值）</span>
+        </summary>
+        <div class="card-body" style="padding-top:var(--s-3);">
+          <div class="kv-grid">
+            {% if product.model %}<div class="kv"><span class="k">型号（老值）</span><span class="v">{{ product.model }}</span></div>{% endif %}
+            {% if product.weight %}<div class="kv"><span class="k">重量（老值）</span><span class="v">{{ money(product.weight) }} kg</span></div>{% endif %}
+            {% if product.shop_name %}<div class="kv"><span class="k">在售闲鱼号（老值）</span><span class="v">{{ product.shop_name }}</span></div>{% endif %}
+            {% if product.listing_id %}<div class="kv"><span class="k">闲鱼商品 ID（老值）</span><span class="v mono-sm">{{ product.listing_id }}</span></div>{% endif %}
+            {% if product.listing_url %}<div class="kv"><span class="k">闲鱼商品链接（老值）</span>
+              <span class="v"><a href="{{ product.listing_url }}" target="_blank" rel="noopener">{{ product.listing_url }}</a></span></div>{% endif %}
+          </div>
+          <p class="help" style="margin-top:var(--s-2)">
+            <i class="bi bi-info-circle"></i>
+            口径已调整：型号 / 重量 / 成色归入「规格与 SKU」（按类目选），在售闲鱼号改为按订单统计的数量，
+            闲鱼商品 ID 与链接不再维护 —— 这里只留历史值备查。
+          </p>
+        </div>
+      </details>
+    </section>
+    {% endif %}
+
+  </div>
+
+  {# ==================== 右栏：上架到渔货栈 ==================== #}
+  <aside class="detail-sticky">
+    <section class="card">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-shop"></i> 上架到渔货栈</div>
+
+        <div style="display: flex; flex-direction: column; gap: var(--s-2);">
+          <form method="post" action="/products/{{ product.id }}/sourcing-publish" style="display:block;">
+            <button class="btn btn-primary btn-block">
+              <i class="bi bi-box-arrow-in-down"></i>
+              {% if sourcing_status.listed %}更新渔货栈资料{% else %}上架到渔货栈{% endif %}
+            </button>
+          </form>
+          {% if sourcing_status.listed %}
+          <form method="post" action="/products/{{ product.id }}/sourcing-unpublish" style="display:block;">
+            <button class="btn btn-outline-secondary btn-block">
+              <i class="bi bi-box-arrow-up"></i> 从渔货栈下架
+            </button>
+          </form>
+          {% endif %}
+        </div>
+
+        {# 状态：落在渔货栈哪个类目、什么时候上的 #}
+        <div class="handoff-status" style="margin-top: var(--s-3);">
+          {% if sourcing_status.listed %}
+            <i class="bi bi-check-circle-fill" style="color: var(--c-success-fg, #16a34a);"></i>
+            <span>
+              已在渔货栈上架 ·
+              类目：<b>{{ sourcing_status.category.text or '—' }}</b>
+              {% if sourcing_status.listed_at %}
+                · {{ sourcing_status.listed_at | dt('%Y-%m-%d %H:%M') }}
+              {% endif %}
+              <br>渔货栈商品：<code>{{ sourcing_status.item_id }}</code>
+            </span>
+          {% elif sourcing_status.unlisted_at %}
+            <i class="bi bi-box-arrow-up" style="color: var(--c-warning-fg, #b45309);"></i>
+            <span>
+              已从渔货栈下架 ·
+              {{ sourcing_status.unlisted_at | dt('%Y-%m-%d %H:%M') }}
+              {% if sourcing_status.unlisted_reason %}· {{ sourcing_status.unlisted_reason }}{% endif %}
+              <br>渔货栈会看到这条下架提示 + 下架前的资料快照
+            </span>
+          {% else %}
+            <i class="bi bi-info-circle"></i>
+            <span>
+              还没上架到渔货栈。
+              上架后会落到类目：<b>{{ sourcing_status.category.text or '（类目待确认）' }}</b>
+            </span>
+          {% endif %}
+        </div>
+        {% if not sourcing_status.category_ok %}
+        <div class="handoff-status" style="margin-top:8px;color:var(--c-error-fg);">
+          <i class="bi bi-exclamation-triangle"></i>
+          <span>{{ sourcing_status.category.note }}</span>
+        </div>
+        {% endif %}
+        {# 资料已过期：档案改过但没回传成功，渔货栈那边还是旧资料 —— 点上面的按钮重传一次 #}
+        {% if sourcing_status.stale %}
+        <div class="handoff-status" style="margin-top:8px;color:var(--c-warning-fg, #b45309);">
+          <i class="bi bi-exclamation-triangle-fill"></i>
+          <span>
+            资料已过期：这份档案刚改过、还没回传到渔货栈，渔货栈看到的还是旧资料
+            （标题 / 图片 / 价格 / 库存可能都对不上）。点上面的「更新渔货栈资料」重传一次。
+          </span>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-body">
+        <div class="sec-title"><i class="bi bi-shop-window"></i> 渔货栈上架预览
+          <span class="sub">共 {{ package.skus | length }} 个规格 · 上架后渔货栈看到的就是这份资料</span>
+        </div>
+        <div class="prefill-grid">
+          <div class="prefill-item">
+            <span class="k">标题</span>
+            <span class="v">{{ package.title or '—' }}</span>
+            <span class="hint">{{ package.title_length }}/{{ package.title_limit }} 字{% if package.title_length > package.title_limit %} · 超长，上架前要删短{% endif %}</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">发布价</span>
+            <span class="v mono">{% if package.price %}¥{{ money(package.price) }}{% else %}<span class="text-secondary">未填</span>{% endif %}</span>
+            <span class="hint">{% if package.original_price %}划线价 ¥{{ money(package.original_price) }}{% else %}没填划线价{% endif %}</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">库存</span>
+            <span class="v mono">{{ package.stock_text }}</span>
+            <span class="hint">{{ package.skus | length }} 个规格</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">图片</span>
+            <span class="v mono">{{ package.images | length }} 张</span>
+            <span class="hint">主图 + 图集{% if not package.images %} · 还没图片{% endif %}</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">详情文案</span>
+            <span class="v mono">{{ package.detail_block_count or 0 }} 组</span>
+            <span class="hint">{% if package.detail_block_count %}按顺序拼成一份描述{% else %}还没写文案{% endif %}</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">详情图</span>
+            <span class="v mono">{{ package.detail_image_count or 0 }} 张</span>
+            <span class="hint">{% if package.detail_image_count %}每 {{ package.detail_image_group_size }} 张一组，共 {{ package.detail_image_groups }} 组{% else %}没有详情图{% endif %}</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">建议类目</span>
+            <span class="v">{{ package.category_text or '—' }}</span>
+            <span class="hint">上架后落到渔货栈这个类目</span>
+          </div>
+          <div class="prefill-item">
+            <span class="k">发货 / 售后</span>
+            <span class="v">{{ package.delivery or '—' }}</span>
+            <span class="hint">{{ package.freight or '运费未填' }} · {{ package.after_sale or '售后未填' }}</span>
+          </div>
+        </div>
+
+        <div class="prefill-block">
+          <span class="k">卖点</span>
+          <div class="v">{% for t in package.selling_points %}<span class="ftag info">{{ t }}</span> {% else %}<span class="text-secondary">—</span>{% endfor %}</div>
+        </div>
+
+        {% if package.description %}
+        <details class="prefill-block">
+          <summary><span class="k">描述</span><span class="text-secondary small">渔货栈看到的图文详情</span></summary>
+          <div class="v prefill-desc">{{ package.description }}</div>
+        </details>
+        {% endif %}
+
+        {% if package.skus %}
+        <details class="prefill-block">
+          <summary><span class="k">规格价目</span><span class="text-secondary small">共 {{ package.skus | length }} 个规格 · 渔货价是渔货栈进货价</span></summary>
+          <div class="table-responsive" style="margin-top: var(--s-2);">
+            <table class="table">
+              <thead><tr><th>规格</th><th>SKU 编码</th><th class="text-end">渔货价</th><th class="text-end">建议售价</th>
+                         <th class="text-end">市场价</th><th class="text-end">库存</th></tr></thead>
+              <tbody>
+                {% for s in package.skus %}
+                <tr>
+                  <td>{{ s.spec_name }}</td>
+                  <td class="mono-sm">{{ s.sku_code or '—' }}</td>
+                  {# 留空的价不显示数字（给「—」），不编 ¥0.00 #}
+                  <td class="text-end mono-sm">{{ ('¥' + money(s.fish_price)) if s.fish_price else '—' }}</td>
+                  <td class="text-end mono-sm">{{ ('¥' + money(s.price)) if s.price else '—' }}</td>
+                  <td class="text-end mono-sm">{{ ('¥' + money(s.market_price)) if s.market_price else '—' }}</td>
+                  <td class="text-end mono-sm">{% if s.stock >= 0 %}{{ s.stock }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+        {% endif %}
+      </div>
+    </section>
+
+  </aside>
+</div>
+
+<style>
+  /* 渔货栈上架预览：关键字段两列卡片，明细折叠 */
+  .prefill-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s-2); }
+  .prefill-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px;
+    border: 1px solid var(--c-border); border-radius: 8px; background: var(--c-surface-2, #f8fafc); }
+  .prefill-item .k { font-size: 11px; color: var(--c-text-muted); }
+  /* 备注 / 描述这类长文案：录入时怎么换行就怎么显示，不挤成一行。
+     注意 .hint 不能吃 pre-wrap：模板里的缩进会被当成真换行，卡片上就多出空白行（详情图那格就是这么乱的） */
+  .prefill-item .v, .prefill-block .v { white-space: pre-wrap; line-height: 1.6; }
+  .prefill-item .v { font-size: 13px; word-break: break-word; }
+  .prefill-item { min-width: 0; }
+  .prefill-item .hint {
+    font-size: 11px; line-height: 1.5; color: var(--c-text-subtle, var(--c-text-muted));
+    overflow-wrap: anywhere;
+  }
+  .prefill-item > .k, .prefill-item > .v, .prefill-item > .hint { display: block; }
+  .prefill-block { margin-top: var(--s-2); padding: 8px 10px; border: 1px solid var(--c-border);
+    border-radius: 8px; }
+  .prefill-block > summary { cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
+  .prefill-block .k { font-size: 11px; color: var(--c-text-muted); }
+  .prefill-desc { margin-top: 6px; font-size: 12px; line-height: 1.7;
+    color: var(--c-text-muted); white-space: pre-wrap; max-height: 220px; overflow: auto; }
+
+  /* 右栏自己滚：不用等左边滑到底才看得到「上架到渔货栈」与上架预览 */
+  .detail-sticky {
+    max-height: calc(100vh - var(--topbar-h, 56px) - 24px);
+    overflow-y: auto; overscroll-behavior: contain; padding-right: 2px;
+  }
+  .detail-sticky::-webkit-scrollbar { width: 8px; }
+  .detail-sticky::-webkit-scrollbar-thumb { background: var(--c-border-strong, #cbd5e1); border-radius: 4px; }
+
+  /* 商品详情：一组文案 / 一组详情图，分开看 */
+  .detail-group { border: 1px solid var(--c-border); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: var(--s-3); background: var(--c-surface-2, #f8fafc); }
+  .detail-group:last-child { margin-bottom: 0; }
+  .detail-group-hd { display: flex; align-items: center; gap: 6px;
+    font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+  .detail-group-hd .sub { font-weight: 400; font-size: 12px; color: var(--c-text-muted); }
+
+  /* 商品图片 / 详情图：整块居中，大图右下角带「第几张 / 共几张」角标，下面一排缩略图 */
+  .detail-gallery { align-items: center; }
+  /* 大图框固定成正方形（图没加载出来也不塌成一个点），图片在框里居中 */
+  .detail-main-img { position: relative; width: min(380px, 100%); }
+  .detail-thumbs { justify-content: center; }
+  /* 详情图打不开时给一句对应的话，别复用主图那句提示 */
+  .detail-group .detail-main-img.is-broken::after { content: "这张详情图打不开：检查详情图地址"; }
+  .img-index {
+    position: absolute; right: 10px; bottom: 10px; z-index: 2;
+    padding: 2px 8px; border-radius: 999px;
+    background: rgba(17, 24, 39, .55); color: #fff;
+    font-family: var(--font-mono); font-size: 11px; line-height: 1.7;
+  }
+
+  /* 吸底操作条：查看页只读，改资料去独立编辑页（与「发布商品」同一套表单） */
+  .detail-edit-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    padding: 10px 16px; background: var(--c-surface, #fff);
+    border-top: 1px solid var(--c-border, #e5e7eb); box-shadow: 0 -2px 12px rgba(15, 23, 42, .06); }
+  .detail-edit-bar-inner { max-width: 1180px; margin: 0 auto; display: flex; align-items: center; gap: 12px; }
+  .detail-edit-bar-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .detail-edit-bar-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail-edit-bar-text span { font-size: 12px; color: var(--c-text-muted); }
+  body { padding-bottom: 78px; }
+  @media (max-width: 900px) {
+    /* 手机 / 平板：左栏 + 右栏（上架预览）改单列，右栏不再自己滚 */
+    .detail-grid { grid-template-columns: minmax(0, 1fr); }
+    .detail-sticky { max-height: none; overflow: visible; padding-right: 0; }
+    /* 键值对一行一项：两列在窄屏会把值挤成竖排 */
+    .kv-grid { grid-template-columns: minmax(0, 1fr); }
+    .kv { grid-template-columns: 96px minmax(0, 1fr); }
+    /* 区块标题里的说明很长，允许换行 */
+    .sec-title { flex-wrap: wrap; row-gap: 2px; }
+    .sec-title .sub { flex: 1 1 100%; }
+    /* 卖点这类标签允许换行，别整枚溢出 */
+    .ftag { white-space: normal; }
+    .detail-group-hd { flex-wrap: wrap; }
+    .prefill-grid { grid-template-columns: minmax(0, 1fr); }
+    .prefill-item > .k, .prefill-item > .v, .prefill-item > .hint { display: block; }
+    /* 规格表横向滚动，列不挤成一团 */
+    .table-responsive { -webkit-overflow-scrolling: touch; }
+  }
+  @media (max-width: 720px) {
+    .detail-edit-bar-text span { display: none; }
+    .detail-main-img { width: 100%; }
+    .detail-thumbs img { width: 48px; height: 48px; }
+  }
+</style>
+
+<div class="detail-edit-bar">
+  <div class="detail-edit-bar-inner">
+    <div class="detail-edit-bar-text">
+      <b>{{ product.name }}</b>
+      <span>这是查看页（只读）· 图片 / 类目 / 价格 / 规格 / 详情都在编辑页里改，保存后自动回传渔货栈</span>
+    </div>
+    <a class="btn btn-primary" href="/products/{{ product.id }}/edit">
+      <i class="bi bi-pencil-square"></i> 编辑商品资料
+    </a>
+  </div>
+</div>
+
+<script>
+  var PRODUCT_NAME = {{ product.name | tojson }};
+
+  // 商品图片 / 详情图共用：点缩略图换大图，顺手把右下角的 x/x 角标改掉
+  function pickThumb(thumb, mainId) {
+    var src = thumb.getAttribute('data-src') || thumb.getAttribute('src');
+    var group = thumb.closest('.detail-gallery');
+    var main = document.getElementById(mainId) || (group && group.querySelector('.detail-main-img'));
+    if (!main || !src) { return; }
+    var img = main.querySelector('img');
+    if (!img) {
+      img = document.createElement('img');
+      main.appendChild(img);
+    }
+    img.src = src;
+    img.alt = PRODUCT_NAME;
+    main.classList.remove('is-broken');
+    var box = (group && group.querySelector('.detail-thumbs')) || { querySelectorAll: function () { return [thumb]; } };
+    var thumbs = box.querySelectorAll('img');
+    Array.prototype.forEach.call(thumbs, function (item) {
+      item.classList.toggle('active', item === thumb);
+    });
+    var index = Array.prototype.indexOf.call(thumbs, thumb);
+    var badge = main.querySelector('.img-index');
+    if (badge && index >= 0) { badge.textContent = (index + 1) + '/' + thumbs.length; }
+  }
+
+  function switchMainImage(thumb) { pickThumb(thumb, 'galleryMain'); }
+
+  function switchGroupImage(thumb, mainId) { pickThumb(thumb, mainId); }
+</script>
+{% endblock %}

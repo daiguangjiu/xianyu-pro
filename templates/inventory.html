@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}库存 · 供应链小鱼{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>库存 / 预占看板</h1>
+    <span class="page-subtitle">按 SKU × 渠道聚合</span>
+  </div>
+  {% if kpi.oversold_count > 0 %}
+    <span class="badge bg-danger">
+      <i class="bi bi-exclamation-triangle"></i> {{ kpi.oversold_count }} 个 SKU 已标记超卖
+    </span>
+  {% endif %}
+</div>
+
+{# ====== KPI ====== #}
+<div class="row g-3 mb-4">
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-box-seam icon"></i> SKU 数量</span>
+        <span class="kpi-value">{{ kpi.sku_count }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-archive icon"></i> 总实物库存</span>
+        <span class="kpi-value" style="color: var(--c-primary);">{{ kpi.total_stock }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-hourglass icon"></i> 已预占</span>
+        <span class="kpi-value" style="color: var(--c-warning);">{{ kpi.total_reserved }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-check2-circle icon"></i> 可售</span>
+        <span class="kpi-value" style="color: var(--c-success);">{{ kpi.total_available }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>item_id</th>
+          <th>标题</th>
+          <th>ali_sku_id</th>
+          <th>渠道 SKU</th>
+          <th>渠道</th>
+          <th class="text-end">实物</th>
+          <th class="text-end">预占</th>
+          <th class="text-end">可售</th>
+          <th style="width: 160px;">占用比</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in mappings %}
+          {% set pct = (m.reserved / m.stock * 100) if m.stock else 0 %}
+          {% set ratio_class = 'danger' if m.oversold else ('warn' if pct >= 80 else '') %}
+          <tr>
+            <td><code class="k">{{ m.item_id }}</code></td>
+            <td class="small">{{ m.title[:32] }}{% if m.title|length > 32 %}…{% endif %}</td>
+            <td><code class="k">{{ m.ali_sku_id }}</code></td>
+            <td class="mono-sm">{{ m.channel_sku_id or '—' }}</td>
+            <td><span class="badge bg-light">{{ m.channel }}</span></td>
+            <td class="text-end mono">{{ m.stock }}</td>
+            <td class="text-end mono" style="color: var(--c-warning);">{{ m.reserved }}</td>
+            <td class="text-end mono" style="color: var(--c-success);">{{ m.available }}</td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <div class="ratio-bar flex-grow-1" title="占用比 {{ '%.0f' % pct }}%">
+                  <div class="{{ ratio_class }}" style="width: {{ pct if pct <= 100 else 100 }}%"></div>
+                </div>
+                <small class="mono-sm text-secondary" style="min-width: 36px; text-align: right;">{{ '%.0f' % pct }}%</small>
+              </div>
+            </td>
+            <td>
+              {% if m.oversold %}
+                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle"></i> 超卖</span>
+              {% elif m.available <= 0 %}
+                <span class="badge bg-warning text-dark">售罄</span>
+              {% else %}
+                <span class="badge bg-success">正常</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="10" class="text-center text-secondary py-5">暂无 SKU 映射</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="alert alert-success mt-4">
+  <i class="bi bi-shield-check"></i>
+  <div>
+    <strong>预占已可归还</strong>：PO 标记失败（<code class="k">POST /api/v1/purchase/{id}/mark-failed</code>）时
+    会按 <code class="k">(ali_sku_id, channel)</code> 归还本单预占，幂等且并发安全。
+    <small class="d-block mt-1" style="color: var(--c-text-muted);">因此"可售"列会在失败后自动回升，不会因失败单累积而软超卖。</small>
+  </div>
+</div>
+{% endblock %}

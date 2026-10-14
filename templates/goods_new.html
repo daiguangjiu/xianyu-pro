@@ -1,0 +1,1062 @@
+{% extends "base.html" %}
+{% block title %}发布商品 · 渔货栈{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>发布商品</h1>
+    <span class="page-subtitle">
+      自营供应链 · 录入 — 填写左侧表单并实时预览，完成后点右上角「立即上架」
+    </span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <button type="button" class="btn btn-outline-secondary" onclick="submitForm('draft', this)">
+      <i class="bi bi-save"></i> 保存草稿
+    </button>
+    <button type="button" class="btn btn-outline-secondary" onclick="submitForm('audit', this)">
+      <i class="bi bi-shield-check"></i> 提交审核
+    </button>
+    <button type="button" class="btn btn-primary" onclick="submitForm('publish', this)">
+      <i class="bi bi-rocket-takeoff"></i> 立即上架
+    </button>
+  </div>
+</div>
+
+<div class="publish-layout">
+  <form id="publishForm" class="publish-main" autocomplete="off" onsubmit="return false">
+    <input type="hidden" name="source_type" value="self_operated">
+
+    {# —— 步骤 1 · 商品类目 —— #}
+    <section class="form-section">
+      <header><span class="step">1</span> 商品类目</header>
+      <div class="section-body">
+        <div class="field-row">
+          <div class="field">
+            <label>一级类目 <span class="req">*</span></label>
+            <select id="cat1" onchange="onCat1Change()">
+              <option value="">请选择一级类目</option>
+              {% for cat in categories %}
+                <option value="{{ cat.id }}">{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>二级类目 <span class="req">*</span></label>
+            <select id="cat2" name="category_id" disabled onchange="onCat2Change()">
+              <option value="">请先选择一级类目</option>
+            </select>
+          </div>
+        </div>
+        <p class="help" id="catHint">
+          选择类目后会按该类目自动套用推荐规格模板
+        </p>
+        {# 类目特性规则：渔枢系统「类目管理」维护的经验提示（不影响类目显示） #}
+        <div class="cat-rules" id="catRulesBox" hidden></div>
+      </div>
+    </section>
+
+    {# —— 步骤 2 · 商品信息 —— #}
+    <section class="form-section">
+      <header><span class="step">2</span> 商品信息</header>
+      <div class="section-body">
+        <div class="field">
+          <label>商品标题 <span class="req">*</span> <span class="counter" id="titleCnt">0 / 60</span></label>
+          <div class="title-row">
+            <input type="text" name="title" id="titleInput" maxlength="60"
+                   placeholder="品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词（填满30字）"
+                   oninput="syncPreview()">
+            <button type="button" class="btn btn-sm btn-outline-secondary ai-btn" id="aiTitleBtn"
+                    onclick="suggestTitles()">
+              <i class="bi bi-magic"></i> AI 生成渔货商品标题
+            </button>
+          </div>
+          <p class="help">
+            品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词（填满30字）——
+            词库来自渔枢系统「类目管理 → 类目特性规则」，闲鱼标题上限 30 字
+          </p>
+          <div class="ai-title-box" id="aiTitleBox" hidden></div>
+        </div>
+        <div class="field">
+          <label>卖点（消费者展示）</label>
+          <textarea name="selling_points" id="sellingInput" rows="2" maxlength="200"
+                    placeholder="3 - 5 个短句，每句不超过 20 字"
+                    oninput="syncPreview()"></textarea>
+        </div>
+        <div class="field-row three">
+          <div class="field">
+            <label>品牌</label>
+            <input type="text" name="brand" id="brandInput" placeholder="选填，如 苹果 / 罗技 / 蕉内" maxlength="64"
+                   oninput="syncPreview()">
+            <p class="help">可以不填；型号 / 成色 / 重量属于规格，在下面的「规格与库存」里按类目挑</p>
+          </div>
+          <div class="field">
+            <label>商家编码（内部编号 / SKU 前缀）</label>
+            <input type="text" name="item_code" id="itemCodeInput" placeholder="留空自动生成" maxlength="64">
+            <p class="help">自动生成：YHZ + 一二三级类目简拼 + 日期 + 4 位流水号<br>
+              当前预览 <code id="codePreview">—（选完类目后显示）</code></p>
+          </div>
+          <div class="field">
+            <label>承诺发货时效</label>
+            <select name="delivery_days" id="deliveryInput" onchange="syncPreview()">
+              <option value="1">24 小时内发货</option>
+              <option value="2" selected>48 小时内发货</option>
+              <option value="3">72 小时内发货</option>
+              <option value="7">7 天内发货</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 3 · 商品图片 —— #}
+    <section class="form-section">
+      <header>
+        <span class="step">3</span> 商品图片
+        <span class="hint">建议 1:1、800×800 以上，第一张为封面；最多 9 张，建议铺满 9 张并覆盖不同细节（正面 / 细节 / 尺寸 / 包装）</span>
+      </header>
+      <div class="section-body">
+        <div class="image-grid" id="mainImageGrid"></div>
+        <div class="image-add">
+          <input type="text" id="mainImageInput" placeholder="或粘贴主图 URL，回车添加">
+          <input type="file" id="mainImageFile" accept="image/*" multiple hidden
+                 onchange="uploadMainFiles(this.files)">
+          <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('mainImageFile').click()">
+            <i class="bi bi-upload"></i> 本地上传主图
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addMainImage()">
+            <i class="bi bi-plus"></i> 添加主图
+          </button>
+        </div>
+        <details style="margin-top: var(--s-4);">
+          <summary class="text-secondary" style="cursor:pointer;">
+            <i class="bi bi-images"></i> 图文详情图（最多 20 张，可选）
+          </summary>
+          <div class="image-grid mt-3" id="detailImageGrid"
+               style="grid-template-columns: repeat(4, minmax(0,1fr));"></div>
+          <div class="image-add mt-2">
+            <input type="text" id="detailImageInput" placeholder="或粘贴图片 URL，回车添加">
+            <input type="file" id="detailImageFile" accept="image/*" multiple hidden
+                   onchange="uploadDetailFiles(this.files)">
+            <button type="button" class="btn btn-sm btn-primary" onclick="document.getElementById('detailImageFile').click()">
+              <i class="bi bi-upload"></i> 本地上传详情图
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addDetailImage()">
+              <i class="bi bi-plus"></i> 添加详情图
+            </button>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    {# —— 步骤 4 · 规格与库存 —— #}
+    <section class="form-section">
+      <header>
+        <span class="step">4</span> 规格与库存
+        <span class="hint">添加规格 → 系统自动生成 SKU 矩阵</span>
+      </header>
+      <div class="section-body">
+        <div id="specEditor"></div>
+        <div class="d-flex gap-2 flex-wrap mt-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" onclick="addSpecRow()">
+            <i class="bi bi-plus-lg"></i> 添加规格
+          </button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="applyTemplate()">
+            <i class="bi bi-stars"></i> 应用规格模板
+          </button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="batchFillSku()">
+            <i class="bi bi-magic"></i> 一键填充价格 / 库存
+          </button>
+        </div>
+        <div style="margin-top: var(--s-3);">
+          <table class="sku-table" id="skuTable">
+            <thead>
+              <tr>
+                <th>规格组合</th>
+                <th style="width: 140px;">价格</th>
+                <th style="width: 120px;">库存</th>
+                <th>SKU 编码</th>
+                <th style="width: 32px;"></th>
+              </tr>
+            </thead>
+            <tbody id="skuTableBody"></tbody>
+          </table>
+          <div class="sku-empty" id="skuEmpty">
+            添加规格后在这里生成 SKU；留空则自动使用「默认规格」一条
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 5 · 价格与库存 —— #}
+    <section class="form-section">
+      <header><span class="step">5</span> 价格与库存</header>
+      <div class="section-body">
+        <div class="field-row four">
+          <div class="field">
+            <label>渔货价<span class="req">*</span></label>
+            <input type="number" name="fish_price" id="fishInput" min="0" step="0.01"
+                   placeholder="0.00" oninput="syncPreview()">
+            <p class="help">
+              渔货栈这边只有一个价：<b>渔货价</b>，它就是学员的进货价（成本），
+              毛利 = 建议零售价 − 渔货价
+            </p>
+          </div>
+          <div class="field">
+            <label>建议售价</label>
+            <input type="number" name="sale_price" id="saleInput" min="0" step="0.01"
+                   placeholder="默认 = 渔货价 × 1.35" oninput="syncPreview()">
+          </div>
+          <div class="field">
+            <label>划线价（市场价）</label>
+            <input type="number" name="market_price" id="marketInput" min="0" step="0.01"
+                   placeholder="用于展示原价" oninput="syncPreview()">
+          </div>
+        </div>
+        <div class="field">
+          <label>总库存 <span class="req">*</span></label>
+          <input type="number" name="stock" id="stockInput" min="0" step="1"
+                 placeholder="未填时自动汇总各 SKU 库存" oninput="syncPreview()"
+                 style="max-width: 240px;">
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 6 · 物流与售后 —— #}
+    <section class="form-section">
+      <header><span class="step">6</span> 物流与售后</header>
+      <div class="section-body">
+        <div class="field-row three">
+          <div class="field">
+            <label>运费模板</label>
+            <select name="freight_template" id="freightInput" onchange="onFreightChange()">
+              <option value="">（按规则自动套用）</option>
+              {% for tpl in freight_templates %}
+                <option value="{{ tpl }}">{{ tpl }}</option>
+              {% endfor %}
+            </select>
+            <p class="help" id="freightHint">留「自动」时按类目规则套用（规则在渔枢系统「货源 · 运费模板」）</p>
+          </div>
+          <div class="field">
+            <label>发货方式（闲鱼）</label>
+            <select name="shipping_mode" id="shippingModeInput" onchange="onShippingModeChange()">
+              <option value="">（按规则自动套用）</option>
+              {% for value, text in shipping_choices %}
+                <option value="{{ value }}">{{ text }}</option>
+              {% endfor %}
+            </select>
+            <p class="help" id="shippingModeHint">邮寄包邮 / 按距离付费 / 固定收费 / 买家自提</p>
+          </div>
+          <div class="field">
+            <label>默认运费</label>
+            <input type="number" name="shipping_fee" id="shippingFeeInput" min="0" step="0.01" placeholder="0.00" value="0">
+            <p class="help">按件运费 / 偏远加收时才填；包邮填 0</p>
+          </div>
+          <div class="field">
+            <label>售后政策</label>
+            <select name="after_sale">
+              {% for opt in after_sale_options %}
+                <option{% if loop.first %} selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {# —— 步骤 7 · 商品详情（图文） —— #}
+    <section class="form-section">
+      <header>
+        <span class="step">7</span> 商品详情（图文）
+        <span class="hint">支持 HTML 标签；详情图在第 3 步</span>
+      </header>
+      <div class="section-body">
+        <div class="field">
+          <label>详情描述</label>
+          <textarea name="detail_html" rows="6"
+                    placeholder="<p>材质、工艺、保养说明…</p>"></textarea>
+        </div>
+        <div class="field">
+          <label>供应商友情提示 <span class="badge">渔货栈特色</span></label>
+          <textarea name="supplier_tip" rows="3"
+                    placeholder="写给自营团队选品 / 经营的提醒，例如：&#10;档口周一到周五发货，急单慎拍&#10;同款别家能压 5 元，量小不建议做"></textarea>
+          <p class="help">只在渔货栈展示，给自营团队选品与经营做参考；不会进闲鱼商品描述</p>
+        </div>
+      </div>
+    </section>
+  </form>
+
+  {# —— 右侧实时预览 —— #}
+  <aside class="publish-side">
+    <div class="preview-card">
+      <header><i class="bi bi-phone"></i> 实时预览</header>
+      <div class="preview-phone">
+        <div class="preview-main" id="previewMain">
+          <i class="bi bi-image"></i>
+        </div>
+      </div>
+      <div class="preview-body">
+        <div class="preview-title empty" id="previewTitle">
+          填写商品标题后会在这里显示
+        </div>
+        <div class="preview-price">
+          <span class="cur">¥</span>
+          <span id="previewPriceVal">—</span>
+          <span class="market" id="previewMarket"></span>
+        </div>
+        <div class="preview-selling" id="previewSelling" style="display:none;"></div>
+        <div class="preview-tags" id="previewTags"></div>
+        <div class="preview-kv" style="margin-top: var(--s-2);">
+          <div class="row"><span>渔货价</span><b id="previewCost">¥—</b></div>
+          <div class="row"><span>总库存</span><b id="previewStock">—</b></div>
+          <div class="row"><span>发货</span><b id="previewDelivery">48 小时内</b></div>
+          <div class="row"><span>来源</span><b style="color: #6D28D9;">自营供应链</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="margin-tip" id="marginTip" style="display:none;">
+      <span>建议毛利</span><span class="m" id="marginVal">—</span>
+    </div>
+
+    <div class="card" style="padding: var(--s-4);">
+      <div class="publish-note-title">
+        <i class="bi bi-info-circle" style="color: var(--c-primary);"></i> 发布说明
+      </div>
+      <p class="note">
+        <span class="src-badge self">自营</span> 商品由本站录入，上架即生效。
+        选择「立即上架」会出现在渔货栈广场并可一键铺货到闲鱼等渠道；
+        「提交审核」会进入待审核队列。
+      </p>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  /* AI 生成标题 / 类目特性规则的局部样式（与渔枢系统同一套观感） */
+  .title-row { display: flex; gap: 8px; align-items: flex-start; }
+  .title-row input { flex: 1; }
+  .ai-btn { white-space: nowrap; }
+  .ai-title-box { margin-top: 8px; border: 1px solid var(--c-border, #e3e6ea); border-radius: 8px; padding: 10px; background: var(--c-surface-2, #fbfcfe); }
+  .ai-title-head { font-size: 12px; color: var(--c-text-muted, #6b7280); margin-bottom: 6px; }
+  .ai-title-item { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; padding: 6px 10px; margin-bottom: 4px; border: 1px solid #e3e6ea; border-radius: 6px; background: #fff; cursor: pointer; font-size: 13px; }
+  .ai-title-item:hover { border-color: #3b82f6; background: #f4f8ff; }
+  .ai-title-item .len { color: #9ca3af; font-size: 12px; white-space: nowrap; }
+  .ai-loading, .ai-empty { font-size: 12px; color: #6b7280; }
+  .cat-rules { margin-top: 8px; border-left: 3px solid #f59e0b; background: #fffbeb; padding: 8px 10px; border-radius: 6px; font-size: 12px; }
+  .cat-rules-head { font-weight: 600; margin-bottom: 4px; }
+  .cat-rules-words { color: #374151; margin-bottom: 4px; }
+  .cat-rules-tip { color: #4b5563; }
+</style>
+<script>
+  var CATEGORIES = {{ categories | tojson }};
+  var SPEC_TEMPLATES = {{ spec_templates | tojson }};
+  var DEFAULT_SPEC = {{ default_spec | tojson }};
+
+  var state = {
+    mainImages: [],
+    detailImages: [],
+    specDefs: [],
+    skus: []
+  };
+
+  // ====================== 类目联动 ======================
+  function onCat1Change() {
+    var v = document.getElementById('cat1').value;
+    var cat2 = document.getElementById('cat2');
+    cat2.innerHTML = '<option value="">请选择二级类目</option>';
+    if (!v) { cat2.disabled = true; document.getElementById('cat2').value = ''; onCat2Change(); return; }
+    var node = CATEGORIES.find(function (c) { return c.id === v; });
+    if (node) {
+      node.children.forEach(function (c) {
+        var opt = document.createElement('option');
+        opt.value = c.id; opt.textContent = c.name;
+        cat2.appendChild(opt);
+      });
+      cat2.disabled = false;
+    }
+    onCat2Change();
+  }
+
+  function onCat2Change() {
+    var cat2 = document.getElementById('cat2').value;
+    var hint = document.getElementById('catHint');
+    if (!cat2) {
+      hint.textContent = '选择类目后会按该类目自动套用推荐规格模板';
+      afterCategoryChange();
+      return;
+    }
+    var tpl = SPEC_TEMPLATES[cat2] || SPEC_TEMPLATES[cat2.split('_')[0]] || DEFAULT_SPEC;
+    hint.innerHTML = '<i class="bi bi-stars"></i> 已为「'
+      + escapeHtml(tpl.map(function (t) { return t.name; }).join(' / '))
+      + '」准备规格，<a href="#" onclick="applyTemplate(); return false;">一键应用</a>';
+    syncPreview();
+    afterCategoryChange();
+  }
+
+  // ====================== 类目驱动的联动（编码 / 经营提示 / 运费与发货方式）======================
+  var shippingTouched = { freight: false, mode: false };
+
+  function afterCategoryChange() {
+    refreshCodePreview();
+    refreshCatRules();
+    refreshShippingDefaults();
+  }
+
+  function apiGet(url) {
+    return fetch(url, { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+  }
+
+  function apiPost(url, payload) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload || {})
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .catch(function () { return null; });
+  }
+
+  // 商家编码预览：YHZ + 一/二/三级类目简拼 + 日期 + 4 位流水号
+  function refreshCodePreview() {
+    var box = document.getElementById('codePreview');
+    if (!box) { return; }
+    var cat = document.getElementById('cat2').value;
+    box.textContent = cat ? '计算中…' : '—（选完类目后显示）';
+    if (!cat) { return; }
+    apiGet('/self/goods/next-code?category_id=' + encodeURIComponent(cat)).then(function (data) {
+      box.textContent = (data && data.code) ? data.code : '—';
+    });
+  }
+
+  // 类目经营提示（渔枢系统「类目管理 → 类目特性规则」维护的经验）
+  function refreshCatRules() {
+    var box = document.getElementById('catRulesBox');
+    var cat = document.getElementById('cat2').value;
+    if (!box) { return; }
+    if (!cat) { box.hidden = true; box.innerHTML = ''; return; }
+    apiGet('/self/goods/category-rules?category_id=' + encodeURIComponent(cat)).then(function (data) {
+      var tips = (data && data.tips) || [];
+      var words = (data && data.words) || {};
+      var lines = Object.keys(words).filter(function (k) { return words[k] && words[k].length; })
+        .map(function (k) { return '<b>' + escapeHtml(k) + '</b>：' + escapeHtml(words[k].join('、')); });
+      if (!tips.length && !lines.length) { box.hidden = true; box.innerHTML = ''; return; }
+      var html = '<div class="cat-rules-head"><i class="bi bi-lightbulb"></i> 类目特性规则'
+        + (data.category ? '（' + escapeHtml(data.category) + '）' : '') + '</div>';
+      if (lines.length) { html += '<div class="cat-rules-words">' + lines.join('；') + '</div>'; }
+      tips.forEach(function (tip) { html += '<div class="cat-rules-tip">· ' + escapeHtml(tip) + '</div>'; });
+      box.innerHTML = html;
+      box.hidden = false;
+    });
+  }
+
+  // 运费模板 / 发货方式：按类目规则预选（运营手动改过就不覆盖）
+  function refreshShippingDefaults() {
+    var cat = document.getElementById('cat2').value;
+    apiGet('/self/goods/shipping-default?category_id=' + encodeURIComponent(cat)).then(function (data) {
+      if (!data) { return; }
+      var freight = document.getElementById('freightInput');
+      var mode = document.getElementById('shippingModeInput');
+      var fee = document.getElementById('shippingFeeInput');
+      var fh = document.getElementById('freightHint');
+      var mh = document.getElementById('shippingModeHint');
+      if (freight && !shippingTouched.freight) {
+        freight.value = data.freight_template || '';
+        if (fee && (!fee.value || +fee.value === 0) && data.freight_fee) { fee.value = data.freight_fee; }
+      }
+      if (mode && !shippingTouched.mode) { mode.value = data.shipping_mode || ''; }
+      if (fh) {
+        fh.textContent = data.freight_rule && data.freight_rule.name
+          ? '已命中规则「' + data.freight_rule.name + '」（' + data.freight_rule.scope + '）'
+          : '留「自动」时按类目规则套用（规则在渔枢系统「货源 · 运费模板」）';
+      }
+      if (mh) {
+        mh.textContent = data.method_rule && data.method_rule.name
+          ? '已命中规则「' + data.method_rule.name + '」（' + data.method_rule.scope + '）'
+          : '邮寄包邮 / 按距离付费 / 固定收费 / 买家自提';
+      }
+    });
+  }
+
+  function onFreightChange() {
+    shippingTouched.freight = true;
+    var freight = document.getElementById('freightInput');
+    var hint = document.getElementById('freightHint');
+    var fee = document.getElementById('shippingFeeInput');
+    if (hint) {
+      hint.textContent = freight && freight.value
+        ? '已手动选择「' + freight.value + '」'
+        : '留「自动」时按类目规则套用';
+    }
+    if (fee && freight && freight.value && freight.value.indexOf('包邮') >= 0) { fee.value = '0'; }
+  }
+
+  function onShippingModeChange() {
+    shippingTouched.mode = true;
+    var mode = document.getElementById('shippingModeInput');
+    var hint = document.getElementById('shippingModeHint');
+    if (hint && mode) {
+      var text = mode.selectedIndex >= 0 ? mode.options[mode.selectedIndex].text : '';
+      hint.textContent = mode.value ? '已手动选择「' + text + '」' : '按类目规则自动套用';
+    }
+  }
+
+  // ====================== AI 生成渔货商品标题（满 30 字）======================
+  function suggestTitles() {
+    var box = document.getElementById('aiTitleBox');
+    var btn = document.getElementById('aiTitleBtn');
+    if (!box) { return; }
+    box.hidden = false;
+    box.innerHTML = '<div class="ai-loading"><i class="bi bi-hourglass-split"></i> 正在按「品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词」生成…</div>';
+    if (btn) { btn.disabled = true; }
+    apiPost('/self/goods/suggest-title', {
+      name: document.getElementById('titleInput').value || '',
+      brand: (document.getElementById('brandInput') || {}).value || '',
+      category_id: document.getElementById('cat2').value || '',
+      selling_points: (document.getElementById('sellingInput') || {}).value || ''
+    }).then(function (data) {
+      if (btn) { btn.disabled = false; }
+      var titles = (data && data.titles) || [];
+      if (!titles.length) {
+        box.innerHTML = '<div class="ai-empty">还没法生成：先填「商品标题」或「品牌」，并选好类目'
+          + '（词库在渔枢系统「类目管理 → 类目特性规则」里维护）</div>';
+        return;
+      }
+      var html = '<div class="ai-title-head">'
+        + (data.has_rule
+          ? '<i class="bi bi-stars"></i> 按类目规则生成'
+          : '<i class="bi bi-info-circle"></i> 该一级类目还没维护特性规则，先用商品信息拼的候选')
+        + '（点一条填入标题，可再改）</div>';
+      titles.forEach(function (item) {
+        html += '<button type="button" class="ai-title-item" onclick="useTitle(this)" data-title="'
+          + escapeHtml(item.title) + '"><span class="t">' + escapeHtml(item.title)
+          + '</span><span class="len">' + item.length + '/30</span></button>';
+      });
+      box.innerHTML = html;
+    });
+  }
+
+  function useTitle(el) {
+    var input = document.getElementById('titleInput');
+    if (!input) { return; }
+    input.value = el.getAttribute('data-title') || '';
+    input.dispatchEvent(new Event('input'));
+    syncPreview();
+  }
+
+  // ====================== 图片管理 ======================
+  function renderMainImages() {
+    var grid = document.getElementById('mainImageGrid');
+    grid.innerHTML = '';
+    var max = MAIN_IMAGE_MAX;
+    for (var i = 0; i < max; i++) {
+      var url = state.mainImages[i];
+      var slot = document.createElement('div');
+      slot.className = 'image-slot' + (url ? ' filled' : '');
+      if (url) {
+        var img = document.createElement('img'); img.src = url;
+        img.onerror = function(){ this.style.display = 'none'; };
+        slot.appendChild(img);
+        if (i === 0) {
+          var cover = document.createElement('div');
+          cover.className = 'slot-cover'; cover.textContent = '封面';
+          slot.appendChild(cover);
+        }
+        var del = document.createElement('button');
+        del.type = 'button'; del.className = 'slot-del';
+        del.innerHTML = '<i class="bi bi-x"></i>';
+        del.onclick = (function (idx) {
+          return function () {
+            state.mainImages.splice(idx, 1);
+            renderMainImages();
+          };
+        })(i);
+        slot.appendChild(del);
+      } else {
+        var hint = document.createElement('div');
+        hint.className = 'slot-hint';
+        hint.innerHTML = '<i class="bi bi-image"></i>主图 ' + (i + 1);
+        slot.appendChild(hint);
+      }
+      grid.appendChild(slot);
+    }
+    syncPreview();
+  }
+
+  var MAIN_IMAGE_MAX = 9;
+  var DETAIL_IMAGE_MAX = 20;
+  function isValidImageUrl(s) {
+    return /^https?:\/\/\S+$/i.test(s);
+  }
+
+  function addMainImage() {
+    var input = document.getElementById('mainImageInput');
+    var url = (input.value || '').trim();
+    if (!url) return;
+    if (!isValidImageUrl(url)) { showToast('请粘贴 http(s):// 开头的图片链接', 'err'); input.focus(); return; }
+    if (state.mainImages.indexOf(url) !== -1) { showToast('这张图已添加过', 'err'); input.focus(); return; }
+    if (state.mainImages.length >= MAIN_IMAGE_MAX) {
+      showToast('主图最多 ' + MAIN_IMAGE_MAX + ' 张', 'err'); return;
+    }
+    state.mainImages.push(url);
+    input.value = '';
+    renderMainImages();
+    showToast('已添加主图 ' + state.mainImages.length + ' / ' + MAIN_IMAGE_MAX, 'ok');
+  }
+
+  function renderDetailImages() {
+    var grid = document.getElementById('detailImageGrid');
+    grid.innerHTML = '';
+    if (state.detailImages.length === 0) {
+      var slot = document.createElement('div');
+      slot.className = 'image-slot';
+      slot.innerHTML = '<div class="slot-hint"><i class="bi bi-image"></i>详情图</div>';
+      grid.appendChild(slot);
+      return;
+    }
+    state.detailImages.forEach(function (url, idx) {
+      var slot = document.createElement('div');
+      slot.className = 'image-slot filled';
+      var img = document.createElement('img'); img.src = url;
+      img.onerror = function(){ this.style.display = 'none'; };
+      slot.appendChild(img);
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'slot-del';
+      del.innerHTML = '<i class="bi bi-x"></i>';
+      del.onclick = (function (i) {
+        return function () { state.detailImages.splice(i, 1); renderDetailImages(); };
+      })(idx);
+      slot.appendChild(del);
+      grid.appendChild(slot);
+    });
+  }
+
+  function addDetailImage() {
+    var input = document.getElementById('detailImageInput');
+    var url = (input.value || '').trim();
+    if (!url) return;
+    if (!isValidImageUrl(url)) { showToast('请粘贴 http(s):// 开头的图片链接', 'err'); input.focus(); return; }
+    if (state.detailImages.indexOf(url) !== -1) { showToast('这张图已添加过', 'err'); input.focus(); return; }
+    if (state.detailImages.length >= DETAIL_IMAGE_MAX) {
+      showToast('详情图最多 ' + DETAIL_IMAGE_MAX + ' 张', 'err'); return;
+    }
+    state.detailImages.push(url);
+    input.value = '';
+    renderDetailImages();
+  }
+
+  function uploadOne(file) {
+    var fd = new FormData();
+    fd.append("file", file);
+    return fetch("/api/v1/upload/image", { method: "POST", body: fd })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+  }
+  function appendMainUrl(url, name) {
+    if (state.mainImages.indexOf(url) !== -1) { showToast("图片已存在，已跳过：" + name, "info"); return; }
+    if (state.mainImages.length >= MAIN_IMAGE_MAX) { showToast("主图最多 " + MAIN_IMAGE_MAX + " 张，已跳过：" + name, "err"); return; }
+    state.mainImages.push(url);
+  }
+  function appendDetailUrl(url, name) {
+    if (state.detailImages.indexOf(url) !== -1) { showToast("图片已存在，已跳过：" + name, "info"); return; }
+    if (state.detailImages.length >= DETAIL_IMAGE_MAX) { showToast("详情图最多 " + DETAIL_IMAGE_MAX + " 张，已跳过：" + name, "err"); return; }
+    state.detailImages.push(url);
+  }
+  function uploadFiles(files, appendUrl, rerender, kind) {
+    if (!files || !files.length) return;
+    var list = Array.prototype.slice.call(files);
+    var done = 0, fail = 0;
+    Promise.all(list.map(function (f) {
+      return uploadOne(f).then(function (r) {
+        if (r.ok && r.d.url) { appendUrl(r.d.url, f.name); done++; }
+        else { fail++; }
+      }).catch(function () { fail++; });
+    })).then(function () {
+      rerender();
+      if (fail) showToast("上传完成：成功 " + done + " 张，失败 " + fail + " 张", "err");
+      else showToast("已上传 " + done + " 张" + kind, "ok");
+    });
+  }
+  function uploadMainFiles(files) {
+    uploadFiles(files, appendMainUrl, renderMainImages, "主图");
+    document.getElementById("mainImageFile").value = "";
+  }
+  function uploadDetailFiles(files) {
+    uploadFiles(files, appendDetailUrl, renderDetailImages, "详情图");
+    document.getElementById("detailImageFile").value = "";
+  }
+
+  // ====================== 规格与 SKU 矩阵 ======================
+  function renderSpecEditor() {
+    var ed = document.getElementById('specEditor');
+    ed.innerHTML = '';
+    if (state.specDefs.length === 0) {
+      var hint = document.createElement('div');
+      hint.className = 'note';
+      hint.textContent = '点击「添加规格」或「应用规格模板」开始；留空时将自动使用「默认规格」创建一条 SKU。';
+      ed.appendChild(hint);
+      rebuildSkus();
+      return;
+    }
+    state.specDefs.forEach(function (def, idx) {
+      var row = document.createElement('div');
+      row.className = 'spec-row';
+
+      var nameWrap = document.createElement('div');
+      nameWrap.className = 'field spec-name';
+      var nameLbl = document.createElement('label');
+      nameLbl.textContent = '规格名';
+      var nameInp = document.createElement('input');
+      nameInp.type = 'text';
+      nameInp.placeholder = '如 颜色';
+      nameInp.value = def.name || '';
+      nameInp.oninput = function () {
+        def.name = nameInp.value;
+        rebuildSkus();
+      };
+      nameWrap.appendChild(nameLbl);
+      nameWrap.appendChild(nameInp);
+
+      var tagBox = document.createElement('div');
+      tagBox.className = 'tag-input';
+      (def.values || []).forEach(function (v, vidx) {
+        var tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.innerHTML = escapeHtml(v)
+          + ' <button type="button" aria-label="删除"><i class="bi bi-x"></i></button>';
+        tag.querySelector('button').onclick = function () {
+          def.values.splice(vidx, 1);
+          rebuildSkus();
+          renderSpecEditor();
+        };
+        tagBox.appendChild(tag);
+      });
+      var tagInput = document.createElement('input');
+      tagInput.type = 'text';
+      tagInput.placeholder = '输入值后回车（如 黑色 / XL）';
+      tagInput.onkeydown = function (e) {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          var v = tagInput.value.trim();
+          if (!v) return;
+          if (!def.values) def.values = [];
+          if (def.values.indexOf(v) === -1) def.values.push(v);
+          tagInput.value = '';
+          rebuildSkus();
+          renderSpecEditor();
+        }
+      };
+      tagBox.appendChild(tagInput);
+
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-sm btn-ghost';
+      delBtn.innerHTML = '<i class="bi bi-trash"></i>';
+      delBtn.onclick = function () {
+        state.specDefs.splice(idx, 1);
+        rebuildSkus();
+        renderSpecEditor();
+      };
+
+      row.appendChild(nameWrap);
+      row.appendChild(tagBox);
+      row.appendChild(delBtn);
+      ed.appendChild(row);
+    });
+    rebuildSkus();
+  }
+
+  function addSpecRow() {
+    state.specDefs.push({ name: '', values: [] });
+    renderSpecEditor();
+  }
+
+  function applyTemplate() {
+    var cat2 = document.getElementById('cat2').value;
+    if (!cat2) { showToast('请先选择类目', 'err'); return; }
+    var tpl = SPEC_TEMPLATES[cat2] || SPEC_TEMPLATES[cat2.split('_')[0]] || DEFAULT_SPEC;
+    state.specDefs = JSON.parse(JSON.stringify(tpl));
+    rebuildSkus();
+    renderSpecEditor();
+    showToast('已套用「' + tpl.map(function (t) { return t.name; }).join(' / ') + '」', 'ok');
+  }
+
+  function cartesian(specs) {
+    var active = specs.filter(function (s) { return s.name && s.values && s.values.length; });
+    if (active.length === 0) return [[]];
+    return active.reduce(function (acc, spec) {
+      var next = [];
+      acc.forEach(function (a) {
+        spec.values.forEach(function (v) {
+          next.push(a.concat([{ name: spec.name, value: v }]));
+        });
+      });
+      return next;
+    }, [[]]);
+  }
+
+  function rebuildSkus() {
+    var matrix = cartesian(state.specDefs);
+    var existing = {};
+    state.skus.forEach(function (s) { existing[s.spec_text] = s; });
+    state.skus = matrix.map(function (combo) {
+      var spec_text = combo.length
+        ? combo.map(function (p) { return p.name + ':' + p.value; }).join(' / ')
+        : '默认规格';
+      var prev = existing[spec_text] || {};
+      return {
+        spec_text: spec_text,
+        price: prev.price !== undefined ? prev.price : 0,
+        stock: prev.stock !== undefined ? prev.stock : 0,
+        code: prev.code || ''
+      };
+    });
+    renderSkuTable();
+  }
+
+  function renderSkuTable() {
+    var body = document.getElementById('skuTableBody');
+    var empty = document.getElementById('skuEmpty');
+    body.innerHTML = '';
+    if (state.skus.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    state.skus.forEach(function (sku, idx) {
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td class="spec-cell">' + escapeHtml(sku.spec_text) + '</td>'
+        + '<td><input type="number" step="0.01" min="0" data-k="price" data-i="' + idx + '" value="' + sku.price + '"></td>'
+        + '<td><input type="number" step="1" min="0" data-k="stock" data-i="' + idx + '" value="' + sku.stock + '"></td>'
+        + '<td><input type="text" data-k="code" data-i="' + idx + '" placeholder="可选" value="' + escapeAttr(sku.code || '') + '"></td>'
+        + '<td><button type="button" class="row-del" title="删除"><i class="bi bi-x"></i></button></td>';
+      tr.querySelectorAll('input').forEach(function (inp) {
+        inp.oninput = function () {
+          var i = +inp.dataset.i, k = inp.dataset.k;
+          var v = inp.value;
+          if (k === 'price' || k === 'stock') v = +v || 0;
+          state.skus[i][k] = v;
+          if (k === 'price') syncPreview();
+        };
+      });
+      tr.querySelector('.row-del').onclick = function () {
+        state.skus.splice(idx, 1);
+        renderSkuTable();
+        syncPreview();
+      };
+      body.appendChild(tr);
+    });
+    syncPreview();
+  }
+
+  function batchFillSku() {
+    var saleInp = document.getElementById('saleInput');
+    var costInp = document.getElementById('fishInput');
+    var stockInp = document.getElementById('stockInput');
+    var sale = parseFloat(saleInp.value || (parseFloat(costInp.value || 0) * 1.35));
+    var stock = parseInt(stockInp.value || 0, 10);
+    var touched = 0;
+    state.skus.forEach(function (sku) {
+        if (!sku.price && sale) { sku.price = +sale.toFixed(2); touched++; }
+        if (!sku.stock && stock) { sku.stock = stock; touched++; }
+      });
+    renderSkuTable();
+    showToast(touched ? '已填充 ' + touched + ' 项' : '价格 / 库存都已有值，无需填充', touched ? 'ok' : 'info');
+  }
+
+  // ====================== 实时预览 ======================
+  function syncPreview() {
+    var titleInp = document.getElementById('titleInput');
+    var title = titleInp.value.trim();
+    var titleEl = document.getElementById('previewTitle');
+    if (title) {
+      titleEl.textContent = title;
+      titleEl.classList.remove('empty');
+    } else {
+      titleEl.textContent = '填写商品标题后会在这里显示';
+      titleEl.classList.add('empty');
+    }
+    document.getElementById('titleCnt').textContent = title.length + ' / 60';
+
+    var sale = parseFloat(document.getElementById('saleInput').value || 0);
+    var cost = parseFloat(document.getElementById('fishInput').value || 0);
+    var market = parseFloat(document.getElementById('marketInput').value || 0);
+    var stock = parseInt(document.getElementById('stockInput').value || 0, 10);
+
+    document.getElementById('previewPriceVal').textContent = sale ? sale.toFixed(2) : '—';
+    document.getElementById('previewMarket').textContent = market ? '¥' + market.toFixed(2) : '';
+    document.getElementById('previewCost').textContent = '¥' + (cost ? cost.toFixed(2) : '—');
+    document.getElementById('previewStock').textContent = stock || '—';
+
+    var dd = document.getElementById('deliveryInput');
+    var ddMap = { '1': '24 小时内', '2': '48 小时内', '3': '72 小时内', '7': '7 天内' };
+    document.getElementById('previewDelivery').textContent = ddMap[dd.value] || '—';
+
+    var selling = document.querySelector('[name="selling_points"]').value.trim();
+    var sellEl = document.getElementById('previewSelling');
+    if (selling) {
+      sellEl.style.display = '';
+      sellEl.textContent = selling.length > 60 ? selling.slice(0, 60) + '…' : selling;
+    } else {
+      sellEl.style.display = 'none';
+    }
+
+    var tags = ['<span class="pt">自营</span>'];
+    var cat2 = document.getElementById('cat2');
+    if (cat2.value && cat2.selectedIndex >= 0) {
+      tags.push('<span class="pt">' + escapeHtml(cat2.options[cat2.selectedIndex].text) + '</span>');
+    }
+    if (market && sale && market > sale) {
+      var off = Math.round((1 - sale / market) * 100);
+      if (off >= 5) {
+        tags.push('<span class="pt" style="background: var(--c-error-soft); color: var(--c-error-fg);">降 ' + off + '%</span>');
+      }
+    }
+    document.getElementById('previewTags').innerHTML = tags.join('');
+
+    var main = state.mainImages[0];
+    var pm = document.getElementById('previewMain');
+    if (main) {
+      pm.innerHTML = '<img src="' + escapeAttr(main) + '" onerror="this.style.display=\'none\'">';
+    } else {
+      pm.innerHTML = '<i class="bi bi-image"></i>';
+    }
+
+    var tip = document.getElementById('marginTip');
+    var tipVal = document.getElementById('marginVal');
+    if (cost > 0 && sale > 0 && sale >= cost) {
+      var margin = ((sale - cost) / sale * 100);
+      tip.style.display = '';
+      tipVal.textContent = margin.toFixed(1) + '% (¥' + (sale - cost).toFixed(2) + ')';
+      tip.className = 'margin-tip ' + (margin >= 20 ? 'good' : (margin >= 10 ? '' : 'bad'));
+    } else {
+      tip.style.display = 'none';
+    }
+  }
+
+  // ====================== 提交 ======================
+  function submitForm(action, btn) {
+    var form = document.getElementById('publishForm');
+    var title = form.title.value.trim();
+    var cat = form.category_id.value;
+
+    if (action !== 'draft') {
+      if (!title || title.length < 2) {
+        showToast('请填写商品标题（≥ 2 字）', 'err');
+        form.title.focus(); return;
+      }
+      if (!cat) {
+        showToast('请选择商品类目', 'err');
+        document.getElementById('cat1').focus(); return;
+      }
+      if (state.mainImages.length === 0) {
+        showToast('请至少上传 1 张主图', 'err'); return;
+      }
+      if (!form.fish_price.value || +form.fish_price.value <= 0) {
+        showToast('请填写渔货价', 'err'); return;
+      }
+    }
+
+    // 成本口径：渔货价对自营的人就是成本价（渔货栈对供应链的采购价不渔货栈展示）
+    var cost = parseFloat(form.fish_price.value || 0);
+    var fishInp = parseFloat(form.fish_price.value || 0);
+    var saleInp = parseFloat(form.sale_price.value || 0);
+    var skuTotalStock = state.skus.reduce(function (a, s) { return a + (s.stock || 0); }, 0);
+    var stockVal = form.stock.value ? parseInt(form.stock.value, 10) : skuTotalStock;
+
+    var payload = {
+      title: title || '(未命名草稿)',
+      category_id: cat || null,
+      source_type: 'self_operated',
+      item_code: form.item_code.value || null,
+      // 品牌（可留空）；最近上架不在这里填，由上架动作自动记
+      brand: (form.brand && form.brand.value) ? form.brand.value : null,
+      selling_points: form.selling_points.value || null,
+      main_image: state.mainImages[0] || null,
+      images: state.mainImages,
+      detail_images: state.detailImages,
+      cost_price: cost || 0,
+      sale_price: form.sale_price.value ? saleInp : null,
+      market_price: form.market_price.value ? parseFloat(form.market_price.value) : null,
+      fish_price: form.fish_price && form.fish_price.value ? fishInp : null,
+      stock: stockVal,
+      spec_defs: state.specDefs.filter(function (s) { return s.name && s.values && s.values.length; }),
+      skus: state.skus.map(function (s, i) {
+        return {
+          sku_id: null,
+          spec_text: s.spec_text,
+          price: s.price || 0,
+          stock: s.stock || 0,
+          code: s.code || null
+        };
+      }),
+      freight_template: form.freight_template.value || null,
+      // 发货方式：留空则由后端按「货源 · 运费模板」的规则套用
+      shipping_mode: (form.shipping_mode && form.shipping_mode.value) ? form.shipping_mode.value : null,
+      // 默认运费：包邮为 0
+      shipping_fee: (form.shipping_fee && form.shipping_fee.value) ? parseFloat(form.shipping_fee.value) : 0,
+      delivery_days: +form.delivery_days.value,
+      after_sale: form.after_sale.value,
+      detail_html: form.detail_html.value || null,
+      supplier_tip: form.supplier_tip && form.supplier_tip.value ? form.supplier_tip.value : null,
+      submit_action: action
+    };
+
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 提交中…';
+
+    fetch('/api/v1/goods/items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+      .then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, status: r.status, data: data }; });
+      })
+      .then(function (resp) {
+        if (resp.ok) {
+          var labelMap = { draft: '草稿已保存', audit: '已提交审核', publish: '已上架' };
+          showToast(labelMap[action] + ' · ' + resp.data.item_id, 'ok');
+          setTimeout(function () {
+            window.location.href = action === 'publish'
+              ? '/goods?source=self_operated&view=card'
+              : '/goods?source=self_operated';
+          }, 700);
+        } else {
+          showToast('提交失败：' + (resp.data.detail || JSON.stringify(resp.data)), 'err');
+          btn.disabled = false;
+          btn.innerHTML = original;
+        }
+      })
+      .catch(function (e) {
+        showToast('网络错误：' + e.message, 'err');
+        btn.disabled = false;
+        btn.innerHTML = original;
+      });
+  }
+
+  // ====================== 工具 ======================
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function escapeAttr(s) { return escapeHtml(s); }
+
+  document.getElementById('mainImageInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addMainImage(); }
+  });
+  document.getElementById('detailImageInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); addDetailImage(); }
+  });
+
+  // 初始渲染
+  renderMainImages();
+  renderDetailImages();
+  renderSpecEditor();
+  syncPreview();
+</script>
+{% endblock %}

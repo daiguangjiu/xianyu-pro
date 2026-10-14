@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}店铺管理{% endblock %}
+{% block heading %}店铺管理{% endblock %}
+{% block sub %}共 {{ total }} 个闲鱼自营账号 · 账号名称对应订单的「出货闲鱼号」，运营人对应飞书发送人{% endblock %}
+{% block actions %}
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>新增店铺</h2>
+  <form class="filters" method="post" action="/shops">
+    <div class="field grow"><label for="new-name">账号名称</label>
+      <input id="new-name" type="text" name="name" required placeholder="闲鱼昵称，如：太阳味汽水（与订单的「出货闲鱼号」一致）">
+    </div>
+    <div class="field"><label for="new-code">账号唯一编号</label>
+      <input id="new-code" type="text" name="code" placeholder="如：XYSK0001（留空自动生成）">
+    </div>
+    <div class="field"><label for="new-operator">账号运营人</label>
+      <input id="new-operator" type="text" name="operator" placeholder="飞书里的发送人">
+    </div>
+    <div class="field"><label for="new-owner">账号所属人</label>
+      <input id="new-owner" type="text" name="owner" placeholder="如：久哥">
+    </div>
+    <div class="field"><label for="new-shop-type">店铺类型</label>
+      <select id="new-shop-type" name="shop_type">
+        {% for t in shop_types %}<option value="{{ t }}" {{ 'selected' if loop.first }}>{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label for="new-nature">店铺性质</label>
+      <select id="new-nature" name="shop_nature" data-coach-field="new-coach-field">
+        {% for n in shop_natures %}<option value="{{ n }}" {{ 'selected' if loop.first }}>{{ n }}</option>{% endfor %}
+      </select>
+    </div>
+    {# 所属带教：只有学员店铺才有，选了「学员店铺」才把这一栏放出来（见页尾 JS） #}
+    <div class="field" id="new-coach-field" hidden><label for="new-coach">所属带教</label>
+      <input id="new-coach" type="text" name="coach" placeholder="带这个学员的老师">
+    </div>
+    <div class="field"><label for="new-fee-rate">平台技术服务费（%）</label>
+      <input id="new-fee-rate" type="text" name="service_fee_rate" value="0.6" placeholder="0.6"
+             title="平台结算时按成交额扣的比例，默认 0.6%">
+    </div>
+    <div class="field"><label for="new-category">经营细分类目</label>
+      <input id="new-category" type="text" name="category" placeholder="家电 / 鞋类 / 数码…">
+    </div>
+    <div class="field"><label for="new-supply">类目 / 供应链</label>
+      <input id="new-supply" type="text" name="supply" placeholder="如：京东家电类">
+    </div>
+    <div class="field"><label for="new-phone">绑定手机号</label>
+      <input id="new-phone" type="text" name="phone">
+    </div>
+    <div class="field"><label for="new-status">账号状态</label>
+      <input id="new-status" type="text" name="status" placeholder="正常运营">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">添加店铺</button></div>
+  </form>
+  <div class="note muted">
+    <span>基础信息来自运营的「闲鱼自营账号台账」（可直接用 <span class="mono">python -m app.cli import-shops 台账.xlsx</span> 导入）；
+      群里出单 / 登记表导入时遇到没建档的账号会自动补一条记录，只填账号名称与运营人，其余资料在这里补全。</span>
+  </div>
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/shops">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="账号名称 / 编号 / 运营人 / 类目 / 手机号 / 支付宝">
+    </div>
+    <div class="field"><label>账号运营人</label>
+      <select name="operator">
+        <option value="">全部</option>
+        {% for o in operators %}<option value="{{ o }}" {{ 'selected' if filters.operator == o }}>{{ o }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>账号状态</label>
+      <select name="status">
+        <option value="">全部</option>
+        {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if filters.status == s }}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>店铺类型</label>
+      <select name="shop_type">
+        <option value="">全部</option>
+        {% for t in shop_types %}<option value="{{ t }}" {{ 'selected' if filters.shop_type == t }}>{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>店铺性质</label>
+      <select name="nature">
+        <option value="">全部</option>
+        {% for n in shop_natures %}<option value="{{ n }}" {{ 'selected' if filters.nature == n }}>{{ n }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>审核状态</label>
+      <select name="audit">
+        <option value="">全部</option>
+        {% for a in audits %}<option value="{{ a }}" {{ 'selected' if filters.audit == a }}>{{ audit_text[a] }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if shops %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">序号</th><th>账号名称</th><th>编号</th><th>账号运营人</th><th>账号所属人</th>
+          <th>店铺类型</th><th>店铺性质</th><th class="num">平台技术服务费</th><th>经营类目</th><th>供应链</th><th>审核</th><th>状态</th>
+          <th class="num">关联订单</th><th class="num">销售额</th><th>最近出单</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in shops %}
+        {% set st = stats.get(s.name, {'orders': 0, 'sale': 0.0, 'profit': 0.0, 'last_order_at': None}) %}
+        <tr>
+          <td class="num muted">{{ loop.index }}</td>
+          <td class="nowrap"><a href="/shops/{{ s.id }}">{{ s.name }}</a></td>
+          <td class="mono">{{ s.code or '-' }}</td>
+          <td>{{ s.operator or '-' }}</td>
+          <td>{{ s.owner or '-' }}</td>
+          <td class="nowrap">{{ s.shop_type_label }}</td>
+          <td class="nowrap">
+            {% if s.is_student_shop %}<span class="badge" title="带教：{{ s.coach or '未填' }}">学员店铺</span>
+            {% else %}<span class="badge muted">自营店铺</span>{% endif %}
+          </td>
+          <td class="num">{{ s.service_fee_rate_value }}%</td>
+          <td>{{ s.category or '-' }}</td>
+          <td>{{ s.supply or '-' }}</td>
+          <td class="nowrap">
+            {% if s.audit_status == 'approved' %}<span class="badge badge-audit-approved">已通过</span>
+            {% elif s.audit_status == 'rejected' %}<span class="badge badge-audit-rejected" title="{{ s.audit_note }}">已驳回</span>
+            {% else %}<span class="badge badge-audit-pending">待审核</span>{% endif %}
+            {% if s.is_self_submitted %}<span class="badge muted" title="渔货栈账号自己提交的店铺">渔货栈</span>{% endif %}
+            {% if s.self_linked_user_id %}
+              <span class="badge" title="渔货栈店铺已关联：这条档案已带入该账号的渔货栈">已关联·{{ linked_names.get(s.self_linked_user_id, '渔货栈账号') }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if s.is_running %}<span class="badge done">{{ s.status or '正常运营' }}</span>
+            {% else %}<span class="badge warn">{{ s.status }}</span>{% endif %}
+          </td>
+          <td class="num">{{ st.orders }}</td>
+          <td class="num">¥{{ money(st.sale) }}</td>
+          <td class="nowrap muted">{{ st.last_order_at | dt('%Y-%m-%d') if st.last_order_at else '—' }}</td>
+          <td class="nowrap">
+            {% if s.audit_status != 'approved' %}
+            <form method="post" action="/shops/{{ s.id }}/audit" style="display:inline">
+              <input type="hidden" name="audit_status" value="approved">
+              <button class="btn sm" title="审核通过后该店铺在渔货栈生效">通过</button>
+            </form>
+            {% endif %}
+            <a class="btn sm" href="/shops/{{ s.id }}">编辑</a>
+            <form method="post" action="/shops/{{ s.id }}/delete" style="display:inline"
+                  data-confirm="删除店铺「{{ s.name }}」？仅删除档案，订单数据不受影响。">
+              <button class="btn sm danger">删除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有店铺档案。用上方表单添加。</div>
+  {% endif %}
+</div>
+
+<script>
+  /* 「所属带教」只给学员店铺：性质选「学员店铺」才把这一栏放出来。
+     群里的学员模板（学员姓名 / 学员店铺名称 / 带教）出的单会自动标成学员店铺并带上带教。 */
+  (function () {
+    var STUDENT = {{ (shop_natures[-1] if shop_natures else '学员店铺') | tojson }};
+    document.querySelectorAll('select[data-coach-field]').forEach(function (sel) {
+      var box = document.getElementById(sel.getAttribute('data-coach-field'));
+      if (!box) { return; }
+      var sync = function () { box.hidden = sel.value !== STUDENT; };
+      sel.addEventListener('change', sync);
+      sync();
+    });
+  })();
+</script>
+{% endblock %}

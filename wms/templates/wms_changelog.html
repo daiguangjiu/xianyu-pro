@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}更新日志{% endblock %}
+{% block sub %}渔集的每一次上线（共 {{ entries|length }} 次）{% endblock %}
+{% block actions %}
+  <span class="chip"><i class="bi bi-tag" aria-hidden="true"></i>当前版本 {{ version or '-' }}</span>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 一条一条往下读：版本徽标 + 日期一行，下面逐条列改了什么 */
+  .cl-items { margin: 6px 0 0; padding-left: 20px; }
+  .cl-items li { margin-bottom: 5px; line-height: 1.75; }
+  .cl-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .cl-date { font-size: 13px; font-weight: 400; color: var(--c-text-muted); }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# 说明卡：这份日志记在哪、怎么跟渔枢系统 / 渔货栈划开的（2026-10-08 用户要求） #}
+<div class="card">
+  <h2>这份日志怎么划的</h2>
+  <p class="d">
+    渔集的更新跟渔枢系统、渔货栈记在平台同一份
+    <span class="mono">config/changelog.json</span> 里 —— 渔集的条目上标着
+    <span class="mono">"system": "wms"</span>，本页只挑这些显示。
+    在渔枢系统的「更新日志」页（<span class="mono">/changelog</span>）里也能按子系统筛，
+    两边看的是同一份数据。
+  </p>
+</div>
+
+{% if entries %}
+  {% for e in entries %}
+  <div class="card">
+    <h2>
+      <span class="cl-head">
+        <span class="badge done">{{ e.version or '更新' }}</span>
+        <span>{{ e.title }}</span>
+        <span class="cl-date">{{ e.date }}</span>
+        {% if loop.first %}<span class="badge processing2">当前版本</span>{% endif %}
+      </span>
+    </h2>
+    {% if e['items'] %}
+    <ul class="cl-items">{% for item in e['items'] %}<li>{{ item }}</li>{% endfor %}</ul>
+    {% else %}
+    {{ bits.empty('本次更新暂无说明') }}
+    {% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="card">{{ bits.empty('还没有渔集的更新记录 —— 在 config/changelog.json 里追加一条并标上 system: "wms" 即可') }}</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}标签打印与贴标复核{% endblock %}
+{% block sub %}打印走队列（幂等 + 可追溯），贴标后扫码复核：等级不符 100% 阻断入库{% endblock %}
+{% block actions %}
+<form class="inline-form" method="post" action="/wms/labels/emergency-stop" style="margin-right:8px"
+      onsubmit="return confirm('强制停止打印：\n1) 清空云端待打印队列（机器还没打的全撤）\n2) 关闭「入队即下发」\n3) 本地待打印任务全部作废\n\n已经打出来的纸收不回来。确定要停吗？')">
+  <button class="btn sm danger">强制停止打印</button></form>
+<a class="btn" href="/wms/print-settings">打印设置（云打印机）</a>
+{% endblock %}
+
+{% block content %}
+{% if rate.alert %}
+<div class="note warn"><b>补打率告警：</b>本批已打印 {{ rate.total }} 张、补打 {{ rate.reprinted }} 张
+  （{{ (rate.rate * 100) | round(2) }}%），超过 1% —— 建议排查流程，别让补打变常态。</div>
+{% endif %}
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>① 生成打印任务</h2>
+    <p class="d">
+      TSPL 不硬写在业务代码里：换机型（TSPL / ZPL）只改指令适配器。
+      已定级的货排进队列，重复点不会多打（幂等）。
+      <b>份数跟数量走：这台货有几台就打几张</b> —— 3 台就是 3 张一模一样的，每台身上贴一张。
+    </p>
+    <form method="post" action="/wms/labels/enqueue">
+      <div class="field-row auto">
+        <div class="field"><label for="l-t">标签类型</label>
+          <select id="l-t" name="label_type">{% for v, t in label_types %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="l-d">指令集</label>
+          <select id="l-d" name="dialect">{% for v, t in dialects %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="l-tr">打印链路</label>
+          <select id="l-tr" name="transport">{% for v, t in transports %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="l-p">打印机（IP / 名称）</label>
+          <input id="l-p" type="text" name="printer" placeholder="192.168.1.50"></div>
+      </div>
+      <div class="field"><label for="l-r">补打原因（补打必填）</label>
+        <input id="l-r" type="text" name="reason" placeholder="如：打印不清 / 标签贴错"></div>
+      {% if graded %}
+      <div class="table-wrap scroll-y">
+        <table>
+          {# 数量（2026-10-10）：一条货 N 台就要打 N 张标签，先让人看清是几台 #}
+          <thead><tr><th class="col-check"></th><th>显示编码</th><th>品牌型号</th>
+            <th class="num">数量</th><th>等级</th><th>处置指令</th></tr></thead>
+          <tbody>
+          {% for it in graded %}
+            <tr>
+              <td><input type="checkbox" name="item_ids" value="{{ it.id }}"></td>
+              <td class="nowrap">{{ it.display_code }}</td>
+              <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td>
+              <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}">{{ it.qty or 1 }}</span></td>
+              <td>{{ bits.grade_badge(it.grade) }}</td>
+              <td class="muted">{% if it.grade in ('S','A','B') %}直接上架{% elif it.grade == 'C' %}线上报修{% else %}拆机件{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <button class="btn primary">排入打印队列</button>
+      {% else %}{{ bits.empty('没有已定级的货（检测完再来打标签）') }}{% endif %}
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>② 贴标复核（防错最后一道闸）</h2>
+    <p class="d">
+      扫贴好的标签 <b>3 项强校验</b>：① 条码存在 ② 标签等级 == 系统等级 ③ 没张冠李戴。
+      全通过才放行入库（S / A → 可售仓）。
+    </p>
+    <form method="post" action="/wms/labels/verify">
+      <div class="field-row auto">
+        <div class="field"><label for="v-b">扫标签上的条码</label>
+          <input id="v-b" type="text" name="barcode" placeholder="QCPH26100012" autofocus></div>
+        <div class="field"><label for="v-g">标签上的等级</label>
+          <select id="v-g" name="grade">{% for v, t in grades %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+      </div>
+      <button class="btn primary">复核并入库</button>
+    </form>
+    <div class="note">
+      <b>macOS 打标签的坑：</b>标签机基本没有官方驱动，切勿用 CUPS 通用驱动打标签（尺寸复位、条码不可扫）。
+      推荐链路 A（网口 RAW 9100）；A4 检测单才走 CUPS。
+    </div>
+  </div>
+</div>
+
+<div class="card flush">
+  <h2>打印队列（{{ prints | length }}）
+    {# 强制停止（2026-10-12）：紧挨「全部下发」放，误点一下就能立刻掐掉 #}
+    <form class="inline-form" method="post" action="/wms/labels/emergency-stop"
+          style="float:right;margin:-2px 0 0"
+          onsubmit="return confirm('强制停止打印：清空云端队列 + 关闭「入队即下发」+ 本地待打印作废。\n已经打出来的纸收不回来。确定要停吗？')">
+      <button class="btn sm danger">强制停止</button></form>
+    <form class="inline-form" method="post" action="/wms/labels/push-all"
+          style="float:right;margin:-2px 8px 0 0">
+      <button class="btn sm">全部下发到云打印机</button></form>
+  </h2>
+  {% if prints %}
+  <div class="table-wrap"><table>
+    {# 份数（2026-10-10）：一台货 N 台就打 N 张一样的 —— 队列里先写清这张任务印几张 #}
+    <thead><tr><th>显示编码</th><th>类型</th><th class="num">份数</th><th>等级</th><th>处置</th><th>指令集</th><th>打印人</th>
+      <th>打印</th><th>贴标</th><th>时间</th><th></th></tr></thead>
+    <tbody>
+    {% for p in prints %}
+      <tr>
+        <td class="nowrap mono">{{ p.display_code }}</td>
+        <td><span class="badge {{ 'warn' if p.label_type == 'reprint' else 'muted' }}">{{ p.label_type }}</span></td>
+        <td class="num"><span class="qty-pill {{ 'many' if (p.copies or 1) > 1 }}"
+              title="这台货有几台就打几张（跟数量一致）">{{ p.copies or 1 }}</span></td>
+        <td>{{ bits.grade_badge(p.grade) }}</td>
+        <td class="muted">{{ p.action_text }}</td>
+        <td class="mono muted">{{ p.dialect }}</td>
+        <td>{{ p.operator or '—' }}</td>
+        <td>
+          {% if p.status == 'printed' %}<span class="badge done">已打印</span>
+          {% elif p.status == 'sent' %}<span class="badge processing2">已下发云端</span>
+          {% else %}<span class="badge pending">待打印</span>{% endif %}
+          {# 检测台打过并提交检测的，等级与最终档一致时已自动贴标复核 → 这里直接显示已贴标 #}
+          {% set it = labeled.get(p.id) %}
+          {% if it and it.grade and p.grade and it.grade != p.grade %}
+            <div style="font-size:11px;color:var(--c-danger)">纸上 {{ p.grade }} 档 ≠ 实判 {{ it.grade }} 档，要补打</div>
+          {% endif %}
+          {% if p.printer_sn %}<div class="muted" style="font-size:11px">{{ p.printer_sn }}</div>{% endif %}
+          {% if p.order_no %}<div class="muted" style="font-size:11px">单号 {{ p.order_no }}</div>{% endif %}
+          {% if p.error %}<div style="font-size:11px;color:var(--c-danger)">{{ p.error }}</div>{% endif %}
+        </td>
+        <td>
+          {% set it = labeled.get(p.id) %}
+          {% if it and it.status == 'SELLABLE' %}<span class="badge done">已贴标 · 已入可售仓</span>
+          {% elif it and it.own_barcode %}<span class="badge processing2">已贴码 · 待复核</span>
+          {% elif it %}<span class="badge muted">未贴标</span>
+          {% else %}<span class="badge muted">—</span>{% endif %}
+        </td>
+        <td class="nowrap muted">{{ (p.printed_at or p.sent_at or p.created_at) | dt }}</td>
+        <td class="nowrap">
+          <a class="btn sm" href="/wms/labels/{{ p.id }}/preview">预览标签</a>
+          <a class="btn sm" href="/wms/labels/{{ p.id }}/command" target="_blank">看指令</a>
+          {% if p.status != 'printed' %}
+          <form class="inline-form" method="post" action="/wms/labels/{{ p.id }}/push">
+            <button class="btn sm">下发</button></form>
+          {% endif %}
+          {% if p.order_no and p.status == 'sent' %}
+          <form class="inline-form" method="post" action="/wms/labels/{{ p.id }}/sync">
+            <button class="btn sm">回查</button></form>
+          {% endif %}
+          {% if p.status != 'printed' %}
+          <form class="inline-form" method="post" action="/wms/labels/{{ p.id }}/printed">
+            <button class="btn sm">标记已打印</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% if p.reason %}<tr><td colspan="11" class="muted sub-row">补打原因：{{ p.reason }}</td></tr>{% endif %}
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('队列是空的：先在左边勾选已定级的货') }}{% endif %}
+</div>
+{% endblock %}

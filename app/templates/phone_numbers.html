@@ -1,0 +1,247 @@
+{# 公司资源 · 手机号管理：列表页（默认）+ 顶部统计。
+   顶部那几个数与下面的列表同筛选口径：筛了就是筛后的数，没筛就是全量 #}
+{% extends "base.html" %}
+{% block title %}手机号管理{% endblock %}
+{% block heading %}手机号管理{% endblock %}
+{% block sub %}公司资源台账：一个号是一条资源 —— 谁实名、什么性质、主卡还是副卡、套餐怎么付，以及它开出了哪些平台账号{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/phone-numbers/new"><i class="bi bi-plus-lg" aria-hidden="true"></i> 新增手机号资源</a>
+{% endblock %}
+{% block content %}
+
+{# —— 顶部统计：先看全貌，再看列表 —— #}
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>资源概览</b>
+      <span class="muted">
+        {% if has_filter %}当前筛选结果{% else %}全部手机号资源{% endif %}
+        · 共 {{ stats.total }} 个号
+      </span>
+    </div>
+    {% if has_filter %}<a class="btn sm" href="{{ clear_url }}">看全部（清掉筛选）</a>{% endif %}
+  </div>
+
+  <div class="grid grid-4" style="margin-top:8px">
+    <div class="stat">
+      <div class="label"><i class="bi bi-phone" aria-hidden="true"></i> 手机号总数</div>
+      <div class="value">{{ stats.total }} <span class="hint">个</span></div>
+      <div class="hint">启用 {{ stats.enabled }} · 停用 {{ stats.disabled }}</div>
+    </div>
+    <div class="stat">
+      <div class="label"><i class="bi bi-person-badge" aria-hidden="true"></i> 账号性质</div>
+      <div class="value">{{ stats.personal }} <span class="hint">个人号</span></div>
+      <div class="hint">企业主体号 {{ stats.enterprise }} 个</div>
+    </div>
+    <div class="stat">
+      <div class="label"><i class="bi bi-sim" aria-hidden="true"></i> 账号类型</div>
+      <div class="value">{{ stats.main }} <span class="hint">主卡</span></div>
+      <div class="hint">副卡 {{ stats.sub }} 个（挂在主卡下）</div>
+    </div>
+    <div class="stat">
+      <div class="label"><i class="bi bi-credit-card" aria-hidden="true"></i> 套餐付费</div>
+      <div class="value">{{ stats.postpaid }} <span class="hint">按月后付费</span></div>
+      <div class="hint">预充值 {{ stats.prepaid }} 个</div>
+    </div>
+  </div>
+
+  {# 四个平台：点数字就筛出「已开了这个平台账号」的号 #}
+  <div class="grid grid-4" style="margin-top:8px">
+    {% for key, label, icon in platforms %}
+      {% set hit = stats.platforms.get(key, 0) %}
+      {% set pct = (hit * 100 / stats.total)|round|int if stats.total else 0 %}
+      <a class="stat" href="{{ platform_links.get(key, '/phone-numbers') }}" style="text-decoration:none">
+        <div class="label"><i class="bi {{ icon }}" aria-hidden="true"></i> 已注册{{ label }}</div>
+        <div class="value">{{ hit }} <span class="hint">个</span></div>
+        <div class="hint">占 {{ pct }}%{% if filters.platform == key %} · 已筛选（再点取消）{% else %} · 点击查看{% endif %}</div>
+      </a>
+    {% endfor %}
+  </div>
+
+  <div class="grid grid-3" style="margin-top:8px">
+    <div class="stat accent">
+      <div class="label"><i class="bi bi-cash-stack" aria-hidden="true"></i> 月度套餐支出</div>
+      <div class="value">¥{{ '%.2f' % stats.monthly_cost }}</div>
+      <div class="hint">只算启用中的号（停用的不再花钱）</div>
+    </div>
+    <div class="stat">
+      <div class="label"><i class="bi bi-wallet2" aria-hidden="true"></i> 预充值余额</div>
+      <div class="value">¥{{ '%.2f' % stats.balance }}</div>
+      <div class="hint">启用中的预充值号合计</div>
+    </div>
+    <a class="stat {{ 'warn' if stats.no_platform else '' }}" href="{{ idle_url }}" style="text-decoration:none">
+      <div class="label"><i class="bi bi-exclamation-circle" aria-hidden="true"></i> 未开任何平台账号</div>
+      <div class="value">{{ stats.no_platform }} <span class="hint">个</span></div>
+      <div class="hint">{% if filters.idle %}已筛选（再点取消）{% else %}还没变成资产，先看这批{% endif %}</div>
+    </a>
+  </div>
+</div>
+
+{# —— 筛选 —— #}
+<div class="card">
+  <form class="filters" method="get" action="/phone-numbers">
+    <div class="field grow">
+      <label>关键词</label>
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="手机号 / 实名人 / 备注 / 主卡号">
+    </div>
+    <div class="field">
+      <label>账号性质</label>
+      <select name="nature">
+        <option value="">全部</option>
+        {% for k in nature_choices %}
+          <option value="{{ k }}" {% if filters.nature == k %}selected{% endif %}>{{ nature_text.get(k, k) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>账号类型</label>
+      <select name="card_type">
+        <option value="">全部</option>
+        {% for k in card_choices %}
+          <option value="{{ k }}" {% if filters.card_type == k %}selected{% endif %}>{{ card_text.get(k, k) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>套餐</label>
+      <select name="plan">
+        <option value="">全部</option>
+        {% for k in plan_choices %}
+          <option value="{{ k }}" {% if filters.plan == k %}selected{% endif %}>{{ plan_text.get(k, k) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>运营商</label>
+      <select name="carrier">
+        <option value="">全部</option>
+        {% for k in carrier_choices %}
+          <option value="{{ k }}" {% if filters.carrier == k %}selected{% endif %}>{{ carrier_text.get(k, k) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>状态</label>
+      <select name="status">
+        <option value="">全部</option>
+        {% for k in status_choices %}
+          <option value="{{ k }}" {% if filters.status == k %}selected{% endif %}>{{ status_text.get(k, k) }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label>已注册平台</label>
+      <select name="platform">
+        <option value="">不限</option>
+        {% for key, label, icon in platforms %}
+          <option value="{{ key }}" {% if filters.platform == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% if filters.idle %}<input type="hidden" name="idle" value="{{ filters.idle }}">{% endif %}
+    <div class="field">
+      <label>&nbsp;</label>
+      <button class="btn primary" type="submit">筛选</button>
+    </div>
+  </form>
+</div>
+
+{# 行内改「平台账号注册」要用的表单：HTML 里 form 不能塞在 tr 里，统一提到表格前面用 form= 关联 #}
+{% for r in rows %}
+  <form method="post" action="/phone-numbers/{{ r.phone.id }}/edit" id="phoneEdit{{ r.phone.id }}"></form>
+{% endfor %}
+
+<div class="card flush">
+  <div class="row-between">
+    <div>
+      <b>手机号台账</b>
+      <span class="muted">共 {{ rows|length }} 个号</span>
+    </div>
+    <span class="muted">下面四个平台的勾可以直接改，改完点「保存注册情况」</span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>手机号</th><th>运营商</th><th>性质</th><th>所属人（实名人）</th>
+          <th>类型</th><th>套餐</th>
+          <th style="text-align:center">闲鱼</th>
+          <th style="text-align:center">支付宝</th>
+          <th style="text-align:center">微信</th>
+          <th style="text-align:center">小红书</th>
+          <th>状态</th><th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td><b>{{ r.number_text }}</b></td>
+          <td>{{ r.carrier_text }}</td>
+          <td>
+            {% if r.phone.nature == 'enterprise' %}<span class="badge template">{{ r.nature_text }}</span>
+            {% else %}<span class="badge bg-light">{{ r.nature_text }}</span>{% endif %}
+          </td>
+          <td>{{ r.phone.owner_name or '—' }}</td>
+          <td>
+            {{ r.card_text }}
+            {% if r.phone.card_type == 'sub' and r.phone.parent_number %}
+              <div class="muted">挂 {{ r.phone.parent_number }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {{ r.plan_text }}
+            <div class="muted">
+              {% if r.phone.monthly_fee %}月租 ¥{{ '%.2f' % r.phone.monthly_fee }}{% else %}月租 —{% endif %}
+              {% if r.phone.plan == 'prepaid' %} · 余额 ¥{{ '%.2f' % r.phone.balance }}{% endif %}
+            </div>
+          </td>
+          {% for key, label, icon in platforms %}
+          <td style="text-align:center">
+            {# hidden 在前：不勾时提交 0，勾了提交 1（Starlette 取同名最后一个值） #}
+            <input type="hidden" form="phoneEdit{{ r.phone.id }}" name="{{ key }}" value="0">
+            <input type="checkbox" form="phoneEdit{{ r.phone.id }}" name="{{ key }}" value="1"
+                   {% if r.phone.registered(key) %}checked{% endif %} title="是否注册{{ label }}账号">
+          </td>
+          {% endfor %}
+          <td>
+            {% if r.phone.enabled %}<span class="badge done">启用中</span>
+            {% else %}<span class="badge ignored">已停用</span>{% endif %}
+          </td>
+          <td class="table-actions">
+            <button class="btn sm" type="submit" form="phoneEdit{{ r.phone.id }}">保存注册情况</button>
+            <a class="btn sm" href="/phone-numbers/{{ r.phone.id }}/edit">编辑</a>
+            <form method="post" action="/phone-numbers/{{ r.phone.id }}/toggle" style="display:inline;">
+              <button class="btn sm" type="submit">{{ '停用' if r.phone.enabled else '启用' }}</button>
+            </form>
+            <form method="post" action="/phone-numbers/{{ r.phone.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('删除手机号资源 {{ r.number_text }}（{{ r.phone.owner_name }}）？删了就查不到是谁开的账号了。');">
+              <button class="btn sm danger" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="12" class="help">
+            {% if has_filter %}
+              这个筛选条件下没有手机号：换个条件，或者
+              <a href="{{ clear_url }}">看全部</a>。
+            {% else %}
+              台账还是空的：右上角「新增手机号资源」录第一个号。
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="note muted">
+  <span>
+    口径：<b>停用 ≠ 删除</b> —— 停用的号保留记录（它可能开过平台账号，删了就查不到是谁实名开的）；
+    月度套餐支出与预充值余额<b>只算启用中的号</b>，停用号里的余额当作已作废。
+    本表只记资源台账，<b>不存任何登录凭据</b>（密码 / Cookie 一律不入库）。
+  </span>
+</div>
+
+{% endblock %}

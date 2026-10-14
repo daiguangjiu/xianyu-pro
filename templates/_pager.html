@@ -1,0 +1,101 @@
+{# 全站统一分页条（固定组件，需要分页的列表一律用它，别再各写各的）。
+
+   形态：左侧「第 x / y 页 · 共 N 条」→ 上一页 / 下一页 → 窗口式页码（首 / 末页 + 当前页前后各 2 页 + 省略号）
+   → 页数超过 10 页时多一个「跳到第几页」输入框；给了 sizes 还会在最左边渲染「每页 N 条」下拉。
+
+   为什么是 10 页：不到 10 页时页码一眼看得全，再多一列就是整屏数字 —— 从 11 页起折叠成窗口式，并给跳页框。
+
+   参数：
+     page     当前页码（越界自动夹到 1..pages）
+     pages    总页数；不知道就传 0，同时给 total 与 size，组件自己算
+     url      基础地址（如 "/products"），页码以 ?page=N 追加，其它筛选参数原样保留
+     params   除 page 之外的查询参数（dict，空值自动忽略，中文会 urlencode）
+     total    可选，总条数（给了就显示「共 N 条」）
+     window   当前页前后各显示几个页码（默认 2）
+     size     可选，每页条数（pages 没给时按 total / size 算总页数）
+     sizes    可选，每页条数档位（如 (20, 50, 100)），给了才渲染「每页 N 条」下拉
+     size_field  每页条数的参数名（默认 per_page，个别页面用 size 就传 'size'）
+
+   用法：
+     {% from "_pager.html" import pager %}
+     {{ pager(page, pages, '/products', {'q': keyword, 'audit': audit_filter}, total, size=per_page, sizes=page_sizes) }}
+
+   只有一页且没有「每页条数」下拉时什么都不渲染（返回空串），免得列表下面挂个孤零零的条。
+#}
+{% macro pager(page, pages, url='', params={}, total=0, window=2, size=0, sizes=(), size_field='per_page') -%}
+{%- set total = total | int -%}
+{%- set size = size | int -%}
+{%- set pages = pages | int -%}
+{%- if pages < 1 and total > 0 and size > 0 -%}
+  {%- set pages = (total + size - 1) // size -%}
+{%- endif -%}
+{%- if pages < 1 -%}{%- set pages = 1 -%}{%- endif -%}
+{%- set page = [[page | int, 1] | max, pages] | min -%}
+{%- set folded = pages > 10 -%}
+{%- set qs = [] -%}
+{%- for k, v in (params or {}).items() if v is not none and v | string | trim != '' -%}
+  {%- set _ = qs.append(k ~ '=' ~ (v | string | urlencode)) -%}
+{%- endfor -%}
+{%- set base = url ~ '?' ~ ((qs | join('&')) ~ '&' if qs else '') -%}
+{%- if pages > 1 or (sizes and size) or total -%}
+<div class="pager-wrap">
+  {%- if sizes and size %}
+  <form class="pager-size" method="get" action="{{ url }}">
+    {%- for k, v in (params or {}).items() if v is not none and v | string | trim != '' and k != size_field and k != 'page' %}
+    <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {%- endfor %}
+    <label for="perPageSel">每页</label>
+    <select id="perPageSel" name="{{ size_field }}" onchange="this.form.submit()">
+      {%- for n in sizes %}
+      <option value="{{ n }}" {% if n | int == size %}selected{% endif %}>{{ n }} 条</option>
+      {%- endfor %}
+    </select>
+  </form>
+  {%- endif %}
+  {%- if pages > 1 %}
+  <nav class="pager" aria-label="分页导航">
+    <span class="pager-info">第 {{ page }} / {{ pages }} 页{% if total %} · 共 {{ total }} 条{% endif %}</span>
+    {% if page > 1 -%}
+      <a class="btn sm" href="{{ base }}page={{ page - 1 }}" rel="prev" title="上一页" aria-label="上一页"><i class="bi bi-chevron-left" aria-hidden="true"></i></a>
+    {%- else -%}
+      <span class="btn sm disabled" aria-disabled="true" title="已是第一页"><i class="bi bi-chevron-left" aria-hidden="true"></i></span>
+    {%- endif %}
+    {%- set first = 1 if not folded else [1, page - window] | max -%}
+    {%- set last = pages if not folded else [pages, page + window] | min -%}
+    {%- if first > 1 %}
+    <a class="btn sm" href="{{ base }}page=1">1</a>
+      {%- if first > 2 %}<span class="pager-ellipsis" aria-hidden="true">…</span>{% endif %}
+    {%- endif %}
+    {%- for p in range(first, last + 1) %}
+      {%- if p == page -%}
+        <span class="btn sm primary" aria-current="page">{{ p }}</span>
+      {%- else -%}
+        <a class="btn sm" href="{{ base }}page={{ p }}">{{ p }}</a>
+      {%- endif -%}
+    {%- endfor %}
+    {%- if last < pages %}
+      {%- if last < pages - 1 %}<span class="pager-ellipsis" aria-hidden="true">…</span>{% endif %}
+      <a class="btn sm" href="{{ base }}page={{ pages }}">{{ pages }}</a>
+    {%- endif %}
+    {% if page < pages -%}
+      <a class="btn sm" href="{{ base }}page={{ page + 1 }}" rel="next" title="下一页" aria-label="下一页"><i class="bi bi-chevron-right" aria-hidden="true"></i></a>
+    {%- else -%}
+      <span class="btn sm disabled" aria-disabled="true" title="已是最后一页"><i class="bi bi-chevron-right" aria-hidden="true"></i></span>
+    {%- endif %}
+    {%- if folded %}
+    <form class="pager-jump" method="get" action="{{ url }}">
+      {%- for k, v in (params or {}).items() if v is not none and v | string | trim != '' and k != 'page' %}
+      <input type="hidden" name="{{ k }}" value="{{ v }}">
+      {%- endfor %}
+      <input type="number" name="page" min="1" max="{{ pages }}" value="{{ page }}" step="1" inputmode="numeric" aria-label="跳转到第几页">
+      <button class="btn sm" type="submit">跳转</button>
+    </form>
+    {%- endif %}
+  </nav>
+  {%- else %}
+  {# 只有一页：不给页码和跳页框，但条数信息照常显示（不然列表底部空一块，看不出分页在不在） #}
+  <span class="pager-info">{% if total %}共 {{ total }} 条{% endif %}{% if total and size %} · 每页 {{ size }} 条{% endif %}</span>
+  {%- endif %}
+</div>
+{%- endif -%}
+{% endmacro %}

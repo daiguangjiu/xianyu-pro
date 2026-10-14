@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.title }}{% endblock %}
+{% block heading %}{{ doc.title }}{% endblock %}
+{% block sub %}{{ doc.lead }}{% endblock %}
+{% block actions %}
+  {% for t in topics %}
+  {% if t.key != topic_key %}<a class="btn" href="/help/{{ t.key }}">{{ t.title }}</a>{% endif %}
+  {% endfor %}
+{% endblock %}
+{% block content %}
+
+{# 流程：这一步是什么、点什么、有什么坑 —— 页面上按「现在做到哪一步」走的就是它 #}
+<div class="card">
+  <h2>流程：每一步是什么、点什么</h2>
+  <ol class="help-flow">
+    {% for s in doc.flow %}
+    <li>
+      <div class="hf-name">{{ s.name }}</div>
+      <div class="hf-row"><span class="hf-k">这一步是什么</span><span>{{ s.what }}</span></div>
+      <div class="hf-row"><span class="hf-k">要做什么</span><span>{{ s.action }}</span></div>
+      {% if s.tip %}<div class="hf-row tip"><span class="hf-k">注意</span><span>{{ s.tip }}</span></div>{% endif %}
+    </li>
+    {% endfor %}
+  </ol>
+</div>
+
+<div class="card">
+  <h2>状态：每个取值什么意思、下一步会变成什么</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>状态</th><th>含义</th><th>下一步</th></tr></thead>
+      <tbody>
+      {% for s in doc.states %}
+        <tr><td><b>{{ s.state }}</b></td><td>{{ s.meaning }}</td><td class="muted">{{ s.next }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h2>容易搞错的地方</h2>
+  <ul class="help-notes">
+    {% for n in doc.notes %}<li>{{ n }}</li>{% endfor %}
+  </ul>
+</div>
+
+{% endblock %}

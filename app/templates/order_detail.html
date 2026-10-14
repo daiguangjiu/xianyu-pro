@@ -1,0 +1,779 @@
+{% extends "base.html" %}
+{# 流程说明弹窗：内容取自 app/services/help.py，与独立说明页 /help 同源 #}
+{% from "_help_dialog.html" import help_modal, help_btn %}
+{# 没权限时给一张「锁住」的卡，写清楚去哪儿申请 —— 订单详情每个板块都用它，文案统一 #}
+{% macro locked_block(title, desc, anchor='') %}
+<div class="card locked-block"{% if anchor %} id="{{ anchor }}"{% endif %}>
+  <h2 style="margin:0"><i class="bi bi-lock" aria-hidden="true"></i> {{ title }}</h2>
+  <p class="muted" style="margin:8px 0 0">
+    你的账号没有查看<b>{{ title }}</b>的权限（{{ desc }}）。
+    需要的话请管理员在「系统 → 角色权限」里，给你所在的角色勾上「{{ title }}」。
+  </p>
+</div>
+{% endmacro %}
+{% block title %}订单 {{ order.order_no }}{% endblock %}
+{% block heading %}{% if order.is_recalled %}<span class="struck">订单 {{ order.order_no }}</span>{% else %}订单 {{ order.order_no }}{% endif %}{% endblock %}
+{% block sub %}{{ order.platform }} · 解析置信度 {{ order.parse_confidence }} · 来源 {{ order.chat_name or order.chat_id or '-' }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/orders">返回列表</a>
+  {# 人工补救三件套：恢复正常 / 标记撤回 / 标记退单，后两个与系统自动处理走同一条流程 #}
+  {% if order.is_recalled or order.is_refund %}
+  <form method="post" action="/orders/{{ order.id }}/restore" style="display:inline">
+    <button class="btn primary" data-confirm="确认恢复为正常订单？系统误判（比如群里撤回后已重发、退单词命中错了）时用这个补救，恢复后该订单重新参与统计与后续流程">标记恢复正常订单</button>
+  </form>
+  {% endif %}
+  {% if order.is_recalled %}
+  <form method="post" action="/orders/{{ order.id }}/recall/undo" style="display:inline">
+    <button class="btn" data-confirm="确认撤销撤回标记？撤销后该订单会重新参与统计与流程">撤销撤回</button>
+  </form>
+  {% else %}
+  <form method="post" action="/orders/{{ order.id }}/recall" style="display:inline">
+    <button class="btn" data-confirm="确认标记为撤回订单？与群里撤回消息走同一流程：只留档，不参与统计与后续流程">标记撤回</button>
+  </form>
+  {% endif %}
+  {% if not order.is_refund %}
+  <form method="post" action="/orders/{{ order.id }}/refund/mark" style="display:inline">
+    <button class="btn" data-confirm="标记退单：与群里同步退单走同一流程，落到「买家申请退单」，之后补理由、同步供应商、维护是否退款">标记退单</button>
+  </form>
+  {% endif %}
+  <form method="post" action="/orders/{{ order.id }}/reparse" style="display:inline">
+    <button class="btn" data-confirm="将按当前规则重新解析该订单所属消息，继续？">重新解析</button>
+  </form>
+  <form method="post" action="/orders/{{ order.id }}/delete" style="display:inline">
+    <button class="btn danger" data-confirm="确认删除该订单？">删除</button>
+  </form>
+{% endblock %}
+{% block content %}
+
+{# 顶部提示条：整体按「订单提示」授权（提示条不显示锁卡，免得顶部堆一堆卡片） #}
+{% if can_block(current_user, 'order_tips') %}
+{% if order.needs_review %}
+<div class="note warn" role="alert">
+  <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+  <b>需要人工核对</b>：{{ order.review_reason or '该订单存在缺失或置信度偏低' }}。核对完在下面「需要人工确认」处改成「否」即可消除提示。
+</div>
+{% elif order.review_reason %}
+<div class="note"><i class="bi bi-info-circle" aria-hidden="true"></i>解析提示：{{ order.review_reason }}</div>
+{% endif %}
+{% endif %}
+
+{% if order.is_refund %}
+{% if can_block(current_user, 'order_refund') %}
+<div class="note danger" role="alert" style="border-width:2px">
+  <i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>
+  <span>
+    <b style="font-size:15px">此订单已退单，请及时处理拦截！</b><br>
+    退单关键词：<b>{{ order.refund_keyword or '退单' }}</b>
+    · 识别时间：<b>{{ human_time(order.refund_at) if order.refund_at else '-' }}</b>
+    · 当前处理状态：<b>{{ order.refund_status_label }}</b>
+    <br>退单理由：{% if order.refund_reason %}<b>{{ order.refund_reason }}</b>{% else %}<b>未填写</b> —— 请在下方补上，或让发起人在群里回复「退单理由：xxx」{% endif %}
+    {% if order.refund_source_message_id %}（<a href="/messages?q={{ order.refund_source_message_id }}">查看退单消息</a>）{% endif %}
+  </span>
+</div>
+
+<div class="card" id="refund">
+  <div class="row-between">
+    <h2 style="margin:0">退单处理{% if refund_push_status %}（推单状态：{{ refund_push_status }}）{% endif %}</h2>
+    {{ help_btn('refund', '退单流程说明', '退单分哪几条路径、每步做什么（叫停 → 寄回 → 收件 → 退款 → 追供应商款）、状态怎么变') }}
+  </div>
+
+  {# 一行说清这单走哪条路径、关了没、金额多少 —— 细节都收在下面 #}
+  <div class="refund-head">
+    <span class="chip big warn"><i class="bi bi-signpost-split" aria-hidden="true"></i>{{ refund_path_label }}</span>
+    {% if order.is_closed %}
+    <span class="chip ok big"><i class="bi bi-check2-circle" aria-hidden="true"></i>已关闭完成{% if order.closed_at %} · {{ human_time(order.closed_at) }}{% endif %}</span>
+    {% endif %}
+    <span class="muted" style="font-size:12px">
+      退款给客户 <b class="mono">¥{{ money(order.refund_amount_abs) }}</b>
+      · 成交价 <b class="mono">¥{{ money(order.deal_amount) }}</b>
+      · {{ '已付款给供应商' if order.transfer_status == 'paid' else '未付款给供应商' }}
+    </span>
+  </div>
+
+  {# 进度一行带走：做过的打勾，没轮到的只是一个小圈 —— 流程不再一次全铺在页面上 #}
+  <div class="refund-track">
+    {% for s in refund_steps %}
+    <span class="rt-step{% if s.done %} done{% endif %}{% if not s.required %} skip{% endif %}{% if refund_now and s.key == refund_now.key %} now{% endif %}"
+          title="{% if s.done %}已完成{% if s.at %} · {{ human_time(s.at) }}{% if s.by %} · {{ s.by }}{% endif %}{% endif %}{% elif not s.required %}这条路径不需要这一步{% else %}{{ s.block }}{% endif %}">
+      <i class="bi {{ 'bi-check-circle-fill' if s.done else ('bi-dash-circle' if not s.required else 'bi-circle') }}" aria-hidden="true"></i>{{ s.label }}
+      {% if not s.required %}<em>不需要</em>{% elif s.done and s.at %}<small>{{ human_time(s.at) }}</small>{% endif %}
+    </span>
+    {% endfor %}
+  </div>
+
+  {% if order.is_closed %}
+  <div class="refund-now is-done">
+    <div class="rn-title"><i class="bi bi-check2-circle" aria-hidden="true"></i>这单已经收尾</div>
+    <div class="rn-hint">关闭完成{% if order.closed_at %} · {{ human_time(order.closed_at) }}{% endif %}{% if order.refund_by %} · 处理人 {{ order.refund_by }}{% endif %}，不再参与统计与结算。</div>
+  </div>
+  {% elif refund_now %}
+  {# 现在这一步：一句话说怎么做 + 只放这一步要填的 + 一个主按钮（其余步骤等轮到了再出现） #}
+  <div class="refund-now">
+    <div class="rn-title"><i class="bi bi-arrow-right-circle-fill" aria-hidden="true"></i>现在要做的：{{ refund_now.label }}</div>
+    <div class="rn-hint">{{ refund_now.hint }}</div>
+    <form method="post" action="/orders/{{ order.id }}/refund/{{ refund_now.action }}" class="rn-form">
+      {% if refund_now.input == 'refund_amount' %}
+      <input type="number" step="0.01" min="0" name="refund_amount"
+             value="{{ order.refund_amount_abs if order.refund_amount_abs else order.deal_amount }}"
+             placeholder="{{ refund_now.placeholder }}">
+      {% elif refund_now.input %}
+      <input type="text" name="{{ refund_now.input }}" placeholder="{{ refund_now.placeholder }}">
+      {% endif %}
+      <button class="btn primary"{% if refund_now.confirm %} data-confirm="{{ refund_now.confirm }}"{% endif %}>{{ refund_now.button }}</button>
+    </form>
+    {# 相关的那一条物流状态才露出来（等寄回 / 等收件时最有用），其余不占地方 #}
+    {% if refund_now.key in ('returned', 'return_received') and order.return_tracking_no %}
+    <div class="rn-hint muted">退回件物流：<b>{{ tracking_labels.get(order.return_tracking_status, '未查询') }}</b>{% if order.return_tracking_status_at %} · {{ human_time(order.return_tracking_status_at) }}{% endif %}
+      <a class="btn sm" href="/orders/{{ order.id }}/tracking?on_return=1">查退回件轨迹</a>
+    </div>
+    {% elif refund_now.key == 'stopped' and order.tracking_no %}
+    <div class="rn-hint muted">正向件物流：<b>{{ tracking_labels.get(order.tracking_status, '未查询') }}</b>{% if order.tracking_status_at %} · {{ human_time(order.tracking_status_at) }}{% endif %}
+      <a class="btn sm" href="/orders/{{ order.id }}/tracking">查轨迹</a>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="refund-now is-final">
+    <div class="rn-title"><i class="bi bi-flag-fill" aria-hidden="true"></i>该做的都做完了：点「关闭完成」收尾</div>
+    <form method="post" action="/orders/{{ order.id }}/refund/close" class="rn-form">
+      <input type="text" name="note" placeholder="关闭备注（可选）">
+      <button class="btn primary" data-confirm="确认关闭完成？关闭后该订单不再参与统计、结算与后续流程">关闭完成</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {# 这单自己的历史数据问题（对不上的地方），有就摆在最上面 #}
+  {% if refund_issues %}
+  <div class="note danger" role="alert">
+    <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+    <span>
+      <b>这单有 {{ refund_issues | length }} 处历史数据对不上（新口径上线前留下的，未自动改动）：</b>
+      <a href="/refund-health">查看全部问题单 →</a>
+      <ul style="margin:4px 0 0 18px;padding:0">
+        {% for it in refund_issues %}
+        <li>{{ it.label }} —— {{ it.fix }}</li>
+        {% endfor %}
+      </ul>
+    </span>
+  </div>
+  {% endif %}
+
+  {# 不常用的都收起来：默认只看得到「现在这一步」，要改细节再展开 —— 界面才不吓人 #}
+  <details class="refund-more">
+    <summary>更多设置：退单理由 / 处理状态 / 退回单号 / 退款金额 / 备注</summary>
+    {# 一个表单一次保存：理由 / 处理状态 / 是否已收货 / 退回单号 / 退款金额 / 是否退款 / 备注。
+       以前这七项散在 6 个表单里，改一项点一次还容易漏 —— 现在一起提交，没改的保持原样 #}
+    <form method="post" action="/orders/{{ order.id }}/refund/process" class="refund-form">
+      <div class="field grow"><label>退单理由</label>
+        <input type="text" name="reason" value="{{ order.refund_reason }}"
+               placeholder="如：客户拍错了 / 不想要了 / 地址填错">
+      </div>
+      {# 处理状态的值与「订单列表 → 退单」筛选项共用 models.REFUND_STATUS_CHOICES：
+         没有记录处理状态的退单，默认显示「待拦截」；选最后一项 = 取消退单标记 #}
+      <div class="field"><label>处理状态</label>
+        <select name="refund_status">
+          {% for v in refund_status_choices %}
+          <option value="{{ v }}" {{ 'selected' if (order.refund_status or 'pending') == v }}>{{ refund_status_labels[v] }}</option>
+          {% endfor %}
+          <option value="">取消退单标记</option>
+        </select>
+      </div>
+      <div class="field"><label>是否已收货</label>
+        <select name="received">
+          <option value="0" {{ 'selected' if not order.is_received }}>未收货（做物流拦截）</option>
+          <option value="1" {{ 'selected' if order.is_received }}>已收货（要退回件）</option>
+        </select>
+      </div>
+      <div class="field"><label>退单编号（退回单号）{% if order.is_received %}（必填）{% endif %}</label>
+        <input type="text" name="return_tracking_no" value="{{ order.return_tracking_no }}"
+               placeholder="客户寄回的快递单号，如 SF1234567890；群里发「原单号 + 退回单号」会自动登记">
+      </div>
+      <div class="field"><label>退款金额（退给客户）</label>
+        <input type="number" step="0.01" min="0" name="refund_amount" value="{{ order.refund_amount_abs }}">
+      </div>
+      <div class="field"><label>是否退款给客户</label>
+        <select name="refund_paid">
+          <option value="0" {{ 'selected' if order.refund_paid != 'paid' }}>未退款</option>
+          <option value="1" {{ 'selected' if order.refund_paid == 'paid' }}>已退款</option>
+        </select>
+      </div>
+      <div class="field grow"><label>处理备注</label>
+        <input type="text" name="refund_note" value="{{ order.refund_note }}"
+               placeholder="如：已通知供应商拦截，包裹已拦截成功">
+      </div>
+      <div class="field actions">
+        <button class="btn primary">保存退单处理</button>
+        <span class="muted">没改的项保持原样</span>
+      </div>
+    </form>
+  </details>
+
+  <details class="refund-more">
+    <summary>其它操作：同步供应商退单{% if refund_blocks and not order.is_closed %} / 线下已退强制关闭{% endif %}</summary>
+    <div class="refund-actions">
+      {# 动作按钮：同步供应商、标记供应商已退款 —— 会推进订单状态，所以不放进上面的表单里 #}
+      <form method="post" action="/orders/{{ order.id }}/refund/sync">
+        <input type="text" name="note" placeholder="同步备注，如：已微信通知安徽梦想电商撤回发货">
+        <button class="btn primary sm" data-confirm="确认已把退单同步给供应商？同步后订单状态变为「已同步供应商退单」">同步供应商退单</button>
+      </form>
+      {% if order.transfer_status == 'paid' and order.supplier_refunded != 'paid' %}
+      <form method="post" action="/orders/{{ order.id }}/refund/supplier-refunded">
+        <input type="text" name="note" placeholder="线下核对备注（可选）">
+        <button class="btn primary sm" data-confirm="确认供应商已把钱退回来了？标记后订单自动关闭完成">标记供应商已退款</button>
+      </form>
+      {% endif %}
+      {% if refund_blocks and not order.is_closed %}
+      {# 线下已经处理完、只是系统里没记的：强制关闭，必须写明原因，留痕里记清楚 #}
+      <form method="post" action="/orders/{{ order.id }}/refund/close" class="force-close">
+        <input type="hidden" name="force" value="1">
+        <input type="text" name="note" placeholder="强制关闭原因（必填），如：已微信退款给客户" required>
+        <button class="btn danger sm"
+                data-confirm="确认强制关闭？这单还没满足：{{ refund_blocks | join('；') }}。请确认线下确实已处理完 —— 关闭会留痕记下原因与操作人">线下已退，强制关闭</button>
+      </form>
+      {% endif %}
+      <span class="muted" style="font-size:12px">取消退单标记：在上面「更多设置」里把处理状态选成「取消退单标记」</span>
+    </div>
+  </details>
+  {% if refund_blocks %}
+  <div class="note warn" role="alert">
+    <i class="bi bi-lock" aria-hidden="true"></i>
+    <span>还不能关闭：<b>{{ refund_blocks | join('；') }}</b>{% if not order.is_closed %} —— 按上面「现在要做的」一步步走完就行；钱和货都在系统外处理完的，展开「其它操作 → 线下已退，强制关闭」并写明原因（会留痕）。{% endif %}</span>
+  </div>
+  {% endif %}
+  <div class="note muted" style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+    <span>{% if order.transfer_status == 'paid' %}该单<b>已付款给供应商</b>：要追回供应商退款，线下核对完在「现在要做的」里点确认。{% else %}该单<b>未付款给供应商</b>：不用付款（也不要付款）。{% endif %}{% if order.refund_by %} · 最近处理人 <b>{{ order.refund_by }}</b>{% if order.refund_handled_at %}（{{ human_time(order.refund_handled_at) }}）{% endif %}{% endif %}</span>
+    <a href="/refund-todo">全部退单待办 →</a>
+  </div>
+</div>
+{% else %}
+{{ locked_block('退单处理', '退单警示、退单理由、同步供应商、是否退款、强制关闭') }}
+{% endif %}
+{% endif %}
+
+{# 撤单提示 / 成本未维护提示：同属顶部「订单提示」 #}
+{% if can_block(current_user, 'order_tips') %}
+{% if order.is_recalled %}
+<div class="note recalled" role="alert" style="border-width:2px">
+  <i class="bi bi-eraser" aria-hidden="true"></i>
+  <span><b>该订单已撤单</b>（{{ human_time(order.recalled_at) if order.recalled_at else '-' }}{% if order.recalled_by %} · {{ order.recalled_by }}{% endif %}）：
+    {% if order.recall_reason %}来源：{{ order.recall_reason }}。{% endif %}
+    仅作留档，<b>不参与任何数据统计与后续流程</b>（不推单、不计入汇总）。
+    {% if order.recalled_message_id %}<a href="/messages?q={{ order.recalled_message_id }}">查看撤单相关消息</a> · {% endif %}
+    群里重发后可重新归档，也可点右上角「撤销撤回」恢复参与统计。</span>
+</div>
+{% endif %}
+
+{% if not order.cost_amount or order.cost_amount <= 0 and not order.is_recalled %}
+<div class="note danger" role="alert">
+  <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+  <span><b>成本价未维护（当前 ¥0）</b>：毛利与毛利率会虚高，请推单人员先补全成本再推单。
+    可在下方「编辑订单」的<b>成本</b>输入框里填写（该框已标红）。</span>
+</div>
+{% endif %}
+{% endif %}
+
+{# 推单信息属受限区块：只有角色里勾了「推单信息」的账号能看（见 web/permissions.py 的 BLOCKS） #}
+{% if can_block(current_user, 'order_push') %}
+<section class="card push-card{{ ' push-card-alert' if push.supplier_missing }}" id="push">
+  {% if push.supplier_missing %}
+  <div class="push-alert" role="alert">
+    <i class="bi bi-exclamation-octagon-fill" aria-hidden="true"></i>
+    <span><b>该订单没有指定供应商！</b>推给谁、按哪个供应商计「今日第 x 单」都不确定，
+      请先在下方「编辑订单 → 供应商」补全后再推单，否则成本与对账无法自动关联。</span>
+    <a class="btn sm danger" href="#edit-order">去补全供应商</a>
+  </div>
+  {% endif %}
+  <div class="row-between">
+  <h2 style="margin:0">推单信息（单笔推单）</h2>
+  <div class="chips">
+    {# 订单状态（生命周期）：一眼看到这单走到哪一步了 #}
+    <span class="chip big state-{{ order.order_state }}"
+          title="新建 → 已推单 → 已发货；逆向：买家申请退单 → 已同步供应商退单 → 已退款 → 关闭完成（终态）；未推单前用户撤单为已撤单">
+      <i class="bi bi-diagram-3" aria-hidden="true"></i>订单状态：{{ order.order_state_label }}
+    </span>
+      {% if push.supplier_missing %}
+        <span class="chip danger big"><i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>供应商：未指定（务必先补全）</span>
+      {% else %}
+        <span class="chip supplier big"><i class="bi bi-shop" aria-hidden="true"></i>供应商：{{ push.supplier }}</span>
+      {% endif %}
+      <span class="chip big" title="按供应商排队：该供应商「当天产生的订单」按群里发送时间先后计第几单；撤回的订单不占号，撤了中间一单后面的单号会自动往前补">今日{{ push.day_label }} 第 {{ push.index }} 单</span>
+      {% if push.reported_index and push.reported_index != push.index %}
+        {# 撤回导致单号重排：把「推单时报的号」和「现在的号」都摆出来，便于跟供应商对账 #}
+        <span class="chip warn" title="撤回的订单不占号，撤回 / 撤销后单号会自动重排；推单时告诉供应商的是第 {{ push.reported_index }} 单">单号已修正（推单时报第 {{ push.reported_index }} 单）</span>
+      {% endif %}
+      <span class="chip" id="transfer-chip">是否转账：{{ push.transfer_label }}{% if push.transfer == 'paid' and push.transfer_paid_at %}<span class="muted"> · {{ human_time(push.transfer_paid_at) }}标记</span>{% endif %}</span>
+      {% if push.tracking_no %}
+        <span class="chip ok">物流单号：{{ push.tracking_no }}</span>
+      {% endif %}
+      {% if not order.cost_amount or order.cost_amount <= 0 %}
+        <span class="chip danger" title="成本未维护：毛利会虚高，请先补全成本">成本未维护 ¥0</span>
+      {% endif %}
+      {% if order.is_refund %}
+        <span class="badge refund" title="{% if order.refund_status == 'not_pushed' %}还没推给供应商：直接不推，把钱退给客户即可（没有包裹要拦）{% elif order.refund_status == 'received' %}客户已收到货：拦不住了，等客户把货寄回{% else %}群里已同步退单，请及时拦截{% endif %}">已退单 · {{ order.refund_status_label }}（勿推单）</span>
+      {% endif %}
+      {% if order.is_recalled %}
+        <span class="badge recalled" title="群里的消息已撤回：该订单只留档，不参与推单等后续流程">已撤回（勿推单）</span>
+      {% endif %}
+      {% if order.is_refund or order.is_recalled %}
+        {# 逆向订单：推单状态按场景给话术 —— 无需推单 / 同步撤回发货 / 同步物流拦截 / 退单物流单号 #}
+        <span class="badge refund" title="推单状态（逆向订单不再推给供应商，按这里写的动作处理）">{{ push_status_label(order) }}</span>
+      {% elif push.pushed %}
+        <span class="badge pushed">已推单 {{ human_time(push.pushed_at) }}</span>
+      {% else %}
+        <span class="badge {{ 'recalled' if (order.is_recalled or order.order_state == 'canceled') else 'pending' }}">{{ push_status_label(order) }}</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <pre class="raw push-text" id="push-text" style="margin-top:12px">{{ push.text }}</pre>
+
+  <form class="btn-row" method="post" action="/orders/{{ order.id }}/push" id="push-form" style="margin-top:12px">
+    <label class="check" for="transfer-select" style="gap:8px">是否转账
+      <select id="transfer-select" name="transfer_status"
+              data-transfer-url="/orders/{{ order.id }}/push/transfer"
+              data-transfer-label="{{ push.transfer_label }}">
+        <option value="paid" {{ 'selected' if push.transfer == 'paid' }}>已转账</option>
+        <option value="unpaid" {{ 'selected' if push.transfer != 'paid' }}>未转账</option>
+      </select>
+    </label>
+    <button class="btn primary" type="button" data-copy="#push-text" data-push-url="/orders/{{ order.id }}/push"
+            {% if order.is_recalled %}disabled title="该订单的群消息已撤回，不参与推单流程"{% endif %}
+            {% if push.supplier_missing %}data-confirm="该订单供应商未指定，仍要复制推单文案吗？"{% endif %}>
+      <i class="bi bi-clipboard-check" aria-hidden="true"></i>复制并标记已推单
+    </button>
+    <button class="btn" type="button" data-copy="#push-text"
+            {% if order.is_recalled %}disabled title="该订单的群消息已撤回，不参与推单流程"{% endif %}
+            {% if push.supplier_missing %}data-confirm="该订单供应商未指定，仍要复制推单文案吗？"{% endif %}>仅复制</button>
+    <noscript><button class="btn" type="submit" {% if order.is_recalled %}disabled{% endif %}>（复制后）标记为已推单</button></noscript>
+    <span class="muted" id="push-hint">{% if order.is_recalled %}该订单已撤回：仅留档，不再走推单流程。{% else %}复制即视为已推单：订单会标记为「已推单」并记录推单时间。改「是否转账」会立即刷新上面的推单文案。{% endif %}</span>
+    {{ help_btn('push', '推单流程说明', '推单从头到尾怎么走：复制文案 → 等回单 → 填物流单号（自动同步群）→ 结算') }}
+  </form>
+</section>
+{% else %}
+{{ locked_block('推单信息', '推单文案、成本、供应商、是否转账、物流单号', 'push') }}
+{% endif %}
+
+{# 订单处理日志：手动标记状态的动作留痕（谁、什么时候、把单子怎么了），放在推单信息下面、订单信息上面 #}
+{% if can_block(current_user, 'order_logs') %}
+{% if logs %}
+<section class="card" id="order-logs">
+  <div class="row-between">
+    <h2 style="margin:0"><i class="bi bi-journal-text" aria-hidden="true"></i> 订单处理日志</h2>
+    <span class="muted">共 {{ logs|length }} 条 · 最新在最上面</span>
+  </div>
+  <div class="table-wrap" style="margin-top:10px">
+    <table class="list-nowrap">
+      <thead><tr><th>时间</th><th>操作</th><th>说明</th><th>操作人</th></tr></thead>
+      <tbody>
+      {% for l in logs %}
+        {% set tone = 'refund' if l.action in ('标记退单', '标记拦截', '标记撤回') else ('pushed' if l.action == '标记已推单' else '') %}
+        <tr>
+          <td class="nowrap muted">{{ human_time(l.created_at) }}</td>
+          <td><span class="badge {{ tone }}">{{ l.action }}</span></td>
+          <td>{{ l.detail or '-' }}</td>
+          <td class="nowrap">{{ log_operator_label(l) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+{% else %}
+{{ locked_block('订单处理日志', '谁在什么时候把单子怎么了', 'order-logs') }}
+{% endif %}
+
+<div class="grid grid-2">
+  {# 订单信息 / 订单截图：同一行两张卡，各自单独授权 #}
+  {% if can_block(current_user, 'order_info') %}
+  <div class="card{% if order.is_recalled %} recalled-card struck{% endif %}">
+    {% if order.is_recalled %}<span class="recall-watermark" aria-hidden="true">撤回订单</span>{% endif %}
+    <h2>订单信息</h2>
+    <div class="kv">
+      <div class="k">订单状态</div>
+      <div class="v">
+        <span class="badge state-{{ order.order_state }}">{{ order.order_state_label }}</span>
+        <span class="muted">
+          {% if order.order_state == 'new' %}飞书群同步后归档，等待运营推单
+          {% elif order.order_state == 'pushed' %}已同步给上游，等上游返回物流单号{% if order.pushed_at %}（{{ human_time(order.pushed_at) }}）{% endif %}
+          {% elif order.order_state == 'shipped' %}上游已发货{% if order.shipped_at %}（{{ human_time(order.shipped_at) }}）{% endif %}
+          {% elif order.order_state == 'canceled' %}未发货前已撤单，只留档
+          {% else %}未发货时退单，已标记已退单{% if order.refund_at %}（{{ human_time(order.refund_at) }}）{% endif %}{% endif %}
+        </span>
+      </div>
+      <div class="k">平台</div><div class="v">{{ order.platform }}</div>
+      <div class="k">买家</div><div class="v">
+        {% if order.buyer_nick %}<a href="/orders?q={{ order.buyer_nick | urlencode }}" title="看这个买家的全部订单">{{ order.buyer_nick }}</a>
+        {% else %}-{% endif %}
+      </div>
+      <div class="k">产品</div><div class="v">{{ order.product_name or '-' }}</div>
+      <div class="k">规格</div><div class="v">{{ order.spec or '-' }}</div>
+      <div class="k">关联商品</div>
+      <div class="v">
+        {% if product %}<a href="{{ product_url(product) }}">{{ product.name }}</a>
+          {% if product.code %}<span class="muted mono">{{ product.code }}</span>{% endif %}
+        {% else %}<span class="muted">未挂到商品档案（自动匹配认不出时，可以在这里手工选）</span>{% endif %}
+        <form method="post" action="/orders/{{ order.id }}/product"
+              style="display:inline-flex;gap:6px;align-items:center;margin-left:8px">
+          <select name="product_id" aria-label="选择关联商品">
+            <option value="">— 不关联 —</option>
+            {% for p in products %}
+            <option value="{{ p.id }}" {{ 'selected' if product and product.id == p.id }}>{{ product_label(p) }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn sm">保存</button>
+        </form>
+      </div>
+      <div class="k">数量</div><div class="v">{{ order.quantity }}</div>
+      {# 收货三件套：只有截图里有 / 与群里对不上 / 两边都没有 都会标「待核对」，写错会发错货 #}
+      <div class="k">收货人</div>
+      <div class="v">{{ order.receiver_name or '-' }}
+        {% if '收货人' in (pending_check_names or []) %}<span class="badge review" title="截图识别不确定或与群里写的不一致，发货前请先核对">待核对</span>{% endif %}</div>
+      <div class="k">手机号码</div>
+      <div class="v">{{ order.receiver_phone or '-' }}
+        {% if '手机号' in (pending_check_names or []) %}<span class="badge review" title="截图识别不确定或与群里写的不一致，发货前请先核对">待核对</span>{% endif %}</div>
+      <div class="k">地址信息</div>
+      <div class="v">{{ order.receiver_address or '-' }}
+        {% if '地址' in (pending_check_names or []) %}<span class="badge review" title="截图识别不确定或与群里写的不一致，发货前请先核对">地址待核对</span>{% endif %}</div>
+      <div class="k">{% if order.origin == 'self' %}订单来源{% else %}飞书发送人{% endif %}</div>
+      <div class="v">
+        {% if order.origin == 'self' %}<span class="badge" title="渔货栈店铺出的单，收单即自动同步到渔枢系统，不依赖群里的订单消息">渔货栈自营出单</span>
+        {% elif order.sender_name %}{{ order.sender_name }} <span class="muted mono" title="{{ order.sender_id }}">（{{ order.sender_id[:10] }}）</span>
+        {% else %}{{ order.sender_id or '-' }}<span class="muted">（历史订单没有发送人，可到<a href="#edit-order">编辑订单</a>手填）</span>{% endif %}
+      </div>
+      <div class="k">发送时间</div><div class="v">{{ human_time(order.msg_time or order.ordered_at) }}</div>
+      <div class="k">所属群</div><div class="v">{{ order.chat_name or order.chat_id or '-' }}</div>
+      <div class="k">出货闲鱼号</div>
+      <div class="v">
+        {% if shop %}<a href="/shops/{{ shop.id }}">{{ order.xianyu_account }}</a>
+        {% if shop.operator %}<span class="muted">（运营人 {{ shop.operator }}）</span>{% endif %}
+        {% else %}{{ order.xianyu_account or '-' }}{% endif %}
+      </div>
+      {# 订单性质：按出货闲鱼号对应的店铺性质归 —— 学员店铺把所属带教一并带出来 #}
+      <div class="k">订单性质</div>
+      <div class="v">
+        {% if shop_nature == '学员店铺' %}
+          <span class="badge pending" title="学员店铺：这个号是学员自己的店">学员订单</span>
+          {% if shop_coach %}<span class="muted">（带教 {{ shop_coach }}）</span>{% endif %}
+        {% else %}
+          <span class="badge muted" title="自营店铺：公司自己运营的号{% if not shop %}（还没有店铺档案，按自营算）{% endif %}">自营订单</span>
+        {% endif %}
+      </div>
+      <div class="k">回款归属人</div><div class="v">{{ order.payee_name or '-' }}</div>
+      <div class="k">供应商</div>
+      <div class="v">
+        {% if order.supplier_name %}{{ order.supplier_name }}
+        {% else %}<span class="cost-zero">未指定（推单前请补全）</span>{% endif %}
+      </div>
+      <div class="k">物流单号</div>
+      <div class="v">
+        {% if order.tracking_no %}
+          <span class="mono">{{ order.tracking_no }}</span>
+          {% if order.tracking_company %}<span class="badge">{{ order.tracking_company }}</span>{% endif %}
+          <a class="btn sm" href="/orders/{{ order.id }}/shipping">发货详情</a>
+          <a class="btn sm" href="/orders/{{ order.id }}/tracking">查物流</a>
+          {% if order.tracking_synced_at %}<span class="muted"> · 已同步群 {{ human_time(order.tracking_synced_at) }}</span>{% endif %}
+        {% else %}
+          <span class="muted">未填写（在<a href="/batches">供应链发货</a>维护后自动同步到群）</span>
+        {% endif %}
+      </div>
+      {# 退单编号：群里登记退单时按原单号写进来（客户寄回的那张快递单号） #}
+      <div class="k">退单编号</div>
+      <div class="v">
+        {% if order.return_tracking_no %}
+          <span class="mono">{{ order.return_tracking_no }}</span>
+          <a class="btn sm" href="/orders/{{ order.id }}/tracking?on_return=1">查退回件轨迹</a>
+        {% else %}
+          <span class="muted">未登记（群里发「原单号 + 退回单号」自动登记，也可在下方退单区块手工维护）</span>
+        {% endif %}
+      </div>
+      {# 备注：群里可能分多次发，每次追加一行（带时间），历史备注保留 —— 这里按行展示 #}
+      <div class="k">备注</div>
+      <div class="v" style="white-space:pre-wrap;line-height:1.65;">{{ order.note or '-' }}</div>
+    </div>
+    <h3>金额</h3>
+    <div class="kv">
+      <div class="k">售价</div><div class="v num">¥{{ money(order.sale_amount) }}</div>
+      <div class="k">成交价</div><div class="v num">{{ ('¥' + money(order.deal_amount)) if order.deal_amount else '-' }}</div>
+      <div class="k">商品总价</div><div class="v num">{{ ('¥' + money(order.total_amount)) if order.total_amount else '-' }}</div>
+      <div class="k">成本</div>
+      <div class="v num">
+        {% if order.cost_amount and order.cost_amount > 0 %}
+          ¥{{ money(order.cost_amount) }}
+        {% else %}
+          <span class="cost-zero">¥{{ money(order.cost_amount) }} · 待维护</span>
+        {% endif %}
+      </div>
+      <div class="k">运费</div><div class="v num">¥{{ money(order.shipping_fee) }}</div>
+      <div class="k">平台技术服务费</div><div class="v num">¥{{ money(order.platform_fee) }}</div>
+      {# 退给客户的钱：退单按实际退款额记；少于成交价 = 部分退款，标出来免得当成全额退 #}
+      <div class="k">退款给客户</div>
+      <div class="v num">
+        {% if order.refund_amount_abs > 0 %}
+          ¥{{ money(order.refund_amount_abs) }}
+          {% if order.deal_amount and order.refund_amount_abs < order.deal_amount %}
+            <span class="chip" title="退款少于成交价 ¥{{ money(order.deal_amount) }}：这是部分退款，不是全额退">部分退款</span>
+          {% endif %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </div>
+      {# 供应商退给我们的钱：可能少于退给客户的（只退成本价、扣掉已发运费），差额自己承担 #}
+      <div class="k">供应商退款</div>
+      <div class="v num">
+        {% if order.supplier_refund_amount and order.supplier_refund_amount > 0 %}
+          ¥{{ money(order.supplier_refund_amount) }}
+          {% if order.refund_amount_abs and order.supplier_refund_amount < order.refund_amount_abs %}
+            <span class="chip" title="供应商退的少于我们退给客户的 ¥{{ money(order.refund_amount_abs) }}：差额由我们自己承担">少退 ¥{{ money(order.refund_amount_abs - order.supplier_refund_amount) }}</span>
+          {% endif %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </div>
+      <div class="k">毛利</div>
+      <div class="v">
+        {% if order.cost_amount and order.cost_amount > 0 %}
+          <strong>¥{{ money(order.net_profit) }}</strong>
+          {% if order.is_refund and (order.refund_amount or order.supplier_refund_amount) %}
+            <span class="muted">（已扣客户退款、加供应商退款）</span>
+          {% endif %}
+        {% else %}
+          <span class="muted">成本未维护，暂不计算</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% else %}
+  {{ locked_block('订单信息', '收货信息、商品、金额、毛利等订单本体内容') }}
+  {% endif %}
+
+  {% if can_block(current_user, 'order_images') %}
+  <div class="card">
+    <h2>订单截图（{{ images|length }}）</h2>
+    {# 左侧保留群里的订单截图原图；商品图是从这张截图里自动裁出的方形缩略图 #}
+    <div class="product-shot">
+      <div class="muted">商品图（从订单截图里自动裁出）</div>
+      {% if order.product_image_path %}
+        <a href="{{ media_url(order.product_image_path) }}" target="_blank" rel="noopener"
+           title="点击查看商品图原图">
+          <img src="{{ media_url(order.product_image_path) }}" alt="商品图">
+        </a>
+      {% else %}
+        <div class="muted">还没裁出商品图{% if not images %}（该订单还没有订单截图）{% endif %}</div>
+      {% endif %}
+      <form method="post" action="/orders/{{ order.id }}/product-image" style="display:inline">
+        <button class="btn sm" title="按当前订单截图重新裁一次商品图">重新裁取</button>
+      </form>
+    </div>
+    {% if images %}
+    <div class="thumbs">
+      {% for img in images %}
+        <div class="thumb">
+          {% if img.local_path %}
+          {# 缩略图按原图完整等比显示（不裁切）；鼠标移上去在旁边弹出原图大图，核对收货地址用 #}
+          <span class="shot">
+            <a class="shot-link" href="{{ media_url(img.local_path) }}" target="_blank" rel="noopener"
+               aria-label="查看订单截图原图">
+              <img src="{{ media_url(img.local_path) }}" alt="订单截图" loading="lazy">
+            </a>
+            <span class="shot-preview">
+              <img src="{{ media_url(img.local_path) }}" alt="订单截图原图">
+            </span>
+          </span>
+          {% endif %}
+          <div class="meta">
+            {# 识别状态：done 已识别 / skipped 未识别（没装 OCR 或图片读不了） #}
+            <span class="badge {{ img.ocr_status }}" title="截图识别状态">{{ img.ocr_status }}</span>
+            {# OCR 认出来的原始文本：手机截图里混着状态栏、广告，看着是一堆乱码，
+               平时折叠着不碍眼，解析结果对不上时可以点开来核对 #}
+            {% if img.ocr_text %}
+            <details style="margin-top:4px">
+              <summary class="muted" style="font-size:12px;cursor:pointer">识别原文（供排查）</summary>
+              <div class="muted" style="max-height:160px;overflow:auto;white-space:pre-wrap;font-size:12px;margin-top:4px">{{ img.ocr_text }}</div>
+            </details>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="empty">暂无截图</div>{% endif %}
+
+    {# 订单截图维护：群里漏发 / 发错时，这里上传正确的截图，系统会重新解析并补全订单字段 #}
+    <form class="filters shot-form" method="post" action="/orders/{{ order.id }}/screenshot"
+          enctype="multipart/form-data" style="margin-top:12px">
+      <div class="field grow"><label>{{ '上传订单截图' if not images else '更新订单截图' }}</label>
+        <input type="file" name="screenshot" accept="image/*" required>
+      </div>
+      <div class="field"><label>&nbsp;</label><button class="btn primary">上传并解析</button></div>
+    </form>
+    <div class="note muted">
+      上传后会重新 OCR 解析订单编号、成交价与收货信息，并补全到本订单{{ '（现有截图会被最新一张替换）' if images else '' }}；
+      若解析出的收货人或手机号与本订单不一致，会提示「订单截图上传不对，请重新上传」并放弃本次上传。
+    </div>
+
+    {# 单号没识别出来时的兜底：重跑一次识别；识别到疑似号可一键采用（截图已配上但单号一直没更新的情况） #}
+    <div class="filters" style="margin-top:10px;align-items:center;gap:8px;flex-wrap:wrap">
+      <form method="post" action="/orders/{{ order.id }}/reocr" style="display:inline">
+        <button class="btn sm">重新识别截图</button>
+      </form>
+      {% if order.order_no.startswith('TMP-') and order_no_hint %}
+        <form method="post" action="/orders/{{ order.id }}/apply-order-no" style="display:inline"
+              data-confirm="把订单号改成「{{ order_no_hint }}」？请确认这就是本单的真实订单号">
+          <input type="hidden" name="order_no" value="{{ order_no_hint }}">
+          <button class="btn sm primary">采用疑似单号 {{ order_no_hint }}</button>
+        </form>
+      {% endif %}
+      <span class="muted">
+        单号还是临时编号时：点「重新识别截图」会把现有截图再认一遍（含订单编号专项识别）；
+        系统每 {{ settings.ocr_reocr_minutes }} 分钟也会自动重试一次{{ '（已关闭自动重试）' if not settings.ocr_reocr_minutes }}{% if order_no_hint %}；
+        截图里疑似单号为 <span class="mono">{{ order_no_hint }}</span>，确认无误可一键采用{% endif %}。
+      </span>
+    </div>
+
+    <h3>推单批次</h3>
+    {% if batches %}
+      <div class="chips">{% for b in batches %}<a class="chip" href="/batches/{{ b.id }}">{{ b.batch_no }}（{{ b.status }}）</a>{% endfor %}</div>
+    {% else %}<div class="muted">尚未加入任何批次</div>{% endif %}
+
+    <h3>原始消息</h3>
+    {% if msg %}<pre class="raw">{{ msg.raw_text }}</pre>{% else %}<div class="muted">无</div>{% endif %}
+  </div>
+  {% else %}
+  {{ locked_block('订单截图', '群里的订单截图与自动裁出的商品图') }}
+  {% endif %}
+</div>
+
+{% if can_block(current_user, 'order_edit') %}
+<div class="card" id="edit-order">
+  <h2>编辑订单</h2>
+  <form method="post" action="/orders/{{ order.id }}/edit">
+    <div class="grid grid-4">
+      <div class="field"><label>订单号</label><input type="text" name="order_no" value="{{ order.order_no }}"></div>
+      <div class="field"><label>买家</label><input type="text" name="buyer_nick" value="{{ order.buyer_nick }}"></div>
+      <div class="field"><label>产品</label><input type="text" name="product_name" value="{{ order.product_name }}"></div>
+      <div class="field"><label>出货闲鱼号</label><input type="text" name="xianyu_account" value="{{ order.xianyu_account }}"></div>
+      <div class="field"><label>回款支付宝归属人</label><input type="text" name="payee_name" value="{{ order.payee_name }}"></div>
+      <div class="field"><label>规格</label><input type="text" name="spec" value="{{ order.spec }}"></div>
+      <div class="field"><label>数量</label><input type="number" name="quantity" value="{{ order.quantity }}"></div>
+      <div class="field"><label>售价</label><input type="text" name="sale_amount" value="{{ order.sale_amount }}"></div>
+      <div class="field"><label>成本</label>
+        <input type="text" name="cost_amount" value="{{ order.cost_amount }}"
+               class="{{ 'input-warn' if not order.cost_amount or order.cost_amount <= 0 }}"
+               {% if not order.cost_amount or order.cost_amount <= 0 %}title="成本为 0，请及时维护：成本缺失会让毛利虚高"{% endif %}>
+      </div>
+      <div class="field"><label>运费</label><input type="text" name="shipping_fee" value="{{ order.shipping_fee }}"></div>
+      {# 平台技术服务费：留空会自动按店铺费率（默认 0.6%）算；手填了就以手填的为准 #}
+      <div class="field"><label>平台技术服务费{% if order.platform_fee_manual %}<span class="muted">（人工）</span>{% endif %}</label>
+        {# 只回填人工填过的值：系统自动算的留空，保存时按当前售价 × 店铺费率重算，
+           否则改了售价、手续费还停在老数上（毛利跟着错）。 #}
+        <input type="text" name="platform_fee" value="{{ order.platform_fee if order.platform_fee_manual else '' }}"
+               placeholder="留空自动按店铺费率算" title="平台结算时按成交额扣的费用 = 成交价 × 店铺的「平台技术服务费」费率（默认 0.6%）；留空则每次保存按当前售价重算">
+      </div>
+      {# 退给客户的钱：全额退填成交价，部分退就填实际退了多少（改完记进订单处理日志） #}
+      <div class="field"><label>退款给客户</label>
+        <input type="text" name="refund_amount" value="{{ order.refund_amount_abs }}"
+               placeholder="0 = 未退款"
+               title="退单按实际退款额填：全额退填成交价，部分退就填实际退了多少；退单后这笔会从毛利里扣掉">
+      </div>
+      {# 供应商退给我们的钱：可能少于退给客户的（只退成本价、扣已发运费），差额自己承担 #}
+      <div class="field"><label>供应商退款</label>
+        <input type="text" name="supplier_refund_amount" value="{{ order.supplier_refund_amount }}"
+               placeholder="0 = 供应商未退款"
+               title="供应商实际退给我们的金额：全额退就填与左边相同，只退成本价就填成本价；退单后这笔会加回毛利">
+      </div>
+      <div class="field"><label>供应商</label>
+        <select name="supplier_name">
+          <option value="">（未指定）</option>
+          {% for s in suppliers %}
+          <option value="{{ s.value }}" {{ 'selected' if order.supplier_name == s.value }}>{{ s.text }}</option>
+          {% endfor %}
+          {% if order.supplier_name and order.supplier_name not in suppliers|map(attribute='value')|list %}
+          <option value="{{ order.supplier_name }}" selected>{{ order.supplier_name }}（不在供应商档案里，保存后自动建档）</option>
+          {% endif %}
+        </select>
+      </div>
+      <div class="field"><label>收货人</label><input type="text" name="receiver_name" value="{{ order.receiver_name }}"></div>
+      <div class="field"><label>电话</label><input type="text" name="receiver_phone" value="{{ order.receiver_phone }}"></div>
+      <div class="field"><label>收货地址</label><input type="text" name="receiver_address" value="{{ order.receiver_address }}"></div>
+      <div class="field"><label>推单状态</label>
+        <select name="supplier_status">
+          {% for v,l in [('pending','待推单发货'),('pushed','已推单'),('done','已完成'),('cancelled','已取消')] %}
+          <option value="{{ v }}" {{ 'selected' if order.supplier_status == v }}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>是否转账</label>
+        <select name="transfer_status">
+          <option value="paid" {{ 'selected' if order.transfer_status == 'paid' }}>已转账</option>
+          <option value="unpaid" {{ 'selected' if order.transfer_status != 'paid' }}>未转账</option>
+        </select>
+      </div>
+      {# 订单状态（生命周期）：新建 → 已推单 → 已发货；未发货前撤单 / 退单为终态 #}
+      <div class="field"><label>订单状态</label>
+        <select name="order_state">
+          {% for v in state_choices %}
+          <option value="{{ v }}" {{ 'selected' if order.order_state == v }}>{{ state_labels[v] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>待人工确认</label>
+        <select name="needs_review">
+          <option value="0" {{ 'selected' if not order.needs_review }}>否</option>
+          <option value="1" {{ 'selected' if order.needs_review }}>是</option>
+        </select>
+      </div>
+      <div class="field"><label>飞书发送人</label>
+        <input type="text" name="sender_name" value="{{ order.sender_name }}"
+               placeholder="历史订单没有发送人时可手填">
+      </div>
+      <div class="field"><label>物流单号</label>
+        <input type="text" name="tracking_no" value="{{ order.tracking_no }}"
+               placeholder="在供应链发货页填写会自动同步到群">
+      </div>
+      <div class="field"><label>备注</label><input type="text" name="note" value="{{ order.note }}"></div>
+    </div>
+    <div class="note muted">
+      <span>
+      订单状态口径：<b>新建</b>（群里同步后归档）→ <b>已推单</b>（复制订单信息同步上游后）→ <b>已发货</b>（上游返回物流单号、回填到订单后）。
+      未发货前撤回 / 撤掉记为<b>已撤单</b>；未发货时群里同步退单记为<b>已退单</b>，
+      <b>已发货的退单请求不受理</b>（请让用户收到货后再退）。改状态会自动校验流转，不允许的跳转会提示原因。
+      </span>
+    </div>
+    <button class="btn primary">保存修改</button>
+  </form>
+</div>
+{% else %}
+{{ locked_block('编辑订单', '改订单字段（会写进订单数据，改错有影响）', 'edit-order') }}
+{% endif %}
+
+{# 合并订单会把另一笔订单并入并删除对方（不可撤销）：只给角色里勾了「合并订单」的人 #}
+{% if can_block(current_user, 'order_merge') %}
+<div class="card" id="merge-order">
+  <h2>合并订单</h2>
+  <form method="post" action="/orders/{{ order.id }}/merge">
+    <div class="filters">
+      <div class="field grow">
+        <label>要并入本单的订单号</label>
+        <input type="text" name="merge_order_no" placeholder="例如 TMP-20260926162511-A6E6EC"
+               required>
+      </div>
+      <div class="field"><label>&nbsp;</label><button class="btn">合并到本单</button></div>
+    </div>
+  </form>
+  <div class="note muted">
+    <span>
+      群里「此单退」这类消息早期会被误建成一笔独立订单（成本为 0、临时单号），真正的订单是另一笔 ——
+      在<b>要保留的那笔订单</b>这里填入对方订单号，即可把两笔合到一起：
+      对方的收货信息、发送人、截图与<b>退单标记</b>会并到本单（本单已有的成本 / 售价 / 供应商不变），
+      对方订单随后删除，同一单不会在统计里重复算一次。
+      合并后不可撤销，请在订单处理日志里留痕核对。
+    </span>
+  </div>
+</div>
+{% else %}
+{{ locked_block('合并订单', '把另一笔订单并入本单并删除对方，不可撤销') }}
+{% endif %}
+
+{{ help_modal('push') }}
+{{ help_modal('refund') }}
+{% endblock %}

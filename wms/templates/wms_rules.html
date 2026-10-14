@@ -1,0 +1,573 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}分级规则与价格系数{% endblock %}
+{% block sub %}分级标准入库为配置项，改标准不改代码；生效期保证历史数据不被追溯重判{% endblock %}
+
+{% block content %}
+{# 2026-10-11：页面的动线是「看规则 → 改规则 → 改价格」，「品类与对标」只是查对用的，
+   以前摆在最上面把两张真正要动的表格顶到屏幕外 —— 现在挪到页面最下面 #}
+<div class="card">
+  <h2>分级规则（安全红线永远第一匹配）</h2>
+  <p class="d">
+    一句话理解：<b>这台货满足什么条件 → 就判成哪一档</b>。下面表里「条件」那一列已经是中文，
+    新增规则时用下面的格子挑一挑就拼好了，<b>不用自己写代码</b>。
+  </p>
+  {# 2026-10-11：「两组条件是且的关系」写清楚 —— 现场把「满足任一」那组当成了自成一条规则，
+     问「满足原封未拆不就是 N 吗，为什么档位是 D」；其实是「全部满足」全中 **且** 「任一」中一条。 #}
+  <p class="d">
+    条件分两组，<b>两组是「且」的关系</b>：先要满足「<b>全部满足</b>」那组里的每一条，
+    <b>并且</b>在「<b>满足任一</b>」那组（可以留空）里至少中一条 —— 两组都满足，才判这一档。<br>
+    例：<b>N 全新</b> = 必检项全过 <b>且</b> 零瑕疵 <b>且</b>（原封未拆 <b>或</b> 拆封未使用）。<br>
+    <b>条件只是「什么时候套这一档」，判成哪一档由「命中档位」那一栏决定</b> ——
+    把 N 全新的条件抄进「D 报废」的表单里，意思就变成「满足这些条件的判 D」。
+  </p>
+  <div class="cond-fold">
+    <details>
+      <summary>这几个词都是什么意思（点开看）</summary>
+      <div class="table-wrap"><table>
+        <thead><tr><th>条件看什么</th><th>意思</th><th>填什么</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for f in cond_fields %}
+          <tr>
+            <td>{{ f.label }}</td>
+            <td class="muted clip">{{ f.hint }}</td>
+            <td>{% if f.kind == 'bool' %}<span class="badge muted">是 / 否</span>{% else %}<span class="badge muted">填数字</span>{% endif %}</td>
+            <td class="mono muted">{{ f.field }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </details>
+    <details>
+      <summary>照抄这几条改一改就行（点开看 · 条件项已按同一套体检项统一）</summary>
+      <ul class="cond-ex">
+      {% for ex in cond_examples %}
+        <li>
+          <b>{{ ex.title }}</b>
+          {% if ex.note %}<br><span class="muted">（{{ ex.note }}）</span>{% endif %}<br>
+          <span class="muted">{{ wms_conditions_text(ex.json) }}</span><br>
+          <code>{{ ex.json | tojson }}</code>
+        </li>
+      {% endfor %}
+      </ul>
+    </details>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">优先级</th><th>品类</th><th>说明</th><th>命中档</th><th>安全红线</th>
+      <th>条件</th><th>启用</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+      <tr class="{{ 'row-editing' if editing and editing.id == r.id }}">
+        <td class="num">{{ r.priority }}</td>
+        <td>{{ wms_category_label(r.category) if r.category != '*' else '通用' }}</td>
+        <td class="wrap2"><span class="clamp2">{{ r.title or '—' }}
+          {# 同档位重影（2026-10-10）：多条同档规则时只能有一条在真正生效（优先级高的先命中），标出来 #}
+          {% if r.twin_count > 1 %}<br><span class="badge pending"
+            title="同品类同档位还有 {{ r.twin_count - 1 }} 条 —— 判级只认优先级最高、条件先命中的那条">同档还有 {{ r.twin_count - 1 }} 条</span>{% endif %}</span></td>
+        <td>{{ bits.grade_badge(r.grade) }}</td>
+        <td>{% if r.safety_flag %}<span class="badge failed">红线</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="wrap2" title="{{ r.conditions }}"><span class="clamp2">{{ wms_conditions_text(r.conditions) }}</span></td>
+        <td>{% if r.enabled %}<span class="badge done">启用</span>{% else %}<span class="badge muted">停用</span>{% endif %}
+          {% if rule_used.get(r.id) %}<br><span class="muted" style="font-size:12px"
+            title="检测记录里存着这条规则 —— 所以它不能删，只能停用">判过 {{ rule_used.get(r.id) }} 台</span>{% endif %}</td>
+        <td class="nowrap">
+          {# 原地编辑（2026-10-10）：以前只有「新增」，想删个条件只能新建一条 → 同档位越堆越多 #}
+          <a class="btn sm" href="/wms/rules?edit={{ r.id }}#rule-form"
+             title="把这条规则填进下面的表单原地改（保存后就地更新，不会多出一条）">编辑</a>
+          {# 按钮写的是「要做的动作」，带图标分正负：别让人只看字面以为这条已经停用 #}
+          <form class="inline-form" method="post" action="/wms/rules/grade/{{ r.id }}/toggle">
+            <button class="btn sm" title="{{ '这条正在用，点一下停用（引擎不再用它判级）' if r.enabled else '这条已停用，点一下启用（引擎恢复用它判级）' }}">
+              <i class="bi bi-{{ 'toggle-on' if r.enabled else 'toggle-off' }}"></i>
+              {{ '正在用 · 点此停用' if r.enabled else '已停用 · 点此启用' }}</button></form>
+          {% if rule_used.get(r.id) %}
+          <button class="btn sm" disabled
+                  title="这条判过 {{ rule_used.get(r.id) }} 台货，历史记录还要指着它查依据 —— 只能停用">删除</button>
+          {% else %}
+          <form class="inline-form" method="post" action="/wms/rules/grade/{{ r.id }}/delete"
+                onsubmit="return confirm('删掉这条规则？\n\n{{ r.title or r.grade }}\n（还没判过货，删了不影响历史记录）')">
+            <button class="btn sm danger">删除</button></form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{# 规则体检（2026-10-11）：循环所有规则，把「每条用了哪些条件项」摆成一张对照表，
+   并挑出「条件项不统一 / 条件一样档位不同 / 兜底档排太前」——
+   现场要求「把所有的等级条件判断都统一一下条件项」，先把现状摆出来。 #}
+<div class="card flush" id="rule-check">
+  <h2>规则体检：各档用到的条件项（每次打开都自动重新比对）</h2>
+  <p class="d">
+    空着的格子 = 那条规则<b>没写</b>这一项。「且」= 全部满足那组、「或」= 满足任一那组。
+    对照看一遍就知道各档的「体检项」是不是统一（比如有的写了外观瑕疵、有的没写）。
+  </p>
+  {% if rule_check.notes or rule_check.row_notes %}
+  <div class="note warn">
+    <i class="bi bi-exclamation-triangle-fill"></i>
+    <div>
+      <div><b>体检发现 {{ rule_check.notes | length + rule_check.row_notes | length }} 处要处理：</b></div>
+      {% for n in rule_check.notes %}<div>· {{ n }}</div>{% endfor %}
+      {% if rule_check.row_notes %}
+      <div>· 还有 {{ rule_check.row_notes | length }} 条规则自己有问题（说明与条件对不上、或抄错了档位）——
+        见下表里带 ↳ 的那几行。</div>
+      {% endif %}
+    </div>
+  </div>
+  {% else %}
+  <div class="note">
+    <i class="bi bi-check2-circle"></i>
+    <div>没发现问题：各档规则的条件项、档位都对得上。</div>
+  </div>
+  {% endif %}
+  <details class="cond-fold">
+    <summary>点开看对照表（每条规则 × 每个条件项）</summary>
+    <div class="table-wrap"><table>
+      <thead><tr><th class="num">优先级</th><th>命中档</th><th>规则</th>
+        {% for field, label in rule_check.fields %}<th>{{ label }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in rule_check.rows %}
+        <tr>
+          <td class="num">{{ row.rule.priority }}</td>
+          <td>{{ bits.grade_badge(row.rule.grade) }}</td>
+          <td class="wrap2"><span class="clamp2">{{ row.rule.title or '—' }}
+            {% if not row.rule.enabled %}<span class="badge muted">停用</span>{% endif %}</span></td>
+          {% for cell in row.cells %}
+            <td class="mono">{% if cell %}{{ cell }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          {% endfor %}
+        </tr>
+        {% if row.note %}
+        <tr><td colspan="{{ rule_check.fields | length + 3 }}" class="muted"
+                style="font-size:12px">↳ {{ row.note }}</td></tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table></div>
+  </details>
+</div>
+
+{# 2026-10-11：新增表单默认收起（现场一天到晚只是看规则、偶尔改一条，
+   那一长条表单把下面的价格系数全顶到屏幕外）→ 点标题条展开；
+   点表格里的「编辑」跳过来时（?edit=）自动展开，不然填不了 #}
+<div class="card" id="rule-card">
+  <details class="rule-fold" id="rule-form" {% if editing %}open{% endif %}>
+    <summary class="rule-fold-sum">
+      <i class="bi bi-{{ 'pencil-square' if editing else 'plus-circle' }}"></i>
+      {% if editing %}编辑分级规则「{{ editing.title or editing.grade }}」{% else %}新增分级规则{% endif %}
+      {% if editing %}<span class="badge processing2">原地改 · 不会多出一条</span>
+      {% else %}<span class="rule-fold-tip">默认收起 · 点这里展开填表</span>{% endif %}
+    </summary>
+    <div class="rule-fold-body">
+  {% if editing %}
+  <p class="d">
+    改的是 <b>「{{ editing.title or editing.grade }}」</b> 这一条本身（保存后就地更新，立即生效）。
+    历史检测记录里存的是当时的等级与依据，<b>不会被追溯重判</b> —— 所以放心改。
+    想留痕就「另存为新规则」：改完把「规则说明」和优先级调一下再保存。
+  </p>
+  {% else %}
+  <p class="d">
+    要改已有的规则，请点上表那一行的 <b>「编辑」</b> —— 在这里改会新添一条（同品类同档位只允许一条，
+    重复保存会被拦下来）。品类可以挂在任意一级：选「通用」所有品类都吃这条，选到三级就只对这一个品类生效
+    （同优先级下三级优先）。
+  </p>
+  {% endif %}
+  <form method="post" action="/wms/rules/grade" id="rule-form-el">
+    {% if editing %}<input type="hidden" name="rule_id" value="{{ editing.id }}">{% endif %}
+    <div class="field-row auto">
+      {{ bits.cat_picker(category_tree, 'rcat', value=(editing.category if editing else '*'), allow_generic=true) }}
+      <div class="field"><label for="r-pri">优先级（小的先匹配）</label>
+        <input id="r-pri" type="number" name="priority" value="{{ editing.priority if editing else 100 }}"></div>
+      <div class="field"><label for="r-g">命中档位（判成哪一档）</label>
+        <select id="r-g" name="grade">{% for v, t in grades %}<option value="{{ v }}" {{ 'selected' if editing and editing.grade == v }}>{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="r-sf">安全红线</label>
+        <select id="r-sf" name="safety_flag">
+          <option value="0" {{ 'selected' if not editing or not editing.safety_flag }}>否</option>
+          <option value="1" {{ 'selected' if editing and editing.safety_flag }}>是（永远第一匹配）</option></select></div>
+    </div>
+    <div class="field"><label for="r-title">规则说明</label>
+      <input id="r-title" type="text" name="title" value="{{ editing.title if editing else '' }}"
+             placeholder="如：S 完美：全项通过 + 零瑕疵"></div>
+    <div class="field">
+      {# 2026-10-11：条件区改成「且」「或」两块，跟引擎一致。
+         引擎判级是「all_of 全部命中 **且** any_of 至少命中一条」，以前界面上只能二选一，
+         N 全新这种「(原封未拆 或 拆封未使用) 且 全项通过 且 零瑕疵」根本表达不出来：
+         照抄那条示例只会插进「或」的半截（「全项通过 + 零瑕疵」被悄悄丢掉），
+         编辑 N 全新 这条规则更糟 —— 一打开就少一半，点保存真就删了。 #}
+      <label>满足什么条件才判这一档（条件只决定「什么时候套用」，判成哪一档看上面的「命中档位」）</label>
+      <div class="cb">
+        <div class="cb-grp">
+          <div class="cb-head">
+            <span class="cb-lead">① 下面这几条<strong>全部</strong>都要满足</span>
+            <button type="button" class="btn sm" id="cb-add">+ 加一条条件</button>
+          </div>
+          <div id="cb-rows"></div>
+        </div>
+        <div class="cb-grp">
+          <div class="cb-head">
+            {# 措辞（2026-10-11）：写成「还要满足任一」= 上面全满足之后**额外**的条件，
+               以前写「满足任一即可」会被读成「自成一条规则」，现场就绕在这里 #}
+            <span class="cb-lead">② 并且（留空就不要求）上面都满足后，下面这几条<strong>还要满足任一</strong></span>
+            <button type="button" class="btn sm" id="cb-add-any">+ 加一条条件</button>
+          </div>
+          <div id="cb-rows-any"></div>
+        </div>
+        {# 删光所有条件 = 空条件 = 兜底档（前面几条都没命中才判它），不是「被系统偷偷加回来」 #}
+        <p class="d" id="cb-human"></p>
+        <p class="d" id="cb-tip">「照抄」会把<b>条件 + 命中档位 + 优先级 + 规则说明</b>一起填上 ——
+          同一批条件填在「D 报废」里，意思就是「满足这些条件的判 D」，别抄错地方。</p>
+        <div class="cb-ex" id="cb-ex"></div>
+      </div>
+    </div>
+    <div class="field"><label for="r-cond">上面挑完自动生成的内容（懂的话也可以直接改这个框）</label>
+      <textarea id="r-cond" name="conditions" rows="3">{{ editing_json or '{"all_of": []}' }}</textarea></div>
+    <div class="field"><label for="r-reason">给检测员看的依据</label>
+      <input id="r-reason" type="text" name="reason" value="{{ editing.reason if editing else '' }}"
+             placeholder="如：零使用痕迹、零外观瑕疵，可直接上架"></div>
+    <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if not editing or editing.enabled }}>
+      保存后启用这条规则（不勾就是停用，引擎不会用它判级）</label>
+    <button class="btn primary">{{ '保存修改（立即生效）' if editing else '保存（立即生效）' }}</button>
+    {% if editing %}
+    <a class="btn" href="/wms/rules">取消编辑（改为新增）</a>
+    {% endif %}
+  </form>
+    </div>
+  </details>
+</div>
+
+<div class="card flush">
+  <h2>价格系数（渔货价 = 基准价 × 系数 · 建议售价 = 基准价 × 建议售价系数）</h2>
+  <p class="d">
+    检测台出价就用这张表：<b>停用的档位等于没配</b> —— 取不到系数时按 1.0 兜底（会显示「系数 1 · 毛利 100%」）。
+    <b>等级按「分级规则」的优先级排（越靠前越先匹配）</b> —— 不再按字母排（那样 S 会排到最后，
+    看着像最低档，其实它是最先命中的那一档）。
+    S / A 两档出价可直接上架；B / C / D 检测时不写渔货价（进维修 / 报修，修完重新定级或按拆机件估值）。
+    <b>建议售价是渔枢 / 渔货栈建档时「建议售价」的基础数据</b>（渔集定完级就带过去了）；
+    <b>渔货价不能高于建议售价</b> —— 算高了（或人工改价改超了）一律压到建议售价。
+  </p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>等级</th><th class="num">渔货价系数</th><th class="num">建议售价系数</th>
+      <th class="num">最低毛利率</th>
+      <th class="num">低于基准价此比例需审批</th><th>说明</th><th>状态</th><th></th></tr></thead>
+    <tbody>
+    {% for p in prices %}
+      <tr>
+        <td>{{ bits.grade_badge(p.grade) }}</td>
+        <td class="num">{{ p.factor }}</td>
+        <td class="num">{{ p.suggest_factor }}
+          {% if p.factor > p.suggest_factor %}<div class="muted" style="font-size:12px">渔货价会压到建议售价</div>{% endif %}</td>
+        <td class="num">{{ (p.min_margin * 100) | round(1) }}%</td>
+        <td class="num">{{ (p.need_approval_below * 100) | round(0) }}%</td>
+        <td class="muted clip">{{ p.note or '—' }}</td>
+        <td>{% if p.enabled %}<span class="badge done">启用</span>{% else %}<span class="badge muted">停用（按 1.0 兜底）</span>{% endif %}</td>
+        <td class="nowrap">
+          {# 按钮写的是「要做的动作」：启用中的档位点它是停用，停用的档位点它是启用 #}
+          <form class="inline-form" method="post" action="/wms/rules/price/{{ p.id }}/toggle">
+            <button class="btn sm" title="{{ '这一档正在用，点一下停用（检测台会按系数 1.0 兜底）' if p.enabled else '这一档已停用，点一下启用（检测台按系数 ' ~ p.factor ~ ' 出价）' }}">
+              <i class="bi bi-{{ 'toggle-on' if p.enabled else 'toggle-off' }}"></i>
+              {{ '正在用 · 点此停用' if p.enabled else '已停用 · 点此启用' }}</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <form method="post" action="/wms/rules/price">
+    <div class="field-row auto">
+      {# 等级下拉与上面的表同一个顺序（按分级规则的优先级）：字母序会把 S 排最后，挑的时候对不上 #}
+      <div class="field"><label for="p-g">等级</label>
+        <select id="p-g" name="grade">{% for v, t in price_grades %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="p-f">渔货价系数</label><input id="p-f" type="number" step="0.01" name="factor" value="1.00"></div>
+      {# 建议售价系数（2026-10-10）：建议售价 = 基准价 × 它，渔枢 / 渔货栈建档直接带过去 #}
+      <div class="field"><label for="p-sf">建议售价系数</label>
+        <input id="p-sf" type="number" step="0.01" name="suggest_factor" value="1.00"
+               title="建议售价 = 基准价 × 这个系数；留空按 1.0（= 基准价）。渔货价不能高于它"></div>
+      <div class="field"><label for="p-m">最低毛利率（0.15=15%）</label>
+        <input id="p-m" type="number" step="0.01" name="min_margin" value="0.15"></div>
+      <div class="field"><label for="p-a">低于此比例需审批（0.85=八五折）</label>
+        <input id="p-a" type="number" step="0.01" name="need_approval_below" value="0.85"></div>
+    </div>
+    <label class="check"><input type="checkbox" name="enabled" value="1" checked>
+      保存后启用这一档（不勾就是停用，检测台会按系数 1.0 兜底）</label>
+    <button class="btn primary">保存价格系数</button>
+  </form>
+</div>
+
+{# 品类与对标：查对用的参照表（2026-10-11 从页面最上面挪下来 —— 真正要动的两张表在前面） #}
+<div class="card flush" id="cat-map">
+  <h2>品类与对标（收货三级品类 ↔ 渔枢系统三级类目）</h2>
+  <p class="d">
+    建档按三级品类选，对应关系是三级对三级（**右边那列是渔枢系统「类目管理」里的三级类目**；
+    对标依据《类目对标看板》三级映射 TOP40，对标源上海婧米 9.29 售后工单 881 条）；
+    条码只取一级码（<code>HA.KC.DFB</code> → <code>QCHA…</code>），
+    改这张表不影响历史条码。没写对标的那几类是「还没拿到工单数据」，标「未对标」，不猜。
+  </p>
+  <div class="table-wrap"><table>
+    <thead><tr><th>品类码</th><th>收货三级品类</th><th>渔枢系统三级类目</th>
+      <th class="num">对标工单</th><th>置信度</th><th class="num">专属规则</th><th class="num">在库货品（台）</th></tr></thead>
+    <tbody>
+    {% for c in category_rows %}
+      <tr>
+        <td class="mono muted">{{ c.code }}</td>
+        <td class="wrap2"><span class="clamp2">{{ c.path }}</span></td>
+        <td class="wrap2"><span class="clamp2">{% if c.map %}{{ c.map }}{% else %}<span class="muted">未对标</span>{% endif %}</span></td>
+        <td class="num">{{ c.tickets if c.tickets else '—' }}</td>
+        <td>{% if c.confidence %}<span class="badge {{ c.confidence_tone }}">{{ c.confidence }}</span>{% else %}<span class="badge muted">未对标</span>{% endif %}</td>
+        <td class="num">{{ c.rules }}{% if not c.rules %}<span class="muted">（走通用）</span>{% endif %}</td>
+        <td class="num">{% if c.stock %}{{ c.stock }}<br><span class="muted">待检 {{ c.pending }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="foot" style="text-align:left">
+    「在库货品（台）」＝ 现在库里属于这个三级品类的货品台数（已售 / 危废这些已经不在库的不算），
+    下面那行小字是其中<b>还没检测</b>的 —— 看它能知道「哪一类还压着活没干」。
+    当前有 {{ generic_rules }} 条「通用」分级规则 —— 没有专属规则的品类全部按通用规则判级；
+    同优先级时更具体的品类规则先匹配（三级 &gt; 二级 &gt; 一级 &gt; 通用）。
+  </div>
+</div>
+
+<style>
+  .cond-fold { margin: 8px 0 12px; }
+  .cond-fold details { border: 1px solid var(--c-line, #e3e6ea); border-radius: 8px; margin-bottom: 6px; }
+  .cond-fold summary { cursor: pointer; padding: 8px 10px; font-size: 13px; }
+  .cond-fold .table-wrap { margin: 0; }
+  .cond-ex { margin: 0; padding: 10px 16px; }
+  .cond-ex li { margin-bottom: 10px; }
+  .cond-ex code { display: inline-block; font-size: 12px; word-break: break-all; color: var(--c-muted, #6b7280); }
+  .cb { border: 1px solid var(--c-line, #e3e6ea); border-radius: 8px; padding: 10px; }
+  .cb-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 8px; }
+  /* 两组条件（且 / 或，2026-10-11）：第二组留空就是「只要求全部满足」 */
+  .cb-grp + .cb-grp { border-top: 1px dashed var(--c-line, #e3e6ea); margin-top: 4px; padding-top: 8px; }
+  .cb-lead { font-size: 13px; color: var(--c-text-subtle, #6b7280); }
+  .cb-lead strong { color: var(--c-text, #1f2937); }
+  .cb-row { display: grid; grid-template-columns: minmax(0, 1.6fr) 150px minmax(0, 1fr) 38px;
+            gap: 8px; margin-bottom: 8px; align-items: center; }
+  .cb-row .cb-del { height: 38px; border: 1px solid var(--c-line, #e3e6ea); background: #fff;
+                    border-radius: 8px; cursor: pointer; }
+  .cb-ex { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .cb-ex .btn { font-size: 12px; }
+  /* 正在编辑的那一行 / 被「编辑」跳过来的表单：给个底色，别看错行（2026-10-10） */
+  tr.row-editing { background: var(--c-primary-soft, #e3f4f1); }
+  /* 新增 / 编辑分级规则：默认收起（2026-10-11），点标题条展开 ——
+     表单挺长，摊开着会把下面的价格系数顶到屏幕外 */
+  .rule-fold { border: 1px solid var(--c-line, #e3e6ea); border-radius: 8px; }
+  .rule-fold > .rule-fold-sum { cursor: pointer; padding: 10px 12px; font-size: 14px; font-weight: 600;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .rule-fold > .rule-fold-sum:hover { background: var(--c-surface-3, #f5f7f8); }
+  .rule-fold > .rule-fold-sum .bi { font-size: 15px; color: var(--c-primary, #0d7f74); }
+  .rule-fold-tip { font-weight: 400; font-size: 12.5px; color: var(--c-text-subtle, #6b7280); }
+  .rule-fold[open] > .rule-fold-sum { border-bottom: 1px solid var(--c-line, #e3e6ea); }
+  .rule-fold-body { padding: 12px 12px 4px; }
+  #rule-form:target { box-shadow: 0 0 0 2px var(--c-primary-border, #a7ded4); }
+  @media (max-width: 900px) {
+    .cb-row { grid-template-columns: 1fr 1fr; }
+    .cb-row .cb-del { grid-column: span 2; }
+  }
+</style>
+
+<script>
+(function () {
+  var FIELDS = {{ cond_fields | tojson }};
+  var OPS = {{ cond_ops | tojson }};
+  var EXAMPLES = {{ cond_examples | tojson }};
+  var box = document.getElementById('r-cond');
+  var rowsAll = document.getElementById('cb-rows');
+  var rowsAny = document.getElementById('cb-rows-any');
+  var human = document.getElementById('cb-human');
+  var tip = document.getElementById('cb-tip');
+  var exBox = document.getElementById('cb-ex');
+  if (!box || !rowsAll || !rowsAny) return;
+
+  function meta(f) {
+    for (var i = 0; i < FIELDS.length; i++) { if (FIELDS[i].field === f) return FIELDS[i]; }
+    return FIELDS[0];
+  }
+  function num(v) { var n = Number(v); return isNaN(n) ? 0 : n; }
+  function opText(op) {
+    var t = '=';
+    for (var i = 0; i < OPS.length; i++) { if (OPS[i][0] === op) t = OPS[i][1].split(' ').pop(); }
+    return t;
+  }
+  function rowHtml(cond) {
+    var f = meta(cond ? cond.field : FIELDS[0].field);
+    var h = '<div class="cb-row"><select class="cb-field">';
+    // 老规则里可能还留着已经下线的条件项（如电池健康度）：先补一个「（已下线）」选项顶住，
+    // 否则下拉只能落到第一项、一保存就把这条条件偷偷改成别的字段了。
+    if (cond && cond.field && f.field !== cond.field) {
+      h += '<option value="' + String(cond.field).replace(/"/g, '') + '" selected>' +
+           String(cond.field) + '（已下线，建议删掉这一条）</option>';
+    }
+    FIELDS.forEach(function (fd) {
+      h += '<option value="' + fd.field + '"' + (fd.field === f.field ? ' selected' : '') + '>' + fd.label + '</option>';
+    });
+    h += '</select><select class="cb-op">';
+    OPS.forEach(function (o) {
+      h += '<option value="' + o[0] + '"' + (cond && cond.op === o[0] ? ' selected' : '') + '>' + o[1] + '</option>';
+    });
+    h += '</select>';
+    if (f.kind === 'bool') {
+      var yes = !(cond && (cond.value === false || cond.value === 'false'));
+      h += '<select class="cb-val"><option value="true"' + (yes ? ' selected' : '') + '>是</option>' +
+           '<option value="false"' + (yes ? '' : ' selected') + '>否</option></select>';
+    } else {
+      var v = (cond && cond.value !== null && cond.value !== undefined) ? num(cond.value) : 0;
+      h += '<input class="cb-val" type="number" step="1" value="' + v + '">';
+    }
+    h += '<button type="button" class="cb-del" title="删掉这一条">×</button></div>';
+    return h;
+  }
+  function readGroup(rowsBox) {
+    var out = [];
+    rowsBox.querySelectorAll('.cb-row').forEach(function (row) {
+      var vEl = row.querySelector('.cb-val');
+      out.push({
+        field: row.querySelector('.cb-field').value,
+        op: row.querySelector('.cb-op').value,
+        value: vEl.tagName === 'SELECT' ? vEl.value === 'true' : num(vEl.value)
+      });
+    });
+    return out;
+  }
+  function condText(c) {
+    var f = meta(c.field);
+    var v = f.kind === 'bool' ? (c.value ? '是' : '否')
+          : (f.field === 'battery_health' ? c.value + '%' : String(c.value));
+    return f.label + ' ' + opText(c.op) + ' ' + v;
+  }
+  function humanText(all, any) {
+    // 2026-10-11：两组的关系写成「且」——以前写「全部满足：A、B；满足任一：C」，
+    // 现场把它读成「满足 C 就判这一档」，于是问「原封未拆不就是 N 吗」。
+    if (!all.length && !any.length) {
+      return '还没填条件：这一档就是兜底（前面几条都没命中就判它）';
+    }
+    var text = all.length ? '必须全部满足：' + all.map(condText).join('、') : '';
+    if (any.length) {
+      var orText = '（' + any.map(condText).join(' 或 ') + '）';
+      text += (text ? ' 并且 ' : '必须满足：') + orText;
+    }
+    return text;
+  }
+  function sync() {
+    var all = readGroup(rowsAll);
+    var any = readGroup(rowsAny);
+    var obj = { all_of: all };
+    if (any.length) obj.any_of = any;
+    box.value = JSON.stringify(obj);
+    if (human) human.textContent = '现在的意思 → ' + humanText(all, any);
+  }
+  function drawGroup(rowsBox, list) {
+    rowsBox.innerHTML = '';
+    // 空就是空（2026-10-10）：以前删光最后一条会自动补一行「必检项全过」，
+    // 现场看到的就是「删了没用，保存后条件还在」—— 现在删光 = 兜底档（前面都没命中才判它）
+    (list || []).forEach(function (c) {
+      rowsBox.insertAdjacentHTML('beforeend', rowHtml(c));
+    });
+  }
+  // 两组一起读、一起写（2026-10-11）：引擎是「all_of 全中 且 any_of 至少中一条」，
+  // 界面必须能在同一个表单里同时表达「且」和「或」，否则照抄 / 编辑来回一次就丢一半条件。
+  function render(json) {
+    var j = json || {};
+    drawGroup(rowsAll, j.all_of);
+    drawGroup(rowsAny, j.any_of);
+    sync();
+  }
+  function bind(rowsBox) {
+    rowsBox.addEventListener('change', function (e) {
+      // 换字段时「是/否」与「填数字」的控件不一样 → 整块按当前值重画
+      if (e.target.classList.contains('cb-field')) { drawGroup(rowsBox, readGroup(rowsBox)); sync(); return; }
+      sync();
+    });
+    rowsBox.addEventListener('input', sync);
+    rowsBox.addEventListener('click', function (e) {
+      if (!e.target.classList.contains('cb-del')) return;
+      e.target.closest('.cb-row').remove();
+      sync();
+    });
+  }
+  bind(rowsAll);
+  bind(rowsAny);
+  function addRow(rowsBox) {
+    var list = readGroup(rowsBox);
+    list.push({ field: FIELDS[0].field, op: '>=', value: FIELDS[0].kind === 'bool' });
+    drawGroup(rowsBox, list);
+    sync();
+  }
+  document.getElementById('cb-add').addEventListener('click', function () { addRow(rowsAll); });
+  document.getElementById('cb-add-any').addEventListener('click', function () { addRow(rowsAny); });
+  if (exBox) {
+    EXAMPLES.forEach(function (ex) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn sm';
+      b.textContent = '照抄：' + ex.title;
+      b.title = '照抄这一条：条件 + 命中档位 + 优先级 + 规则说明一起填上（保存后才生效）'
+        + (ex.note ? '\n' + ex.note : '');
+      b.addEventListener('click', function () {
+        render(ex.json || {});
+        // 照抄 = 整套照抄（2026-10-11）：只填条件会让人以为「条件满足就自动判那一档」——
+        // 在 D 报废 的编辑页里照抄 N 的条件，档位却还是 D，现场就是这么被绕住的。
+        var title = document.getElementById('r-title');
+        if (title) title.value = ex.title;
+        var grade = document.getElementById('r-g');
+        if (grade && ex.grade) grade.value = ex.grade;
+        var pri = document.getElementById('r-pri');
+        if (pri && ex.priority) pri.value = ex.priority;
+        var safety = document.getElementById('r-sf');
+        if (safety) safety.value = ex.safety ? '1' : '0';
+        if (tip) {
+          tip.textContent = '已照抄「' + ex.title + '」：条件、命中档位（' + (ex.grade || '—') +
+            '）、优先级（' + (ex.priority || '—') + '）、规则说明都填好了，核对无误再点保存。';
+        }
+      });
+      exBox.appendChild(b);
+    });
+  }
+  // 「判断一下条件对不对」（2026-10-11）：条件与某个内置示例一字不差、但命中档位 / 安全红线
+  // 跟那条示例不一样时，保存前问一句 —— 现场正是在「D 报废」的表单里照抄了 N 全新的条件，
+  // 条条看着都对、档位却是 D。只在**完全一致**时问，不猜、不拦别的写法。
+  function conditionsKey(text) {
+    try {
+      var obj = JSON.parse(text || '{}');
+      var parts = [];
+      ['all_of', 'any_of'].forEach(function (k) {
+        var list = (obj[k] || []).map(function (c) {
+          return c.field + '|' + c.op + '|' + JSON.stringify(c.value);
+        }).sort();
+        if (list.length) parts.push(k + ':' + list.join(','));
+      });
+      return parts.join(' & ');
+    } catch (err) { return ''; }
+  }
+  var formEl = document.getElementById('rule-form-el');
+  if (formEl) {
+    formEl.addEventListener('submit', function (e) {
+      var now = conditionsKey(box.value);
+      if (!now) return;
+      var hit = null;
+      EXAMPLES.forEach(function (ex) {
+        if (conditionsKey(JSON.stringify(ex.json || {})) === now) hit = ex;
+      });
+      if (!hit) return;
+      var gradeEl = document.getElementById('r-g');
+      var safetyEl = document.getElementById('r-sf');
+      var sameGrade = !hit.grade || (gradeEl && gradeEl.value === hit.grade);
+      var sameSafety = (!!hit.safety) === (safetyEl && safetyEl.value === '1');
+      if (sameGrade && sameSafety) return;
+      var nowText = gradeEl && gradeEl.selectedIndex >= 0
+        ? gradeEl.options[gradeEl.selectedIndex].text : '';
+      var ok = window.confirm(
+        '停一下，先确认条件对不对：\n\n你填的条件跟「' + hit.title + '」一模一样，\n' +
+        '但这条的「命中档位」是「' + nowText + '」' +
+        (hit.grade ? '（那条示例是判 ' + hit.grade + '）' : '') + '。\n\n' +
+        '保存后这条规则的意思是：满足这些条件的判成「' + nowText + '」。\n' +
+        '是要这样吗？（点「取消」回去改「命中档位」，点「确定」照现在这样保存）'
+      );
+      if (!ok) e.preventDefault();
+    });
+  }
+  try {
+    render(JSON.parse(box.value || '{}'));
+  } catch (err) { render({}); }
+})();
+</script>
+{% endblock %}

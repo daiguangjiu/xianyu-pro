@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}提现审核 · 审核台{% endblock %}
+
+{% block content %}
+{% if not can_write %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid #b26a00;">
+  <div class="card-body" style="padding: 12px 16px; font-size: 14px;">
+    <i class="bi bi-lock"></i> 当前为<strong>只读浏览</strong>。审核操作需
+    <a href="/self/merchant/login?next=/platform/withdraws" style="color:var(--c-primary);">以平台管理员登录</a>。
+  </div>
+</div>
+{% endif %}
+{% if request.query_params.get('msg') %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid var(--c-success);">
+  <div class="card-body" style="padding: 12px 16px;">
+    <i class="bi bi-check-circle"></i> {{ request.query_params.get('msg') }}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>提现审核</h1>
+    <span class="page-subtitle">通过后金额从冻结转已打款；驳回则退回可提现余额</span>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="/self/platform/settlements" class="btn btn-outline-secondary">
+      <i class="bi bi-receipt"></i> 结算管理
+    </a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    {% if rows %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" style="margin:0;">
+        <thead>
+          <tr>
+            <th>申请单号</th>
+            <th style="width:150px;">商家</th>
+            <th style="width:110px;">金额</th>
+            <th>收款账户</th>
+            <th style="width:100px;">状态</th>
+            <th style="width:220px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in rows %}
+          {% set m = merchants.get(w.merchant_id) %}
+          <tr>
+            <td class="mono-sm">{{ w.apply_no }}</td>
+            <td>{{ m.short_name or m.name if m else w.merchant_id }}</td>
+            <td><strong>¥{{ '{:,.2f}'.format(w.amount or 0) }}</strong></td>
+            <td style="font-size:13px;">
+              {{ w.bank_name or '-' }}
+              {% if w.bank_account %}· {{ w.bank_account }}{% endif %}
+              {% if w.account_name %}
+                <div style="color:var(--c-text-muted);">{{ w.account_name }}</div>
+              {% endif %}
+            </td>
+            <td>
+              {% if w.status == 'pending' %}
+                <span class="badge" style="background:#fff4e5;color:#b26a00;">{{ w.status_text }}</span>
+              {% elif w.status == 'paid' %}
+                <span class="badge" style="background:#e6f7ee;color:#0a7a45;">{{ w.status_text }}</span>
+              {% elif w.status == 'rejected' %}
+                <span class="badge" style="background:#fdecec;color:#b3261e;">{{ w.status_text }}</span>
+              {% else %}
+                <span class="badge" style="background:#eef0f3;color:#555;">{{ w.status_text }}</span>
+              {% endif %}
+              {% if w.review_note %}
+                <div style="font-size:12px;color:var(--c-text-muted);">备注：{{ w.review_note }}</div>
+              {% endif %}
+            </td>
+            <td>
+              {% if w.status == 'pending' %}
+              <div class="d-flex gap-1">
+                <form method="post" action="/self/platform/withdraws/{{ w.id }}/review" style="margin:0;">
+                  <input type="hidden" name="action" value="approve">
+                  <input type="text" name="review_note" placeholder="备注（可选）"
+                         style="width:110px;font-size:12px;padding:2px 6px;">
+                  <button type="submit" class="btn btn-sm btn-primary" style="margin-left:2px;" {% if not can_write %}disabled title="需要平台管理员登录"{% endif %}>
+                    <i class="bi bi-check2"></i> 通过
+                  </button>
+                </form>
+                <form method="post" action="/self/platform/withdraws/{{ w.id }}/review" style="margin:0;">
+                  <input type="hidden" name="action" value="reject">
+                  <input type="hidden" name="review_note" value="资料不符，已退回余额">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_write %}disabled title="需要平台管理员登录"{% endif %}>
+                    <i class="bi bi-x"></i> 驳回
+                  </button>
+                </form>
+              </div>
+              {% else %}
+              <span style="font-size:12px;color:var(--c-text-muted);">
+                {{ w.reviewed_by or '-' }} · {{ (w.reviewed_at | string)[:16] | replace('T',' ') if w.reviewed_at else '' }}
+              </span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="padding:48px;text-align:center;color:var(--c-text-muted);">
+      <i class="bi bi-bank" style="font-size:40px;display:block;margin-bottom:12px;"></i>
+      暂无提现申请
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

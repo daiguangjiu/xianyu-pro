@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}{{ batch.batch_no }}{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/wms/batches/{{ batch.id }}/import">Excel 导入建档</a>
+  <a class="btn" href="/wms/inspect">去检测</a>
+  <a class="btn" href="/wms/labels?batch_no={{ batch.batch_no }}">打标签</a>
+  <form method="post" action="/wms/batches/{{ batch.id }}/disable" class="inline-form">
+    <button class="btn">{{ '恢复' if not batch.enabled else '停用' }}</button></form>
+  <form method="post" action="/wms/batches/{{ batch.id }}/delete" class="inline-form"
+        onsubmit="return confirm('删除批次 {{ batch.batch_no }}？（只有一台货都没有的空批次才删得掉，有货的请改用「停用」）')">
+    <button class="btn danger">删除</button></form>
+{% endblock %}
+
+{% block content %}
+{% if not batch.enabled %}
+<div class="card" style="border-color:var(--c-warn)">
+  <p class="d"><b>这个批次已停用</b>：不再出现在建档 / 导入 / 检测的批次选择里，
+    <b>货品、条码、库存流水一条不少</b>，随时能用右上角的「恢复」放回来。</p>
+</div>
+{% endif %}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">已建档</div><div class="value">{{ stats.total }}</div>
+    <div class="hint">预计 {{ batch.qty_expected }} 台</div></div>
+  <div class="stat ok"><div class="label">已定级</div><div class="value">{{ stats.graded }}</div>
+    <div class="hint">非 W 档</div></div>
+  <div class="stat accent"><div class="label">待检</div><div class="value">{{ stats.pending }}</div>
+    <div class="hint">等级还是 W</div></div>
+  <div class="stat"><div class="label">采购成本合计</div><div class="value">¥{{ money(stats.cost) }}</div>
+    <div class="hint">按批次出成本表</div></div>
+</div>
+
+<div class="card">
+  <h2>建档</h2>
+  <p class="d">
+    吃进来的货若是「某一家的某一批」（什么类目都有），走 <b>Excel 导入</b> 把供应商的清单灌进来 ——
+    货号 / 产品名 / 品类按清单每行定，多出来的列沉淀成商品字段。
+    已经知道是什么货的（单条、少量）走 <b>手动建档</b>：独立页面，字段与清单完全一致
+    （货号 / 产品 / 品牌 / 一级·二级·三级分类 / 型号 / 规格 / 成本 / 基准价 / 序列号 /
+    检修后条码 + 商品字段），一机一码或多台一次建好。
+  </p>
+  <div class="field-row auto">
+    <a class="btn primary" href="/wms/batches/{{ batch.id }}/register">手动建档（单条 / 多台）</a>
+    <a class="btn" href="/wms/batches/{{ batch.id }}/import">Excel 导入建档</a>
+  </div>
+  <p class="d muted">（这张表单 2026-10-08 搬到了独立页
+    <a href="/wms/batches/{{ batch.id }}/register">手动建档</a> —— 字段更全，还能跟编辑货品共用一套。）
+  </p>
+</div>
+
+<div class="card flush">
+  <h2>本批货品（{{ stats.total }}）</h2>
+  {% if items %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>显示编码</th><th>货号</th>{# 数量（2026-10-10）：一条货可以是多台 #}
+      <th class="num">数量</th><th>检修后码</th><th>条码</th><th>品牌型号</th><th>序列号</th><th>等级</th><th>状态</th>
+      <th class="num">成本</th><th class="num">基准价</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
+        <td class="mono">{{ it.sku_code or '—' }}</td>
+        <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}"
+              title="这一个条码底下有几台">{{ it.qty or 1 }}</span></td>
+        <td class="mono">{{ it.own_barcode or '—' }}</td>
+        <td class="mono muted">{{ it.barcode }}</td>
+        <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td>
+        <td class="mono muted">{{ it.serial_no or '—' }}</td>
+        <td>{{ bits.grade_badge(it.grade) }}</td>
+        <td>{{ bits.status_badge(it.status) }}</td>
+        <td class="num">{{ bits.money_cell(it.purchase_cost) }}</td>
+        <td class="num">{{ bits.money_cell(it.base_price) }}</td>
+        <td class="nowrap">
+          <a class="btn sm" href="/wms/items/{{ it.id }}/edit">改</a>
+          <form method="post" action="/wms/items/{{ it.id }}/delete" class="inline-form"
+                onsubmit="return confirm('删除 {{ it.display_code }}？检测过 / 出库 / 报修 / 盘点过的不让删')">
+            <button class="btn sm danger">删</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('这一批还没建档 —— 去「Excel 导入建档」把供应商的清单灌进来') }}{% endif %}
+</div>
+
+{% if imports %}
+<div class="card flush">
+  <h2>导入记录（{{ imports | length }}）</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th>时间</th><th>文件</th><th class="num">行数</th><th class="num">入库台数</th>
+      <th>沉淀的字段</th><th>操作人</th></tr></thead>
+    <tbody>{% for g in imports %}
+      <tr>
+        <td class="nowrap muted">{{ g.created_at | dt }}</td>
+        <td class="wrap2"><span class="clamp2">{{ g.file_name or '—' }}</span></td>
+        <td class="num">{{ g.row_count }}</td>
+        <td class="num">{{ g.ok_count }}</td>
+        <td class="clip muted">{% for k in (g.fields or []) %}{{ field_labels.get(k, k) }}{% if not loop.last %}、{% endif %}{% else %}—{% endfor %}</td>
+        <td class="muted">{{ g.operator or '—' }}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

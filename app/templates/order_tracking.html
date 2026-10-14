@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}物流轨迹 · {{ order.order_no }}{% endblock %}
+{% block heading %}物流轨迹{% endblock %}
+{% block sub %}{{ '退回件' if on_return else '正向件' }}运单 {{ mail_no or '未填写' }} · 订单 {{ order.order_no }}{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>{{ '退回件' if on_return else '正向件' }}轨迹</h2>
+  <div class="kv">
+    <div class="k">订单号</div><div class="v"><a href="/orders/{{ order.id }}">{{ order.order_no }}</a></div>
+    <div class="k">运单号</div><div class="v">{% if mail_no %}<span class="mono">{{ mail_no }}</span>{% else %}<span class="muted">未填写</span>{% endif %}</div>
+    <div class="k">收货人</div><div class="v">{{ order.receiver_name or '-' }}</div>
+    <div class="k">物流状态</div>
+    <div class="v">
+      {% if result.status %}
+        <span class="badge {% if result.abnormal %}failed{% elif result.status == 'signed' %}done{% else %}processing2{% endif %}">{{ result.status_label or result.status }}</span>
+        {% if result.abnormal %}<span class="muted" style="margin-left:6px">异常件，要人跟进</span>{% endif %}
+      {% else %}<span class="muted">未识别（接口没给状态码）</span>{% endif %}
+    </div>
+    <div class="k">订单上的状态</div>
+    <div class="v">{{ tracking_labels.get(order.return_tracking_status if on_return else order.tracking_status, '未查询') }}</div>
+  </div>
+  <div class="btn-row" style="margin-top:10px">
+    <a class="btn" href="/orders/{{ order.id }}">返回订单详情</a>
+    {% if not on_return and order.return_tracking_no %}
+      <a class="btn" href="/orders/{{ order.id }}/tracking?on_return=1">查退回件轨迹</a>
+    {% endif %}
+    {% if on_return %}
+      <a class="btn" href="/orders/{{ order.id }}/tracking">查正向件轨迹</a>
+    {% endif %}
+    {% if result.status and result.status != (order.return_tracking_status if on_return else order.tracking_status) %}
+      <form method="post" action="/orders/{{ order.id }}/tracking/apply" style="display:inline">
+        <input type="hidden" name="status" value="{{ result.status }}">
+        <input type="hidden" name="on_return" value="{{ '1' if on_return else '0' }}">
+        <button class="btn primary">同步为「{{ tracking_labels.get(result.status, result.status) }}」</button>
+      </form>
+      <span class="muted">同步会把轨迹里的事实补到订单上（比如已签收 → 已收货），人工标记过的不覆盖。</span>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>轨迹明细</h2>
+  <div class="muted" style="margin:2px 0 10px">
+    {% if result.from_cache %}
+      本地存档{% if result.queried_at %} · 查询于 {{ result.queried_at | dt('%m-%d %H:%M') }}{% endif %}{% if result.is_final %} · 已签收（不再自动刷新）{% endif %}
+    {% elif result.ok %}
+      刚刚实时查询
+    {% endif %}
+    <a class="btn" href="?force=1{% if on_return %}&on_return=1{% endif %}" style="margin-left:8px">刷新</a>
+    {% if result.stale %}<span class="muted" style="margin-left:8px">这次菜鸟没查到，显示的是上次存档</span>{% endif %}
+  </div>
+  {% if result.nodes %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:170px">时间</th><th style="width:200px">地点</th><th>说明</th></tr></thead>
+        <tbody>
+        {% for node in result.nodes %}
+          <tr>
+            <td class="mono">{{ node.time or '-' }}</td>
+            <td>{{ node.station or '-' }}</td>
+            <td>{{ node.desc }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif result.ok %}
+    <div class="muted">菜鸟这次没返回轨迹节点（单号可能有误，或该接口还没在控制台订阅）。</div>
+    {% if result.official_url %}
+      <div class="note" style="margin-top:8px">
+        菜鸟这边暂时查不到{{ result.official_name or '这家快递' }}的轨迹 —— 可以直接到
+        <a href="{{ result.official_url }}" target="_blank" rel="noopener">{{ result.official_name or '快递公司' }}官网</a>查这个单号。
+      </div>
+    {% endif %}
+  {% else %}
+    <div class="note danger" role="alert"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i> {{ result.msg }}</div>
+  {% endif %}
+</div>
+
+{% endblock %}

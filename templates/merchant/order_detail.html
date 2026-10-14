@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}订单 {{ order.downstream_order_id }} · 商家后台{% endblock %}
+
+{% block content %}
+{# ====== 结果提示 ====== #}
+{% if request.query_params.get('msg') %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid {% if request.query_params.get('ok') == '1' %}var(--c-success){% else %}var(--c-danger){% endif %};">
+  <div class="card-body" style="padding: 12px 16px;">
+    <i class="bi bi-{% if request.query_params.get('ok') == '1' %}check-circle{% else %}x-circle{% endif %}"></i>
+    {{ request.query_params.get('msg') }}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>订单详情</h1>
+    <span class="page-subtitle mono-sm">{{ order.downstream_order_id }}</span>
+  </div>
+  <div class="d-flex gap-2 align-items-center">
+    <span class="badge" style="font-size:13px;
+      background:{% if order.status == 'pending' %}#fff4e5;color:#b26a00
+      {% elif order.status in ('confirmed','pushed') %}#e7f1ff;color:#1a56c4
+      {% elif order.status == 'shipped' %}#e6f7ee;color:#0a7a45
+      {% elif order.status in ('refunded','exception') %}#fdecec;color:#b3261e
+      {% else %}#eef0f3;color:#555{% endif %};">
+      {{ order.status_label }}
+    </span>
+    <a href="/self/merchant/orders" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> 返回
+    </a>
+  </div>
+</div>
+
+<div class="row g-3">
+  {# ====== 左：订单主体 ====== #}
+  <div class="col-lg-8">
+    <div class="card" style="margin-bottom: var(--s-4);">
+      <div class="card-header"><i class="bi bi-bag"></i> 商品与金额</div>
+      <div class="card-body">
+        <div class="d-flex gap-3">
+          {% if item and item.main_image %}
+            <img src="{{ item.main_image }}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:10px;">
+          {% else %}
+            <div style="width:72px;height:72px;border-radius:10px;background:var(--c-surface-2);display:flex;align-items:center;justify-content:center;color:var(--c-text-muted);">
+              <i class="bi bi-image" style="font-size:24px;"></i>
+            </div>
+          {% endif %}
+          <div style="flex:1;">
+            <div style="font-weight:600;">{{ item.title if item else '商品信息缺失' }}</div>
+            <div style="font-size:13px;color:var(--c-text-muted);">
+              SKU {{ order.channel_sku_id }}
+              {% if item %} · 编码 {{ item.item_code }}{% endif %}
+            </div>
+          </div>
+        </div>
+        <hr style="margin: 16px 0;">
+        <div class="row" style="font-size:14px;">
+          <div class="col-4">
+            <div style="color:var(--c-text-muted);font-size:12px;">单价</div>
+            <strong>¥{{ '{:,.2f}'.format(order.sale_price or 0) }}</strong>
+          </div>
+          <div class="col-4">
+            <div style="color:var(--c-text-muted);font-size:12px;">数量</div>
+            <strong>{{ order.qty }}</strong>
+          </div>
+          <div class="col-4">
+            <div style="color:var(--c-text-muted);font-size:12px;">货款小计</div>
+            <strong style="color:var(--c-primary);">¥{{ '{:,.2f}'.format(order.amount) }}</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><i class="bi bi-geo-alt"></i> 收货与买家</div>
+      <div class="card-body" style="font-size:14px;">
+        <div class="row g-2">
+          <div class="col-sm-4"><span style="color:var(--c-text-muted);">买家</span><div>{{ order.buyer_name or '-' }}</div></div>
+          <div class="col-sm-4"><span style="color:var(--c-text-muted);">联系电话</span><div>{{ order.buyer_phone or '-' }}</div></div>
+          <div class="col-sm-4"><span style="color:var(--c-text-muted);">渠道</span><div>{{ order.channel }}</div></div>
+          <div class="col-12"><span style="color:var(--c-text-muted);">收货地址</span><div>{{ order.address or '-' }}</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ====== 右：操作区 ====== #}
+  <div class="col-lg-4">
+    {# 物流 #}
+    <div class="card" style="margin-bottom: var(--s-4);">
+      <div class="card-header"><i class="bi bi-truck"></i> 物流信息</div>
+      <div class="card-body">
+        {% if order.logistics %}
+          <div style="font-size:14px;">
+            <div><span style="color:var(--c-text-muted);">物流公司</span> <strong>{{ order.logistics.carrier or '-' }}</strong></div>
+            <div><span style="color:var(--c-text-muted);">运单号</span> <strong class="mono-sm">{{ order.logistics.shipping_no }}</strong></div>
+            <div><span style="color:var(--c-text-muted);">发货时间</span> {{ (order.logistics.received_at or '')[:19] | replace('T', ' ') }}</div>
+            <div><span style="color:var(--c-text-muted);">来源</span> {{ order.logistics.source }}</div>
+          </div>
+        {% else %}
+          <div style="color:var(--c-text-muted);font-size:13px;">尚未发货</div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# 接单 #}
+    {% if order.status == 'pending' %}
+    <div class="card" style="margin-bottom: var(--s-4);">
+      <div class="card-header"><i class="bi bi-check2-circle"></i> 接单</div>
+      <div class="card-body">
+        <p style="font-size:13px;color:var(--c-text-muted);margin-bottom:12px;">
+          确认库存充足可发货后再接单。
+        </p>
+        <form method="post" action="/self/merchant/orders/{{ order.id }}/confirm">
+          <button type="submit" class="btn btn-primary" style="width:100%;">
+            <i class="bi bi-check2-circle"></i> 确认接单
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {# 发货 #}
+    {% if order.status in ('pending', 'confirmed', 'pushed') %}
+    <div class="card" style="margin-bottom: var(--s-4);">
+      <div class="card-header"><i class="bi bi-box-seam"></i> 发货</div>
+      <div class="card-body">
+        <form method="post" action="/self/merchant/orders/{{ order.id }}/ship">
+          <div class="field">
+            <label>物流公司</label>
+            <input type="text" name="carrier" placeholder="如 顺丰速运" list="carrierList" required>
+            <datalist id="carrierList">
+              <option value="顺丰速运"></option>
+              <option value="中通快递"></option>
+              <option value="圆通速递"></option>
+              <option value="韵达快递"></option>
+              <option value="申通快递"></option>
+              <option value="京东物流"></option>
+            </datalist>
+          </div>
+          <div class="field">
+            <label>运单号</label>
+            <input type="text" name="shipping_no" placeholder="如 SF1234567890" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%;">
+            <i class="bi bi-truck"></i> 确认发货
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    {# 采购单 #}
+    {% if pos %}
+    <div class="card">
+      <div class="card-header"><i class="bi bi-cart3"></i> 采购单</div>
+      <div class="card-body" style="font-size:13px;">
+        {% for po in pos %}
+        <div style="padding:6px 0;{% if not loop.last %}border-bottom:1px solid var(--c-border);{% endif %}">
+          <div>{{ po.ali_item_id }} / {{ po.ali_sku_id }}</div>
+          <div style="color:var(--c-text-muted);">
+            成本 ¥{{ '{:,.2f}'.format(po.cost_price or 0) }} × {{ po.qty }} ·
+            状态 {{ po.status }}
+            {% if po.ali_order_id %} · 1688单号 {{ po.ali_order_id }}{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

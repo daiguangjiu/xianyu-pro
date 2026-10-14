@@ -1,0 +1,222 @@
+{# 渔货栈发布管理：渔枢系统商品 → 渔货栈商品池（供应商商品）
+   页面结构对齐渔货栈（货源广场）：搜索 + 类目筛选 + 卡片/列表，
+   但这里管的是「发布」：商品内容在渔枢系统端维护，一键上架到渔货栈对应的类目下。 #}
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}渔货栈发布管理{% endblock %}
+{% block heading %}渔货栈发布管理{% endblock %}
+{% block sub %}共 {{ stats.total }} 款商品{% if state_filter == 'all' %} · 已上架 {{ stats.listed }} · 类目待处理 {{ stats.category_failed }}{% endif %}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/products">商品管理</a>
+  <a class="btn" href="/products/categories">类目管理</a>
+{% endblock %}
+{% block content %}
+
+<form class="goods-toolbar" method="get" action="/sourcing" id="sourcingFilter">
+  <input type="hidden" name="state" value="{{ state_filter }}">
+  <input type="hidden" name="source" value="{{ source_filter }}">
+  <input type="hidden" name="audit" value="{{ audit_filter }}">
+
+  <div class="goods-search">
+    <i class="bi bi-search"></i>
+    <input type="search" name="q" value="{{ keyword }}" placeholder="搜商品名称 / 商品编号">
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">渔货栈状态</span>
+    <div class="seg">
+      <a href="#" class="{% if state_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('state','all');return false;">全部 <span class="n">{{ stats.total }}</span></a>
+      <a href="#" class="{% if state_filter == 'listed' %}active{% endif %}"
+         onclick="setFilter('state','listed');return false;">
+        <i class="bi bi-check-circle"></i> 已上架 <span class="n">{{ stats.listed }}</span></a>
+      <a href="#" class="{% if state_filter == 'unlisted' %}active{% endif %}"
+         onclick="setFilter('state','unlisted');return false;">
+        <i class="bi bi-dash-circle"></i> 未上架</a>
+      <a href="#" class="{% if state_filter == 'category_failed' %}active{% endif %}"
+         onclick="setFilter('state','category_failed');return false;">
+        <i class="bi bi-exclamation-triangle"></i> 类目对不上 <span class="n">{{ stats.category_failed }}</span></a>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">类目</span>
+    <select name="category" class="form-select cat-select" onchange="this.form.submit()">
+      <option value="">全部类目</option>
+      {% for c in categories %}
+        <option value="{{ c }}" {% if category_filter == c %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">商品属性</span>
+    <div class="seg">
+      <a href="#" class="{% if source_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('source','all');return false;">全部</a>
+      <a href="#" class="{% if source_filter == 'third_party' %}active{% endif %}"
+         onclick="setFilter('source','third_party');return false;">供应链商品</a>
+      <a href="#" class="{% if source_filter == 'self_operated' %}active{% endif %}"
+         onclick="setFilter('source','self_operated');return false;">自营商品</a>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">审核</span>
+    <div class="seg">
+      <a href="#" class="{% if audit_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('audit','all');return false;">全部</a>
+      {% for value, label in audit_choices %}
+        <a href="#" class="{% if audit_filter == value %}active{% endif %}"
+           onclick="setFilter('audit','{{ value }}');return false;">{{ label }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</form>
+
+<form method="post" action="/sourcing/publish" id="batchForm">
+  <div class="batch-bar" style="display:flex;align-items:center;gap:var(--s-2);margin-bottom:var(--s-3);">
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+      <input type="checkbox" id="checkAll"> 全选
+    </label>
+    <button class="btn primary btn-sm" data-confirm="把勾选的商品上架到渔货栈（已上架的会更新资料）？">
+      <i class="bi bi-box-arrow-in-down"></i> 批量上架到渔货栈
+    </button>
+    <span class="help" style="margin:0;">
+      上架 = 直接推到渔货栈的对应类目下，渔货栈去自己的店铺发布（闲鱼发布不在这里做）
+    </span>
+  </div>
+
+  <div class="card">
+    {# 手机上这一行有 8 列，横着滑比挤成一条好读 #}
+    <div class="table-responsive">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:36px;"></th>
+          <th>商品</th>
+          <th>渔枢系统类目</th>
+          <th>渔货栈类目（落库）</th>
+          <th style="text-align:right;">渔货价</th>
+          <th style="text-align:right;">成本价</th>
+          <th>审核</th>
+          <th>渔货栈状态</th>
+          <th style="width:150px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          {% set p = row.product %}
+          <tr>
+            <td><input type="checkbox" name="product_id" value="{{ p.id }}" class="row-check"></td>
+            <td>
+              <div style="display:flex;gap:8px;align-items:center;">
+                {% if p.image_path %}
+                  <img src="{{ p.image_path }}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">
+                {% endif %}
+                <div>
+                  <a href="{{ product_url(p) }}" style="text-decoration:none;">{{ p.name or '（未命名）' }}</a>
+                  <div class="help-sm" style="color:var(--c-text-muted);font-size:12px;">
+                    <code>{{ p.code or '—' }}</code>
+                    {% if p.source_type %}<span> · {{ source_label(p) }}</span>{% endif %}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td class="mono-sm">{{ p.category or '—' }}</td>
+            <td>
+              {% if row.category.ok %}
+                <span class="badge">{{ row.category.text }}</span>
+                <div class="help-sm" style="color:var(--c-text-muted);font-size:12px;">
+                  <code>{{ row.category.category_id }}</code>
+                </div>
+              {% else %}
+                <span class="badge warn" title="{{ row.category.note }}">类目对不上</span>
+                <div class="help-sm" style="color:var(--c-warning-fg);font-size:12px;">{{ row.category.note }}</div>
+              {% endif %}
+            </td>
+            <td style="text-align:right;" class="mono">
+              {% if (p.fish_price or 0) > 0 %}
+                ¥{{ '%.2f'|format(p.fish_price) }}
+              {% else %}
+                <span class="badge warn" title="渔货价是渔货栈看到的成本价，没填的话渔货栈看到「待定」">未填渔货价</span>
+              {% endif %}
+            </td>
+            {# 成本价：与商品管理列表同一口径（商品级成本价，SKU 各自的价格在详情 / 编辑页看） #}
+            <td style="text-align:right;" class="mono">¥{{ money(p.cost_amount) }}</td>
+            <td>{{ audit_label(p) }}</td>
+            <td>
+              {% if row.listed %}
+                <span class="badge ok">已上架</span>
+                <div class="help-sm" style="color:var(--c-text-muted);font-size:12px;">
+                  {{ row.synced_at | dt('%m-%d %H:%M') if row.synced_at else '' }}
+                  · <code>{{ row.item_id }}</code>
+                </div>
+              {% elif row.item and row.item.unlisted_at %}
+                <span class="badge warn">已下架</span>
+                <div class="help-sm" style="color:var(--c-text-muted);font-size:12px;">
+                  {{ row.item.unlisted_at | dt('%m-%d %H:%M') }}
+                  {% if row.item.unlisted_reason %}· {{ row.item.unlisted_reason }}{% endif %}
+                </div>
+              {% else %}
+                <span class="badge">未上架</span>
+              {% endif %}
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;">
+                <form method="post" action="/products/{{ p.id }}/sourcing-publish" style="display:inline;">
+                  <button class="btn btn-sm {% if row.listed %}{% else %}primary{% endif %}">
+                    {% if row.listed %}更新{% else %}上架{% endif %}
+                  </button>
+                </form>
+                {% if row.listed %}
+                  <form method="post" action="/products/{{ p.id }}/sourcing-unpublish" style="display:inline;"
+                        data-confirm="从渔货栈下架？渔货栈商品池会置为下架（资料保留）。">
+                    <button class="btn btn-sm">下架</button>
+                  </form>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" style="text-align:center;color:var(--c-text-muted);padding:var(--s-5);">
+            没有符合条件的商品
+          </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+</form>
+
+{# ============================================================ 分页（全站统一组件，放 form 外面：
+   组件自己带 form，塞进批量表单里会造成 form 嵌套） #}
+{{ pager(page, pages, '/sourcing', {
+    'q': keyword, 'category': category_filter, 'state': state_filter,
+    'source': source_filter, 'audit': audit_filter, 'per_page': per_page
+}, total, size=per_page, sizes=page_sizes) }}
+
+<script>
+  function setFilter(name, value) {
+    var form = document.getElementById('sourcingFilter');
+    var input = form.querySelector('input[name="' + name + '"]');
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      form.appendChild(input);
+    }
+    input.value = value;
+    form.submit();
+  }
+  (function () {
+    var all = document.getElementById('checkAll');
+    var boxes = document.querySelectorAll('.row-check');
+    if (all) {
+      all.addEventListener('change', function () {
+        boxes.forEach(function (b) { b.checked = all.checked; });
+      });
+    }
+  })();
+</script>
+{% endblock %}

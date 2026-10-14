@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}编辑账号{% endblock %}
+{% block heading %}{{ heading }}{% endblock %}
+{% block sub %}{{ sub }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/users"><i class="bi bi-arrow-left" aria-hidden="true"></i>返回用户管理</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>基本信息</h2>
+  <form method="post" action="/users/{{ account.id }}/edit">
+    {# 字段自适应排布（与「新增账号」同一套栅格）：一行放不下自动换行 #}
+    <div class="field-row auto">
+      <div class="field"><label for="e-username">登录账号</label>
+        <input id="e-username" type="text" name="username" value="{{ account.username }}" required
+               title="改了以后要用新账号登录；{{ username_rule }}">
+      </div>
+      <div class="field"><label for="e-phone">手机号</label>
+        <input id="e-phone" type="text" name="phone" value="{{ account.phone or '' }}"
+               placeholder="留空 = 不用手机号登录"
+               title="填了就能用手机号登录；{{ phone_rule }}">
+      </div>
+      <div class="field"><label for="e-display">显示名</label>
+        <input id="e-display" type="text" name="display_name" value="{{ account.display_name }}"
+               placeholder="如：小鱼（选填）">
+      </div>
+      <div class="field"><label for="e-role">账号类型</label>
+        <select id="e-role" name="role">
+          <option value="user" {{ 'selected' if account.role != 'admin' }}>子账号</option>
+          <option value="admin" {{ 'selected' if account.role == 'admin' }}>管理员</option>
+        </select>
+      </div>
+      {# 身份（2026-10-11）：外部学员第一次进渔货栈会先走「开店 → 选品 → 素材 → 第一单」引导 #}
+      <div class="field"><label for="e-identity">身份</label>
+        <select id="e-identity" name="identity">
+          {% for value, label in identity_choices %}
+            <option value="{{ value }}" {% if (account.identity or 'internal') == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {# 权限角色：子账号能进哪些菜单看这里；留空 = 默认菜单 #}
+      <div class="field"><label for="e-role-id">权限角色</label>
+        <select id="e-role-id" name="role_id">
+          <option value="">默认（普通成员菜单）</option>
+          {% for r in role_choices %}
+            <option value="{{ r.id }}" {% if account.role_id and account.role_id == r.id %}selected{% endif %}>{{ r.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn primary">保存</button>
+      <span class="help">账号、手机号、显示名、身份、账号类型、权限角色一次提交全部生效。</span>
+    </div>
+  </form>
+  <div class="chips">
+    <span class="chip"><i class="bi bi-person-badge" aria-hidden="true"></i>{{ username_rule }}</span>
+    <span class="chip"><i class="bi bi-phone" aria-hidden="true"></i>{{ phone_rule }}</span>
+    <span class="chip"><i class="bi bi-diagram-3" aria-hidden="true"></i>管理员默认拥有全部菜单；子账号按这里挂的角色</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>可用端</h2>
+  {% if account.role == 'admin' %}
+    <p class="muted">管理员默认拥有全部子系统，不用单独配置。</p>
+  {% else %}
+    <form method="post" action="/users/{{ account.id }}/portals">
+      <div class="portal-checks">
+        {% for p in portals %}
+        <label class="portal-check" title="{{ p.desc }}">
+          <input type="checkbox" name="portals" value="{{ p.key }}" {{ 'checked' if p.key in account.portal_keys }}>
+          <span>{{ p.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="form-actions">
+        <button class="btn primary">保存可用端</button>
+        <span class="help">至少保留一个端，否则账号登录后没有可进的端。</span>
+      </div>
+    </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>密码与状态</h2>
+  <div class="form-actions">
+    <form method="post" action="/users/{{ account.id }}/password" data-confirm="重置「{{ account.username }}」的密码？">
+      <input type="password" name="password" placeholder="新密码" required aria-label="为 {{ account.username }} 设置新密码">
+      <button class="btn">重置密码</button>
+    </form>
+    <form method="post" action="/users/{{ account.id }}/status">
+      <input type="hidden" name="status" value="{{ 'disabled' if account.status == 'active' else 'active' }}">
+      <button class="btn">{{ '停用账号' if account.status == 'active' else '启用账号' }}</button>
+    </form>
+    {% if not me or account.id != me.id %}
+    <form method="post" action="/users/{{ account.id }}/delete" data-confirm="删除账号「{{ account.username }}」？其历史操作日志会保留。">
+      <button class="btn danger">删除账号</button>
+    </form>
+    {% else %}
+    <span class="muted">当前登录的账号不能删除自己（免得把自己锁在系统外面）</span>
+    {% endif %}
+  </div>
+  <div class="chips">
+    <span class="chip"><i class="bi bi-shield-lock" aria-hidden="true"></i>{{ password_rule }}</span>
+    <span class="chip">当前状态：{% if account.status == 'active' %}启用{% else %}已停用{% endif %}</span>
+    <span class="chip">最近登录 {{ human_time(account.last_login_at) }} · 建号 {{ human_time(account.created_at) }}</span>
+  </div>
+</div>
+{% endblock %}

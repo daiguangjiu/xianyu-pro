@@ -1,0 +1,113 @@
+{# 商品标签字典：发布商品时能勾选的固定标签（源头工厂 / 现货速发 …） #}
+{% extends "base.html" %}
+{% block title %}商品标签{% endblock %}
+{% block heading %}商品标签{% endblock %}
+{% block sub %}发布商品时勾选的固定标签：勾上以后随「上架到渔货栈」同步过去{% endblock %}
+{% block actions %}
+  <a class="btn" href="/products/new">去发布商品</a>
+  <a class="btn" href="/sourcing">渔货栈发布管理</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>固定标签 / 动态标签</b>
+      <div class="scope-note">本页只维护「人工认定」的固定标签</div>
+    </div>
+    <p class="help" style="margin:0;max-width:680px;">
+      <b>固定标签</b>（本页维护，如 源头工厂 / 现货速发 / 工厂直供）：发布、编辑商品时勾选，
+      存进商品资料，上架到渔货栈时一并同步 —— 它代表「人工认下来的事实」。<br>
+      <b>动态标签</b>（今日上新 / 直降 x 元 / 高毛利 x% / 库存预警 / 已开单）：渔货栈按商品的
+      真实数据当场算，不在这里配、也不写进商品资料。
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="post" action="/product-tags/create">
+    <div class="field-row auto">
+      <div class="field"><label>标签名</label>
+        <input type="text" name="name" required maxlength="16" placeholder="如：源头工厂">
+        <p class="help">最多 16 字，货源卡片上要放得下</p>
+      </div>
+      <div class="field"><label>配色</label>
+        <select name="kind">
+          {% for k in kinds %}<option value="{{ k }}">{{ kind_text.get(k, k) }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>排序</label>
+        <input type="number" name="sort_order" value="100">
+        <p class="help">数字小的排前面</p>
+      </div>
+      <div class="field"><label>说明（悬停提示）</label>
+        <input type="text" name="hint" maxlength="255" placeholder="如：厂家直供、有工厂资质">
+      </div>
+      <div class="field"><label>&nbsp;</label>
+        <button class="btn primary" type="submit">新增标签</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+{# 行内编辑要用的空表单：HTML 里 form 不能塞在 tr 里，统一提到表格前面，用 form= 关联 #}
+{% for t in rows %}
+  <form method="post" action="/product-tags/{{ t.id }}/edit" id="tagEdit{{ t.id }}"></form>
+{% endfor %}
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>标签名</th><th>配色</th><th>说明</th><th>排序</th>
+          <th>在用商品</th><th>状态</th><th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in rows %}
+        <tr>
+          <td><input form="tagEdit{{ t.id }}" type="text" name="name" value="{{ t.name }}"
+                     maxlength="16" style="width:120px;"></td>
+          <td>
+            <select form="tagEdit{{ t.id }}" name="kind" style="width:150px;">
+              {% for k in kinds %}
+                <option value="{{ k }}" {% if k == t.kind %}selected{% endif %}>{{ kind_text.get(k, k) }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input form="tagEdit{{ t.id }}" type="text" name="hint" value="{{ t.hint }}"
+                     maxlength="255" style="width:100%;min-width:180px;"></td>
+          <td><input form="tagEdit{{ t.id }}" type="number" name="sort_order"
+                     value="{{ t.sort_order }}" style="width:80px;"></td>
+          <td>{{ usage.get(t.name, 0) }} 款</td>
+          <td>
+            {% if t.enabled %}<span class="badge done">启用中</span>
+            {% else %}<span class="badge ignored">已停用</span>{% endif %}
+            {% if t.seeded %}<span class="badge template">内置</span>{% endif %}
+          </td>
+          <td class="table-actions">
+            <button class="btn" type="submit" form="tagEdit{{ t.id }}">保存</button>
+            <form method="post" action="/product-tags/{{ t.id }}/toggle" style="display:inline;">
+              <button class="btn" type="submit">{{ '停用' if t.enabled else '启用' }}</button>
+            </form>
+            <form method="post" action="/product-tags/{{ t.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('删除标签「{{ t.name }}」？');">
+              <button class="btn" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="help">字典是空的：上面新增一个，或者重启一次让内置标签播种。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="help" style="margin-top:12px;">
+    改名会连同商品上的旧名一起改（否则商品上留着字典里没有的野标签，再编辑时选不回来）；
+    「在用商品」不为 0 的标签删不掉 —— 先去那些商品上取消勾选。停用只是从发布页的候选里拿掉，
+    已经在用的商品照旧显示。
+  </p>
+</div>
+
+{% endblock %}

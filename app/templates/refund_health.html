@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}数据体检{% endblock %}
+{% block heading %}数据体检{% endblock %}
+{% block sub %}退单对不上的老账 + 成本异常的单 —— 只提示，不自动改数据{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="chips">
+    <span class="chip big">退单对不上：<b>{{ rows | length }}</b></span>
+    <span class="chip big {% if cost_rows %}danger{% else %}ok{% endif %}">成本异常：<b>{{ cost_rows | length }}</b></span>
+    <span class="chip big {% if high %}danger{% else %}ok{% endif %}">其中要处理：<b>{{ high }}</b></span>
+    <span class="chip">要核对：<b>{{ mid }}</b></span>
+    <span class="chip">可忽略：<b>{{ low }}</b></span>
+  </div>
+  <div class="note muted">
+    <i class="bi bi-info-circle" aria-hidden="true"></i>
+    <span>两类问题：① 退单口径改版前的老数据（状态与事实对不上）；② 成本看着不对的单（比售价还高、或没取到值）。
+      新数据已经有护栏：自动流程写进来的成本不对会直接拦下、标「待核对」，不会悄悄写进去。
+      这里列出的是<b>历史遗留</b>的，改不改由你定。</span>
+  </div>
+</div>
+
+{% if cost_rows %}
+<div class="card">
+  <h2>成本异常（{{ cost_rows | length }} 笔）</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>订单号</th>
+          <th>商品</th>
+          <th>售价</th>
+          <th>成本</th>
+          <th>问题</th>
+          <th>建议动作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in cost_rows %}
+        <tr>
+          <td class="src"><a href="/orders/{{ r.order_id }}">{{ r.order_no }}</a></td>
+          <td class="muted">{{ r.product_name }}</td>
+          <td>¥{{ money(r.sale) }}</td>
+          <td><b class="danger">¥{{ money(r.cost) }}</b></td>
+          <td>{{ r.label }}</td>
+          <td class="muted">{{ r.fix }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if rows %}
+<div class="card">
+  <h2>退单问题清单（{{ rows | length }} 条）</h2>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>订单号</th>
+          <th>严重度</th>
+          <th>问题</th>
+          <th>建议动作</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="level-{{ r.level }}">
+          <td class="src"><a href="/orders/{{ r.order_id }}#refund">{{ r.order_no }}</a></td>
+          <td>
+            {% if r.level == 'high' %}<span class="badge refund">{{ r.level_label }}</span>
+            {% elif r.level == 'mid' %}<span class="badge pending">{{ r.level_label }}</span>
+            {% else %}<span class="badge ignored">{{ r.level_label }}</span>{% endif %}
+          </td>
+          <td>{{ r.label }}</td>
+          <td class="muted">{{ r.fix }}</td>
+          <td>{% if r.closed %}<span class="chip">已关闭完成</span>{% else %}<span class="chip warn">处理中</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="note muted"><i class="bi bi-check2-circle" aria-hidden="true"></i>
+    <span>退单没有发现问题：所有退单的状态与事实都对得上。</span></div>
+</div>
+{% endif %}
+
+<div class="card">
+  <div class="btn-row">
+    <a class="btn" href="/refund-todo"><i class="bi bi-list-check" aria-hidden="true"></i> 退单待办</a>
+    <a class="btn" href="/orders?refund=pending">去看待拦截的退单</a>
+    <a class="btn" href="/orders">返回订单管理</a>
+  </div>
+</div>
+{% endblock %}

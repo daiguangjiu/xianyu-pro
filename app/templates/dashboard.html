@@ -1,0 +1,444 @@
+{% extends "base.html" %}
+{% from "_charts.html" import pie_chart, bar_chart %}
+{% block title %}数据总览{% endblock %}
+{% block heading %}数据总览{% endblock %}
+{% block sub %}订单管理 · 推单进度 · 资金概览{% endblock %}
+{% block actions %}
+  {# 同步消息入口只放在「飞书消息」页（且仅管理员可见），首页不再开放 #}
+  <a class="btn primary" href="/orders?supplier_status=pending">处理待推单发货</a>
+{% endblock %}
+{% block content %}
+
+{% if s.zero_cost_orders %}
+<div class="note danger" role="alert">
+  <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+  <span><b>有 {{ s.zero_cost_orders }} 单成本价为 ¥0（未维护）</b>：这些订单的毛利与毛利率会虚高，
+    请推单人员到<a href="/orders">订单管理</a>里补全成本。</span>
+</div>
+{% endif %}
+
+<section class="hero hero-tech">
+  <span class="hero-grid" aria-hidden="true"></span>
+  <span class="hero-glow" aria-hidden="true"></span>
+  <div class="hero-brand">
+    <span class="hero-live"><i aria-hidden="true"></i>飞书群实时同步</span>
+    <span class="name">{{ app_name }}</span>
+    <span class="slogan">模板消息与订单截图自动解析 · 归档 · 推单 · 回单同步</span>
+    <div class="hero-chips">
+      <span class="chip"><i class="bi bi-magic" aria-hidden="true"></i>模板解析</span>
+      <span class="chip"><i class="bi bi-image" aria-hidden="true"></i>截图 OCR</span>
+      <span class="chip"><i class="bi bi-truck" aria-hidden="true"></i>单笔推单</span>
+      <span class="chip"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>退单拦截</span>
+    </div>
+  </div>
+  {# 统计块都支持点击：点进去就是对应的订单列表，省得再手动筛 #}
+  <div class="hero-stats">
+    {# 累计 / 今日新增：左侧累计口径（全部订单），右侧今天归档进来的单量 #}
+    <a class="hero-stat" href="/orders?created=today"
+       title="累计 {{ s.total_orders }} 单（含今日新增 {{ s.today_orders }} 单），点进去看今日新增的订单列表">
+      <span class="ns">
+        <span class="n" data-count="{{ s.total_orders }}">{{ s.total_orders }}</span><span class="n n-sep">/</span><span class="n n-sub" data-count="{{ s.today_orders }}">{{ s.today_orders }}</span>
+      </span><span class="l">累计 / 今日新增</span>
+    </a>
+    <a class="hero-stat" href="/orders?supplier_status=pending"
+       title="还没推给供应商的订单数（点进去直接处理待推单发货）">
+      <span class="n" data-count="{{ s.pending_push }}">{{ s.pending_push }}</span><span class="l">待推单发货</span>
+    </a>
+    <a class="hero-stat" href="/orders?review=1"
+       title="存在缺失或置信度偏低、需要人工核对的订单数（点进去逐单确认）">
+      <span class="n" data-count="{{ s.needs_review }}">{{ s.needs_review }}</span><span class="l">待人工确认</span>
+    </a>
+    {# 已发货 / 待发货：左边已发货（撤单 / 退单会改状态，不重复计数），右边已推单、等发货的单量（不含待推单发货） #}
+    <a class="hero-stat" href="/orders?state=shipped"
+       title="已发货 {{ s.shipped }} 单、待发货 {{ s.pending_ship }} 单（待发货只算已推给供应商的单，还没推单的不计入；点进去看已发货列表，核对物流与后续结算）">
+      <span class="ns">
+        <span class="n" data-count="{{ s.shipped }}">{{ s.shipped }}</span><span class="n n-sep">/</span><span class="n n-sub" data-count="{{ s.pending_ship }}">{{ s.pending_ship }}</span>
+      </span><span class="l">已发货 / 待发货</span>
+    </a>
+    {# 待供应商回单：已推单但还没回填物流单号的订单数，点进去就是「已推单」列表 #}
+    <a class="hero-stat" href="/orders?supplier_status=pushed"
+       title="已经推给供应商、但还没回填物流单号的订单数（点进去看已推单列表，跟进催单）">
+      <span class="n" data-count="{{ s.pending_tracking }}">{{ s.pending_tracking }}</span><span class="l">待供应商回单</span>
+    </a>
+  </div>
+</section>
+
+<div class="grid grid-6">
+  {# 主数值是累计口径（上方大字），副文案里带「今日」（今天归档的订单），两张口径并排看 #}
+  <div class="stat kpi kpi-indigo">
+    <div class="label"><i class="bi bi-box-seam" aria-hidden="true"></i>订单总数</div>
+    <div class="value" data-count="{{ s.total_orders }}">{{ s.total_orders }}</div>
+    <div class="hint"><span class="hi-today" title="今天归档进系统的订单数">今日新增 {{ s.today_orders }} 单</span></div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  <div class="stat kpi kpi-sky">
+    <div class="label"><i class="bi bi-cash-coin" aria-hidden="true"></i>销售额</div>
+    <div class="value" data-count="{{ s.total_sale }}" data-money="1">¥{{ money(s.total_sale) }}</div>
+    <div class="hint"><span class="hi-today" title="今天归档的订单销售额">今日 ¥{{ money(s.today_sale) }}</span> · 客单价 ¥{{ money(s.avg_order) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 客户退款：我们退给客户的钱；供应商退回来的钱在采购成本后面单列，差额就是自担的 #}
+  <div class="stat kpi kpi-rose">
+    <div class="label"><i class="bi bi-arrow-return-left" aria-hidden="true"></i>客户退款</div>
+    <div class="value" data-count="{{ s.total_refund }}" data-money="1">¥{{ money(s.total_refund) }}</div>
+    <div class="hint" title="我们退给客户的金额汇总；减去供应商退回来的钱，差额由自己承担">自担 ¥{{ money(s.total_refund - s.total_supplier_refund) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  <div class="stat kpi kpi-amber">
+    <div class="label"><i class="bi bi-bag-check" aria-hidden="true"></i>采购成本</div>
+    <div class="value" data-count="{{ s.total_cost }}" data-money="1">¥{{ money(s.total_cost) }}</div>
+    <div class="hint"><span class="hi-today" title="今天归档的订单采购成本">今日 ¥{{ money(s.today_cost) }}</span> · 运费/技术服务费 ¥{{ money(s.total_fee) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 供应商退款：供应商退给我们的钱，与客户退款对照着看 #}
+  <div class="stat kpi kpi-violet">
+    <div class="label"><i class="bi bi-arrow-down-left" aria-hidden="true"></i>供应商退款</div>
+    <div class="value" data-count="{{ s.total_supplier_refund }}" data-money="1">¥{{ money(s.total_supplier_refund) }}</div>
+    <div class="hint" title="供应商退给我们的金额汇总；与客户退款的差额由自己承担">客户退货退款 ¥{{ money(s.total_refund) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  <div class="stat kpi kpi-emerald">
+    <div class="label"><i class="bi bi-graph-up-arrow" aria-hidden="true"></i>毛利</div>
+    <div class="value" data-count="{{ s.total_profit }}" data-money="1">¥{{ money(s.total_profit) }}</div>
+    <div class="hint"><span class="hi-today" title="今天归档的订单毛利">今日 ¥{{ money(s.today_profit) }}</span> · 毛利率 {{ s.margin }}%</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+</div>
+
+<div class="grid grid-2" style="margin-top:16px">
+  {# chart-card：柱状图撑满卡片高度，跟右侧「推单与归档状态」等高对齐；
+     chart-body 吃掉剩余高度，.bars 绝对定位铺满它，柱子百分比高度才有确定参照 #}
+  <div class="card chart-card">
+    <div class="row-between">
+      <h2>销售额趋势</h2>
+      {# 两个汇总数跟着所选区间走：区间累计（右下 日均按区间天数摊，含没有订单的那天） #}
+      <div class="chart-sum">
+        <span class="cs"><b>¥{{ money(trend_total) }}</b><i>区间累计</i></span>
+        <span class="cs"><b>¥{{ money(trend_avg) }}</b><i>日均</i></span>
+      </div>
+    </div>
+    {# 时间段：起止日期任选，也可以一键切「本月 / 上月 / 近 30 天」（都按北京自然日算） #}
+    <form class="chart-range" method="get" action="/" id="trendRange">
+      <label>从 <input type="date" name="start" value="{{ trend_start }}" max="{{ trend_today }}"></label>
+      <label>到 <input type="date" name="end" value="{{ trend_end }}" max="{{ trend_today }}"></label>
+      <button class="btn sm" type="submit">查看</button>
+      <div class="seg trend-presets">
+        <a href="#" data-trend-preset="this_month">本月</a>
+        <a href="#" data-trend-preset="last_month">上月</a>
+        <a href="#" data-trend-preset="d30">近 30 天</a>
+      </div>
+    </form>
+    <div class="chart-body">
+      <div class="bars">
+        {% for d in trend %}
+          <div class="bar" style="--h: {{ (d.sale / max_sale * 100)|round(1) }}%; animation-delay: {{ loop.index0 * 16 }}ms" title="{{ d.date }} · {{ d.count }} 单 · {{ d.qty }} 件 · ¥{{ money(d.sale) }} · 件单价 {% if d.qty %}¥{{ money(d.unit_price) }}{% else %}—{% endif %}"></div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="legend">
+      <span>{{ trend[0].date }} → {{ trend[-1].date }}（{{ trend|length }} 天）</span>
+      <span>共 {{ trend_qty }} 件 · 件单价 {% if trend_qty %}¥{{ money(trend_unit) }}{% else %}—{% endif %}</span>
+      <span>悬停柱子看当天单数 / 件数 / 件单价</span>
+    </div>
+  </div>
+
+  <script>
+    /* 快捷区间：本月（1 号~今天）/ 上月（整月）/ 近 30 天 —— 填进日期框再提交，URL 可分享 */
+    (function () {
+      var form = document.getElementById('trendRange');
+      if (!form) { return; }
+      function p2(n) { return (n < 10 ? '0' : '') + n; }
+      function iso(d) { return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()); }
+      var today = new Date();
+      var ranges = {
+        this_month: [new Date(today.getFullYear(), today.getMonth(), 1), today],
+        last_month: [
+          new Date(today.getFullYear(), today.getMonth() - 1, 1),
+          new Date(today.getFullYear(), today.getMonth(), 0)
+        ],
+        d30: [new Date(today.getTime() - 29 * 86400000), today]
+      };
+      Array.prototype.forEach.call(document.querySelectorAll('[data-trend-preset]'), function (a) {
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          var r = ranges[a.getAttribute('data-trend-preset')];
+          if (!r) { return; }
+          form.start.value = iso(r[0]);
+          form.end.value = iso(r[1]);
+          form.submit();
+        });
+      });
+    })();
+  </script>
+
+  <div class="card">
+    <h2>推单与归档状态</h2>
+    <div class="grid grid-2">
+      <div class="stat warn"><div class="label">待推单发货</div><div class="value" data-count="{{ s.pending_push }}">{{ s.pending_push }}</div></div>
+      <div class="stat"><div class="label">待人工确认</div><div class="value" data-count="{{ s.needs_review }}">{{ s.needs_review }}</div></div>
+      {# 这张按「供应商处理状态」统计（没标记完成的都算），跟供应链发货页的「已推单记录」
+         （含已完成 / 已关闭的全部记录）不是一个数 —— 标签写全，免得两边同名被当成同一个数 #}
+      <div class="stat" title="已同步给供应商、还没标记完成的订单（按供应商处理状态统计，不是发货页的「已推单记录」）">
+        <div class="label">已推单未完结</div>
+        <div class="value"><span class="n" data-count="{{ counts.supplier.pushed }}">{{ counts.supplier.pushed }}</span></div>
+      </div>
+      <div class="stat ok"><div class="label">已完成</div><div class="value"><span class="n" data-count="{{ counts.supplier.done }}">{{ counts.supplier.done }}</span></div></div>
+    </div>
+    {# 订单状态（生命周期）：新建 → 已推单 → 已发货，撤单 / 退单为终态；点进去看对应订单 #}
+    <h3>订单状态</h3>
+    <div class="chips">
+      {% for v in state_choices %}
+      <a class="chip state-{{ v }}{{ ' chip-alert' if v in ('canceled','refunded') and state_counts[v] }}"
+         href="/orders?state={{ v }}"
+         title="{% if v == 'new' %}飞书群同步后刚归档的订单{% elif v == 'pushed' %}已复制订单信息同步给上游供应商{% elif v == 'shipped' %}上游已返回物流单号，运营回填后即为已发货{% elif v == 'canceled' %}未发货前撤回 / 撤掉，只留档{% else %}未发货时群里同步退单{% endif %}（点击查看）">
+        {{ state_labels[v] }} <span class="n" data-count="{{ state_counts[v] }}">{{ state_counts[v] }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    {# 订单性质（2026-10-11）：自营订单 / 学员订单，按出货闲鱼号对应的店铺性质归；点进去就是筛好的列表 #}
+    <h3>订单性质</h3>
+    <div class="chips">
+      <a class="chip" href="/orders?nature=self"
+         title="公司自营的店铺出的单：出货闲鱼号在店铺档案里是「自营店铺」（点击查看）">
+        自营订单 <span class="n" data-count="{{ nature_counts.self }}">{{ nature_counts.self }}</span>
+      </a>
+      <a class="chip" href="/orders?nature=student"
+         title="学员自己的店铺出的单：出货闲鱼号在店铺档案里是「学员店铺」（点击查看）">
+        学员订单 <span class="n" data-count="{{ nature_counts.student }}">{{ nature_counts.student }}</span>
+      </a>
+    </div>
+    <h3>消息与批次</h3>
+    <div class="chips">
+      <span class="chip {{ 'chip-pulse' if s.unparsed_messages }}">待解析 {{ s.unparsed_messages }}</span>
+      <span class="chip">草稿批次 <span class="n" data-count="{{ counts.batches.draft }}">{{ counts.batches.draft }}</span></span>
+      <span class="chip">已推送批次 <span class="n" data-count="{{ counts.batches.pushed }}">{{ counts.batches.pushed }}</span></span>
+    </div>
+  </div>
+</div>
+
+{# 资金结算：公司自营应收 / 公司自营应付 / 本月已结算，点进去就是资金台账 #}
+<div class="card">
+  <div class="row-between">
+    <h2 style="margin:0"><i class="bi bi-cash-coin" aria-hidden="true"></i> 资金结算</h2>
+    <a class="btn sm" href="/finance">资金台账</a>
+  </div>
+  <div class="grid grid-4" style="margin-top:12px">
+    <a class="stat kpi kpi-indigo" href="/finance?kind=initiator&status=pending"
+       title="待结算：公司自营应收 = 销售金额 - 平台技术服务费（0.6%）">
+      <div class="label">待结算 · 公司自营应收</div>
+      <div class="value">¥{{ money(finance.pending_in) }}</div>
+      <div class="hint">{{ finance.pending_count_in }} 笔（已扣 0.6%）</div>
+      <span class="kpi-glow" aria-hidden="true"></span>
+    </a>
+    <a class="stat kpi kpi-amber" href="/finance?kind=supplier&status=pending"
+       title="待结算：公司自营应付上游供应商（采购成本 + 运费）">
+      <div class="label">待结算 · 公司自营应付</div>
+      <div class="value">¥{{ money(finance.pending_out) }}</div>
+      <div class="hint">{{ finance.pending_count_out }} 笔</div>
+      <span class="kpi-glow" aria-hidden="true"></span>
+    </a>
+    <a class="stat kpi {{ 'kpi-rose' if finance.pending_net < 0 else 'kpi-emerald' }}"
+       href="/finance?status=pending" title="待结算净额 = 公司自营应收 - 公司自营应付">
+      <div class="label">待结算净额</div>
+      <div class="value">¥{{ money(finance.pending_net) }}</div>
+      <div class="hint">应收 - 应付</div>
+      <span class="kpi-glow" aria-hidden="true"></span>
+    </a>
+    <a class="stat kpi kpi-violet" href="/finance?granularity=day&status=settled"
+       title="本月已完成结算的金额（应收 + 应付）">
+      <div class="label">本月已结算</div>
+      <div class="value">¥{{ money(finance.month_settled_in + finance.month_settled_out) }}</div>
+      <div class="hint">{{ finance.month }}</div>
+      <span class="kpi-glow" aria-hidden="true"></span>
+    </a>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>供应商维度</h2>
+    {% if suppliers %}
+    {% set sup_total_sale = suppliers|map(attribute='sale')|sum or 1 %}
+    {% set sup_total_profit = suppliers|map(attribute='profit')|sum or 0 %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">序号</th><th>供应商</th><th class="num">订单</th><th class="num">退单</th><th class="num">销售额</th><th class="num">退款金额</th><th class="num">成本</th><th class="num">毛利</th><th class="num">毛利率</th><th class="num">销售占比</th><th class="num">毛利占比</th></tr></thead>
+        <tbody>
+        {% for r in suppliers %}
+          <tr>
+            <td class="num muted">{{ loop.index }}</td>
+            <td><a href="/orders?supplier={{ r.supplier }}">{{ r.supplier }}</a></td>
+            <td class="num">{{ r.count }}</td>
+            <td class="num">{% if r.refund_count %}<span class="cost-zero" title="该供应商有 {{ r.refund_count }} 单退单">{{ r.refund_count }}</span>{% else %}0{% endif %}</td>
+            <td class="num">¥{{ money(r.sale) }}</td>
+            <td class="num">{% if r.refund_amount %}¥{{ money(r.refund_amount | abs) }}{% else %}-{% endif %}</td>
+            <td class="num">
+              {% if r.zero_cost %}<span class="cost-zero" title="{{ r.zero_cost }} 单成本未维护">¥{{ money(r.cost) }}</span>
+              {% else %}¥{{ money(r.cost) }}{% endif %}
+            </td>
+            <td class="num">¥{{ money(r.profit) }}</td>
+            <td class="num">{{ '%.1f'|format(r.margin) }}%</td>
+            <td class="num">{{ '%.1f'|format((r.sale / sup_total_sale * 100)) }}%</td>
+            <td class="num">{% if sup_total_profit > 0 %}{{ '%.1f'|format((r.profit / sup_total_profit * 100)) }}%{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty">暂无数据</div>{% endif %}
+  </div>
+
+  <div class="card">
+    <div class="row-between">
+      <h2 style="margin:0">热销产品 TOP 5</h2>
+      <a class="btn sm" href="/stats/products">查看完整 TOP 榜单 →</a>
+    </div>
+    {% if tops %}
+    {% set top_total_sale = tops|map(attribute='sale')|sum or 1 %}
+    {% set top_total_profit = tops|map(attribute='profit')|sum or 0 %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">序号</th><th>商品</th><th class="num">订单</th><th class="num">件数</th><th class="num">销售额</th><th class="num">成本</th><th class="num">毛利</th><th class="num">毛利率</th><th class="num">销售占比</th><th class="num">毛利占比</th></tr></thead>
+        <tbody>
+        {% for r in tops %}
+          <tr><td class="num muted">{{ loop.index }}</td><td>{{ r.product }}</td><td class="num">{{ r.count }}</td><td class="num">{{ r.quantity }}</td><td class="num">¥{{ money(r.sale) }}</td>
+            <td class="num">
+              {% if r.zero_cost %}<span class="cost-zero" title="{{ r.zero_cost }} 单成本未维护">¥{{ money(r.cost) }}</span>
+              {% else %}¥{{ money(r.cost) }}{% endif %}
+            </td>
+            <td class="num">¥{{ money(r.profit) }}</td>
+            <td class="num">{{ '%.1f'|format(r.margin) }}%</td>
+            <td class="num">{{ '%.1f'|format((r.sale / top_total_sale * 100)) }}%</td>
+            <td class="num">{% if top_total_profit > 0 %}{{ '%.1f'|format((r.profit / top_total_profit * 100)) }}%{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty">暂无数据</div>{% endif %}
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>出货闲鱼号</h2>
+    {% if accounts %}
+    {% set acc_total_sale = accounts|map(attribute='sale')|sum or 1 %}
+    {% set acc_total_profit = accounts|map(attribute='profit')|sum or 0 %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">序号</th><th class="sortable" data-sort-type="text">闲鱼号</th><th class="num sortable" data-sort-type="num">订单</th><th class="num sortable" data-sort-type="num">销售额</th><th class="num sortable" data-sort-type="num">成本</th><th class="num sortable" data-sort-type="num">毛利</th><th class="num sortable" data-sort-type="num">毛利率</th><th class="num sortable" data-sort-type="num">销售占比</th><th class="num sortable" data-sort-type="num">毛利占比</th></tr></thead>
+        <tbody>
+        {% for r in accounts %}
+          <tr><td class="num muted">{{ loop.index }}</td><td>{{ r.account }}</td><td class="num">{{ r.count }}</td><td class="num">¥{{ money(r.sale) }}</td>
+            <td class="num">
+              {% if r.zero_cost %}<span class="cost-zero" title="{{ r.zero_cost }} 单成本未维护">¥{{ money(r.cost) }}</span>
+              {% else %}¥{{ money(r.cost) }}{% endif %}
+            </td>
+            <td class="num">¥{{ money(r.profit) }}</td>
+            <td class="num">{{ '%.1f'|format(r.margin) }}%</td>
+            <td class="num">{{ '%.1f'|format((r.sale / acc_total_sale * 100)) }}%</td>
+            <td class="num">{% if acc_total_profit > 0 %}{{ '%.1f'|format((r.profit / acc_total_profit * 100)) }}%{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <details open style="margin-top:10px">
+      <summary style="cursor:pointer"><i class="bi bi-pie-chart" aria-hidden="true"></i> 图表：销售额分布（点开 / 收起）</summary>
+      <div class="chart-row" style="margin-top:10px">
+        <div class="chart-box"><h4>销售额占比</h4>{{ pie_chart(charts.account_sale) }}</div>
+        <div class="chart-box"><h4>各号销售额对比</h4>{{ bar_chart(charts.account_sale, label='销售额') }}</div>
+      </div>
+    </details>
+    {% else %}<div class="empty">暂无数据</div>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>回款支付宝归属人</h2>
+    {% if payees %}
+    {% set pay_total_sale = payees|map(attribute='sale')|sum or 1 %}
+    {% set pay_total_profit = payees|map(attribute='profit')|sum or 0 %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">序号</th><th class="sortable" data-sort-type="text">归属人</th><th class="num sortable" data-sort-type="num">订单</th><th class="num sortable" data-sort-type="num">应收金额</th><th class="num sortable" data-sort-type="num">成本</th><th class="num sortable" data-sort-type="num">毛利</th><th class="num sortable" data-sort-type="num">毛利率</th><th class="num sortable" data-sort-type="num">销售占比</th><th class="num sortable" data-sort-type="num">毛利占比</th></tr></thead>
+        <tbody>
+        {% for r in payees %}
+          <tr><td class="num muted">{{ loop.index }}</td><td>{{ r.payee }}</td><td class="num">{{ r.count }}</td><td class="num">¥{{ money(r.sale) }}</td>
+            <td class="num">
+              {% if r.zero_cost %}<span class="cost-zero" title="{{ r.zero_cost }} 单成本未维护">¥{{ money(r.cost) }}</span>
+              {% else %}¥{{ money(r.cost) }}{% endif %}
+            </td>
+            <td class="num">¥{{ money(r.profit) }}</td>
+            <td class="num">{{ '%.1f'|format(r.margin) }}%</td>
+            <td class="num">{{ '%.1f'|format((r.sale / pay_total_sale * 100)) }}%</td>
+            <td class="num">{% if pay_total_profit > 0 %}{{ '%.1f'|format((r.profit / pay_total_profit * 100)) }}%{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <details open style="margin-top:10px">
+      <summary style="cursor:pointer"><i class="bi bi-pie-chart" aria-hidden="true"></i> 图表：回款分布（点开 / 收起）</summary>
+      <div class="chart-row" style="margin-top:10px">
+        <div class="chart-box"><h4>回款金额占比</h4>{{ pie_chart(charts.payee_sale) }}</div>
+        <div class="chart-box"><h4>各归属人回款对比</h4>{{ bar_chart(charts.payee_sale, label='回款金额') }}</div>
+      </div>
+    </details>
+    {% else %}<div class="empty">暂无数据</div>{% endif %}
+  </div>
+</div>
+
+{% if not feishu_ready %}
+<div class="note warn">尚未配置飞书应用凭证，无法同步群消息。请复制 <span class="mono">.env.example</span> 为 <span class="mono">.env</span> 并填写 <span class="mono">FEISHU_APP_ID / FEISHU_APP_SECRET</span>。</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // 统计表格：所有单元格不换行（横向滚动），字段旁带上下箭头可点表头排序
+  document.querySelectorAll('.card table').forEach(function (table) {
+    table.classList.add('list-nowrap');
+    var head = table.querySelector('thead');
+    if (!head) return;
+    head.querySelectorAll('th.sortable').forEach(function (th) {
+      var arrow = document.createElement('span');
+      arrow.className = 'sort-arrow';
+      th.appendChild(arrow);
+      th.setAttribute('title', '点击按该字段排序（再点一次反向）');
+      th.addEventListener('click', function () {
+        var tbody = table.querySelector('tbody');
+        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
+        var cells = Array.prototype.slice.call(th.parentElement.querySelectorAll('th'));
+        var col = cells.indexOf(th);
+        var asc = !th.classList.contains('sorted-asc');
+        cells.forEach(function (c) { c.classList.remove('sorted-asc', 'sorted-desc'); });
+        th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
+        var numeric = th.dataset.sortType === 'num';
+        rows.sort(function (a, b) {
+          var av = (a.children[col] || {}).textContent || '';
+          var bv = (b.children[col] || {}).textContent || '';
+          var x, y;
+          if (numeric) {
+            x = parseFloat(av.replace(/[^0-9.\-]/g, '')) || 0;
+            y = parseFloat(bv.replace(/[^0-9.\-]/g, '')) || 0;
+          } else {
+            x = av.trim(); y = bv.trim();
+          }
+          if (x < y) return asc ? -1 : 1;
+          if (x > y) return asc ? 1 : -1;
+          return 0;
+        });
+        rows.forEach(function (r) { tbody.appendChild(r); });
+        // 序号跟着重排，保证第一列始终是 1、2、3…
+        rows.forEach(function (r, i) {
+          var first = r.children[0];
+          if (first && first.classList.contains('num')) first.textContent = i + 1;
+        });
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

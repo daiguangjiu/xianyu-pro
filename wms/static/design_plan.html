@@ -1,0 +1,2488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>货品检测入库出库管理系统 · 详细方案 V1.0</title>
+<style>
+:root{
+  --bg:#0d0f14;--panel:#161920;--panel2:#1c2029;--line:#272c37;
+  --tx:#e9ebef;--tx2:#a3aab8;--tx3:#6d7480;
+  --S:#22c55e;--A:#eab308;--B:#3b82f6;--C:#f97316;--D:#ef4444;--P:#a855f7;
+  --accent:#3b82f6;--ok:#22c55e;--warn:#eab308;--bad:#ef4444;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font:14px/1.75 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding-bottom:70px}
+.wrap{max-width:1300px;margin:0 auto;padding:0 26px}
+header{background:linear-gradient(140deg,#151922 0%,#1a2334 55%,#16202e 100%);border-bottom:1px solid var(--line);padding:30px 0 0}
+.hd{max-width:1300px;margin:0 auto;padding:0 26px 22px}
+h1{font-size:25px;font-weight:700;letter-spacing:.4px;line-height:1.35}
+.sub{color:var(--tx2);font-size:13px;margin-top:8px;max-width:960px}
+.badge{display:inline-block;padding:2px 9px;border-radius:4px;background:#1e2530;border:1px solid var(--line);color:var(--tx2);font-size:11px;margin:10px 5px 0 0}
+nav{position:sticky;top:0;z-index:60;background:rgba(13,15,20,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);margin-top:24px}
+nav .wrap{display:flex;gap:2px;overflow-x:auto;padding:0 26px}
+nav button{background:none;border:none;color:var(--tx2);font:14px/1 inherit;padding:14px 14px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;font-family:inherit}
+nav button:hover{color:var(--tx)}
+nav button.on{color:#fff;border-bottom-color:var(--accent);font-weight:600}
+nav button.g{color:#7d8796}
+.page{display:none;padding-top:26px}
+.page.on{display:block}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:22px 24px;margin-bottom:20px}
+.card>h2{font-size:17px;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:9px;line-height:1.4}
+.card>h2::before{content:"";width:3px;height:16px;background:var(--accent);border-radius:2px;flex:none}
+.card>p.d{color:var(--tx2);font-size:13px;margin-bottom:15px}
+h3{font-size:14.5px;font-weight:600;margin:20px 0 9px}
+h3:first-of-type{margin-top:2px}
+h4{font-size:13px;font-weight:600;margin:14px 0 6px;color:var(--tx2)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{background:var(--panel2);color:var(--tx2);text-align:left;padding:9px 10px;font-weight:600;border-bottom:1px solid var(--line);font-size:11.5px}
+td{padding:9px 10px;border-bottom:1px solid #20242d;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#1a1e27}
+.tw{overflow-x:auto}
+.lv{display:inline-flex;align-items:center;justify-content:center;min-width:23px;height:23px;padding:0 5px;border-radius:5px;font-weight:800;font-size:12.5px;color:#0b0d10;flex:none}
+.S{background:var(--S)}.A{background:var(--A)}.B{background:var(--B)}.C{background:var(--C)}.D{background:var(--D)}
+.lvc{color:var(--S)}.lvc.A{color:var(--A)}.lvc.B{color:var(--B)}.lvc.C{color:var(--C)}.lvc.D{color:var(--D)}
+.lvt{display:inline-flex;align-items:center;gap:7px;font-weight:600;white-space:nowrap}
+.st{display:inline-block;padding:2px 8px;border-radius:11px;font-size:11.5px;font-weight:600;white-space:nowrap;border:1px solid}
+.st1{background:#1c2536;border-color:#2d3f5e;color:#93b4e8}
+.st2{background:#2a2410;border-color:#5a4a17;color:#e5c768}
+.st3{background:#12291c;border-color:#1f4a30;color:#6ed99a}
+.st4{background:#1a2f14;border-color:#2f5220;color:#93d977}
+.st5{background:#2a1f10;border-color:#5c3f18;color:#e8ac6a}
+.st6{background:#2b1a10;border-color:#5c3418;color:#f0a071}
+.st7{background:#251a2e;border-color:#3f2b52;color:#c39ce0}
+.st8{background:#2b1414;border-color:#5c2828;color:#f08a8a}
+.st9{background:#1a1a1f;border-color:#333;font;color:#98a0ad}
+.st10{background:#2b1414;border-color:#5c2828;color:#f08a8a}
+.st11{background:#1a1526;border-color:#3d2f55;color:#c3a8e8}
+ul,ol{margin:7px 0 7px 21px;color:var(--tx2);font-size:13px}li{margin:3px 0}
+strong{color:var(--tx)}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.code{background:#0a0c11;border:1px solid var(--line);border-radius:6px;padding:13px 15px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:#7dd3fc;overflow-x:auto;line-height:1.7}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:8px 18px;font-size:13px;color:var(--tx2)}
+.kv b{color:var(--tx);font-weight:600}
+.note{background:#0c1017;border-left:3px solid var(--accent);padding:12px 15px;border-radius:0 6px 6px 0;font-size:12.5px;color:var(--tx2);margin:13px 0}
+.warn{background:#1a1409;border-left:3px solid var(--warn)}
+.bad{background:#1a0f0f;border-left:3px solid var(--bad)}
+.ok{background:#0c150f;border-left:3px solid var(--ok)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+@media(max-width:960px){.grid2,.grid3{grid-template-columns:1fr}.hd,.wrap{padding-left:17px;padding-right:17px}nav .wrap{padding:0 17px}}
+.flow{display:flex;flex-wrap:wrap;gap:9px;margin:15px 0}
+.step{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:13px 15px;flex:1;min-width:165px}
+.step .n{font-size:10.5px;color:var(--tx3);font-weight:700;letter-spacing:1px}
+.step .t{font-size:14px;font-weight:600;margin:4px 0 5px}
+.step .d{font-size:12px;color:var(--tx2);line-height:1.6}
+.arr{display:flex;align-items:center;color:var(--tx3);font-size:17px;flex:none}
+.fig{background:#0a0c11;border:1px solid var(--line);border-radius:10px;padding:12px;margin:14px 0;overflow-x:auto}
+.figcap{font-size:11.5px;color:var(--tx3);text-align:center;margin-top:6px}
+.acc{border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:11px}
+.acc>.ah{background:var(--panel2);padding:11px 15px;cursor:pointer;display:flex;align-items:center;gap:10px;font-weight:600;font-size:13.5px}
+.acc>.ah:hover{background:#222834}
+.acc>.ah .no{background:var(--accent);color:#fff;width:22px;height:22px;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex:none}
+.acc>.ah .tag{margin-left:auto;font-size:11px;color:var(--tx3);font-weight:400}
+.acc>.ab{padding:15px 17px;border-top:1px solid var(--line);display:none}
+.acc.on>.ab{display:block}
+.acc.on>.ah .no{background:var(--ok)}
+.acc.on>.ah::after{content:"▾";color:var(--tx3);font-size:12px}
+.acc:not(.on)>.ah::after{content:"▸";color:var(--tx3);font-size:12px}
+.accept{background:#0c150f;border:1px solid #1f4a30;border-radius:7px;padding:11px 14px;margin-top:11px}
+.accept b{color:#6ed99a}
+.pill{display:inline-block;background:#1e2530;border:1px solid var(--line);border-radius:5px;padding:1px 7px;font-size:11.5px;color:var(--tx2);margin:2px 3px 2px 0}
+.tocbox{background:#0a0c11;border:1px solid var(--line);border-radius:10px;padding:16px 20px;margin:14px 0}
+.tocbox ol{margin:8px 0 0 0;columns:3;column-gap:30px}
+.tocbox a{color:var(--tx2);text-decoration:none;font-size:12.5px}
+.tocbox a:hover{color:var(--accent)}
+@media(max-width:960px){.tocbox ol{columns:1}}
+.fin{text-align:center;color:var(--tx3);font-size:12px;padding:26px 0}
+
+/* ===== 标签（60×40mm 绝对尺寸，屏幕预览=打印实际尺寸） ===== */
+.lbl{width:60mm;height:40mm;background:#fff;color:#000;border:.2mm dashed #999;position:relative;box-sizing:border-box;page-break-inside:avoid;break-inside:avoid;overflow:hidden}
+.lbl .top{position:absolute;left:2.5mm;right:2.5mm;top:2mm;height:9.5mm;display:flex;align-items:center;gap:2mm;border-bottom:.25mm solid #000;box-sizing:border-box}
+.lbl .lvbox{width:9mm;height:9mm;display:flex;align-items:center;justify-content:center;font:800 20pt/1 Arial;color:#fff;border-radius:.8mm;flex:none}
+.lbl .cat{font:700 9pt/1.15 Arial;flex:none}
+.lbl .cat small{display:block;font:400 6pt/1.1 Arial;color:#444;margin-top:.4mm}
+.lbl .act{margin-left:auto;font:700 6.5pt/1.15 Arial;text-align:right;color:#000;max-width:21mm}
+.lbl .act small{display:block;font:400 5.2pt/1.15 Arial;color:#555;margin-top:.4mm}
+.lbl .bc{position:absolute;left:2.5mm;right:2.5mm;top:13mm;text-align:center}
+.lbl .bc svg{display:block;margin:0 auto;max-width:100%}
+.lbl .bc .bt{font:600 6pt/1.2 ui-monospace,Menlo,monospace;letter-spacing:.15mm;margin-top:.6mm;white-space:nowrap}
+.lbl .ft{position:absolute;left:2.5mm;right:2.5mm;bottom:1.6mm;display:flex;justify-content:space-between;font:400 5.2pt/1 Arial;color:#333;border-top:.2mm solid #999;padding-top:.7mm}
+.lblgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;justify-items:start}
+
+/* ===== 检测记录单 ===== */
+table.fixw{table-layout:fixed;min-width:1180px}
+table.fixw .c-idx{width:30px}
+table.fixw .c-code{width:132px}
+table.fixw .c-cat{width:66px}
+table.fixw .c-bh{width:58px}
+table.fixw .c-note{width:210px}
+table.fixw .c-grade{width:62px}
+table.fixw td,table.fixw th{text-align:center;vertical-align:middle}
+table.fixw td input,table.fixw td select{width:100%;box-sizing:border-box}
+table.fixw tbody tr:nth-child(even){background:#1b1f28}
+@media print{
+  :root{--bg:#fff;--panel:#fff;--panel2:#f4f5f7;--line:#c9cdd4;--tx:#111;--tx2:#444;--tx3:#777}
+  body{background:#fff;color:#111;padding:0;font-size:10pt}
+  header,nav,.noprint{display:none !important}
+  .page{display:none !important}
+  .page.printable{display:block !important;padding-top:0}
+  .card{border:1px solid #bbb;border-radius:0;padding:0;margin:0 0 7mm;break-inside:avoid}
+  .card.pad{padding:4mm}
+  .acc{border:1px solid #ccc;break-inside:avoid}
+  .acc>.ab{display:block !important}
+  table{font-size:8.5pt}
+  th{background:#eee !important;color:#111;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  td{padding:4px 5px}
+  .code{background:#f2f2f2;border:1px solid #ccc;color:#111;white-space:normal;word-break:break-all}
+  .note,.ok,.warn,.bad{background:#f6f6f6;border-left:3px solid #666;color:#333}
+  .S,.A,.B,.C,.D{background:#ddd !important;color:#111 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .st1,.st2,.st3,.st4,.st5,.st6,.st7,.st8,.st9,.st10,.st11{background:#eee !important;color:#111 !important;border-color:#999 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .tw{overflow:visible}
+  .fig{background:#fff;border:1px solid #ccc}
+  .fig svg text{fill:#111 !important}
+  .tocbox{background:#fff}
+  a{text-decoration:none;color:#111}
+  input,select,textarea{background:#fff !important;border:1px solid #999 !important;color:#000 !important;border-radius:0 !important}
+  input,select{height:16px !important;font-size:8.5pt !important;padding:0 2px !important}
+  table.fixw tbody tr:nth-child(even){background:#f4f4f4 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  table.fixw{min-width:0;font-size:8pt}
+  table.fixw th,table.fixw td{padding:2px 1px}
+  .lbl{border:.2mm dashed #aaa}
+  .lblgrid{gap:4mm}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hd">
+    <h1>货品检测入库出库管理系统 · 详细方案</h1>
+    <div class="sub">V2.0 ｜ 已整合《二手货品检测分级标准 V1.0》全文 ｜ 覆盖「扫码检测 → 分级定价 → 入库上架 → 出库履约 → 报修/拆机件闭环」全链路 ｜ 5 档分级：S 完美 / A 微瑕 / B 小修 / C 报修 / D 报废</div>
+    <div>
+      <span class="badge">15 个章节</span>
+      <span class="badge">分级标准全文</span>
+      <span class="badge">标签生成器</span>
+      <span class="badge">检测记录单</span>
+      <span class="badge">扫码枪实测通过</span>
+      <span class="badge">10 状态生命周期机</span>
+      <span class="badge">17 张核心数据表</span>
+      <span class="badge">4 类出库</span>
+      <span class="badge">条码一码到底</span>
+      <span class="badge">中台/前参谋对接</span>
+    </div>
+  </div>
+  <nav><div class="wrap" id="tabs">
+    <button data-p="p1" class="on">0 · 总览</button>
+    <button data-p="p2">1 · 定位与边界</button>
+    <button data-p="p3">2 · 业务全流程</button>
+    <button data-p="p14">3 · 分级标准全文★</button>
+    <button data-p="p15">4 · 标签与记录单工具★</button>
+    <button data-p="p4">5 · 生命周期状态机</button>
+    <button data-p="p5">6 · 库存模型</button>
+    <button data-p="p6">7 · 数据模型</button>
+    <button data-p="p7">8 · 功能模块</button>
+    <button data-p="p13">9 · 硬件接入（扫码枪/标签机）★</button>
+    <button data-p="p8">10 · 出库与履约</button>
+    <button data-p="p9">11 · 分级引擎</button>
+    <button data-p="p10">12 · 中台对接</button>
+    <button data-p="p11">13 · 权限·报表·风控</button>
+    <button data-p="p12">14 · 实施与选型</button>
+    <button data-p="print" class="g" style="margin-left:auto">🖨 打印</button>
+  </div></nav>
+</header>
+
+<div class="wrap">
+
+<!-- ============ 0 总览 ============ -->
+<div class="page on" id="p1">
+  <div class="card">
+    <h2>方案总览</h2>
+    <p class="d">本方案解决的核心问题：<strong>货品从入库到上架之间「检测—分级—贴标—建账」这一段，目前靠人工记在本子上，导致后续出库、报修、盘点、残值核算全部对不上账。</strong>系统把分级标准从「一张纸」变成「引擎里可执行的规则」。</p>
+    <div class="grid3">
+      <div>
+        <h3>要解决的 4 个痛点</h3>
+        <ul>
+          <li><strong>账实不符</strong>：货在手上，系统里查不到；或系统显示有货，人找不到</li>
+          <li><strong>分级靠嘴</strong>：不同检测员对同一台机器判定差一档，价差几百</li>
+          <li><strong>报修黑洞</strong>：机器寄出去了，没人跟进，钱垫着，货回不来</li>
+          <li><strong>报废即损失</strong>：D 档当废品扔掉，主板/电池残值白白流失</li>
+        </ul>
+      </div>
+      <div>
+        <h3>系统的 4 条铁律</h3>
+        <ul>
+          <li><strong>一码到底</strong>：条码终身不变，等级可变（字段而非换码）</li>
+          <li><strong>强制扫码</strong>：任何库存变动必须扫码，<span style="color:#f08a8a">禁止直接改数量</span></li>
+          <li><strong>只认流水</strong>：库存余额由流水表算出，不允许直接改</li>
+          <li><strong>分级留痕</strong>：谁在何时判为哪档、改过几次、依据是什么，全留痕</li>
+        </ul>
+      </div>
+      <div>
+        <h3>交付形态建议</h3>
+        <ul>
+          <li><strong>扫码工作台</strong>（PWA）：检测员主力，手机/平板/电脑都能开，扫码即录</li>
+          <li><strong>管理后台</strong>（PC）：报表、盘点、对账、权限配置</li>
+          <li><strong>数据库</strong>：PostgreSQL + 对象存储（照片）</li>
+          <li><strong>离线优先</strong>：检测现场网络差时本地暂存，恢复后自动补传</li>
+          <li><strong>硬件接入</strong>：扫码枪（键盘模式）+ 标签机（网口 9100）→ <a href="#p13" style="color:var(--accent)">见 Tab 7，含实测结论</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="note ok"><b>本章的硬件结论都已在本机实测：</b>扫码检测算法通过 4 个场景验证（含噪声过滤）；标签打印三条链路的浏览器兼容性已确认；<b>macOS 上标签机无官方驱动、不可用 CUPS 打标签</b>——这是最容易踩的坑，详见 <a href="#p13" style="color:var(--accent)">Tab 7 硬件接入</a>。</div>
+  </div>
+
+  <div class="card">
+    <h2>功能地图（12 个模块）</h2>
+    <p class="d">按「检测入库」「库存中台」「出库履约」「支撑保障」四段划分。★ 标记为本系统成败关键模块。</p>
+    <div class="grid2">
+      <div>
+        <h4 style="color:#93b4e8">A 段 · 检测入库（1–4）</h4>
+        <div class="acc on"><div class="ah"><span class="no">1</span>批次与建档<span class="tag">★ 库存起点</span></div><div class="ab">
+          <ul>
+            <li>批次单：来源（采购/回收/清仓/退换）、供应商、品类、预计数量</li>
+            <li>流水号段预留：<code class="mono">2603-01-0001 ~ 2603-01-0500</code>，按段领用</li>
+            <li>入库单：整批 / 散件两种模式，支持一机一码与「按型号批量」</li>
+            <li>拍照上传：入库即拍外观，作为后续争议凭证</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">2</span>扫码检测工作台<span class="tag">★ 最高频使用</span></div><div class="ab">
+          <ul>
+            <li>扫码枪一响即调出货品档案 + 自动填品牌型号</li>
+            <li>检测项逐项打勾（√ / × / 不适用），不合格项强制填描述</li>
+            <li>录入时<strong>自动带出品类与等级</strong>，扫 W 占位码也能定位</li>
+            <li>离线暂存队列，网络恢复自动补传</li>
+            <li>音效 + 色块反馈，检测员不用看屏幕</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">3</span>分级与定价引擎<span class="tag">★ 规则可配置</span></div><div class="ab">
+          <ul>
+            <li>分级规则入库为配置项（品类 × 条件 → 等级），改规则不改代码</li>
+            <li>建议档位 + 人工确认（AI 建议 ≠ 自动改档）</li>
+            <li>价格系数自动套用，基准价可取外部行情或手工指定</li>
+            <li>存疑机制：判「?」自动进入复检池，不隔夜</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">4</span>贴标与建档<span class="tag">★ 身份唯一</span></div><div class="ab">
+          <ul>
+            <li>批量生成 60×40mm 标签（等级色块 + 编码 + 处置指令）</li>
+            <li>打印队列 + 补打记录（补打要留原因）</li>
+            <li>贴标后扫码复核：<strong>不匹配则阻断入库</strong></li>
+          </ul>
+        </div></div>
+      </div>
+      <div>
+        <h4 style="color:#6ed99a">B 段 · 库存中台（5–8）</h4>
+        <div class="acc"><div class="ah"><span class="no">5</span>库存账本（流水）<span class="tag">★ 数据地基</span></div><div class="ab">
+          <ul>
+            <li>所有出入库写 <code class="mono">stock_ledger</code> 流水，余额由其汇总</li>
+            <li>禁止直接 UPDATE 库存数量（用数据库触发器/权限层阻断）</li>
+            <li>支持负库存告警、呆滞库存账龄</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">6</span>仓库与库位<span class="tag">★ 防混批</span></div><div class="ab">
+          <ul>
+            <li>仓库：待检仓 / 可售仓 / 维修仓 / 拆机件仓 / 危废区 / 报修在外</li>
+            <li>库位：可选，精确到货架卡位</li>
+            <li>按「库位 + 等级」双维度分拣，避免高价值货被错拿</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">7</span>盘点与差异处理<span class="tag">★ 防丢货</span></div><div class="ab">
+          <ul>
+            <li>循环盘点（按库位 / 按批次 / 按等级）</li>
+            <li>差异需审批；差异率 &gt; 阈值自动升级</li>
+            <li>盘盈盘亏生成调整流水，<strong>不允许无单据调整</strong></li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">8</span>报修与售后<span class="tag">★ 防黑洞</span></div><div class="ab">
+          <ul>
+            <li>C 档线上（京东/400）/ 线下（授权网点）双通道</li>
+            <li>凭证号、承诺时效、垫付金额、状态全跟踪</li>
+            <li><strong>超时未回自动预警</strong>（默认 15 天），支持撤单/转 D</li>
+          </ul>
+        </div></div>
+      </div>
+    </div>
+    <div class="grid2" style="margin-top:14px">
+      <div>
+        <h4 style="color:#e8ac6a">C 段 · 出库履约（9–10）</h4>
+        <div class="acc"><div class="ah"><span class="no">9</span>出库管理（4 类）<span class="tag">★ 见 Tab 7</span></div><div class="ab">
+          <ul>
+            <li>销售出库（拍品/现货）、报修出库、调拨出库、拆机件出库</li>
+            <li>拣货扫码校验（错货/错等级直接拦截）</li>
+            <li>面单打印对接快递鸟/快递100</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">10</span>拆机件与残值<span class="tag">★ 止损</span></div><div class="ab">
+          <ul>
+            <li>D 档逐件估值（主板/屏/电池/摄像头…）</li>
+            <li>拆机件单独建档、出库、结算残值</li>
+            <li>D 档无残值明细<strong>不允许关闭工单</strong></li>
+          </ul>
+        </div></div>
+      </div>
+      <div>
+        <h4 style="color:#c39ce0">D 段 · 支撑保障（11–12）</h4>
+        <div class="acc"><div class="ah"><span class="no">11</span>报表与看板<span class="tag">数据驱动</span></div><div class="ab">
+          <ul>
+            <li>分级分布、检测产能、报修时效、库存账龄、残值回收</li>
+            <li>检测员准确率（用于抽检与绩效）</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">12</span>权限与审计<span class="tag">责任可追溯</span></div><div class="ab">
+          <ul>
+            <li>5 角色 RBAC：检测员/定价员/仓管/售后/管理员</li>
+            <li>关键操作全审计：改档、改价、盘盈盘亏、报修撤单</li>
+          </ul>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>文档导航</h2>
+    <div class="tocbox"><ol>
+      <li><a href="#p2">定位与边界（做什么/不做什么）</a></li>
+      <li><a href="#p3">业务全流程（6 主干 + 异常分支）</a></li>
+      <li><a href="#p14">分级标准全文（5 档判定 / 修修清单 / 报修分流 / 必检项 / 编码 / 价格）</a></li>
+      <li><a href="#p15">标签生成器 + 检测记录单（可直接用）</a></li>
+      <li><a href="#p4">生命周期状态机（10 状态）</a></li>
+      <li><a href="#p5">库存模型（口径与账实一致）</a></li>
+      <li><a href="#p6">数据模型（17 张表）</a></li>
+      <li><a href="#p7">功能模块详细设计</a></li>
+      <li><a href="#p13">硬件接入：扫码枪 · 标签机（已实测）</a></li>
+      <li><a href="#p8">出库与履约（4 类出库）</a></li>
+      <li><a href="#p9">分级引擎（规则如何执行）</a></li>
+      <li><a href="#p10">中台 / 前参谋对接</a></li>
+      <li><a href="#p11">权限 · 报表 · 风控</a></li>
+      <li><a href="#p12">实施路径与技术选型</a></li>
+    </ol></div>
+    <div class="note ok"><b>本方案已整合《二手货品检测分级标准 V1.0》全部内容</b>（Tab 3 分级标准全文 + Tab 4 标签与记录单工具），<b>单文件即可交付团队使用</b>，不必再单独传标准文档。</div>
+  </div>
+</div>
+
+<!-- ============ 1 定位与边界 ============ -->
+<div class="page printable" id="p2">
+  <div class="card">
+    <h2>1. 系统定位与边界</h2>
+    <p class="d">先说清「不做什么」——边界不清的系统最终都会变成大杂烩。</p>
+    <div class="grid2">
+      <div>
+        <h3 style="color:#6ed99a">系统负责（范围内）</h3>
+        <ul>
+          <li>批次/入库单管理，一机一码建档</li>
+          <li>检测作业与记录留痕（含照片）</li>
+          <li>分级判定与定价（规则可配置）</li>
+          <li>标签打印与贴标复核</li>
+          <li>库存台账（流水驱动）、仓位、盘点</li>
+          <li>报修工单（线上/线下双通道）</li>
+          <li>拆机件残值核算</li>
+          <li>各类出库（销售/报修/调拨/拆机件）</li>
+          <li>报表、权限、审计</li>
+          <li>与中台/前参谋的数据同步</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color:#f08a8a">系统不做（范围外，靠对接）</h3>
+        <ul>
+          <li><strong>不做</strong>前台商城、交易、支付、客服 IM</li>
+          <li><strong>不做</strong>营销活动、优惠券、会员</li>
+          <li><strong>不做</strong>物流轨迹查询（对接快递鸟）</li>
+          <li><strong>不做</strong>财务总账、税务（对接财务系统）</li>
+          <li><strong>不做</strong>供应商门户（用 Excel 导入替代）</li>
+          <li><strong>不做</strong>图像 AI 自动判瑕（先留接口，二期再评估）</li>
+        </ul>
+        <div class="note warn"><b>边界原则：</b>本系统是<b>「货品实体的状态与账本」</b>，是库存真相来源（Single Source of Truth）。销售侧和财务侧的数据，本系统<b>推送出去</b>而非替代。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>1.1 角色与核心诉求</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:96px">角色</th><th style="width:210px">最关心</th><th>系统给什么</th><th style="width:130px">每天用量</th></tr></thead>
+      <tbody>
+        <tr><td><b>检测员</b></td><td>别让我手填重复的东西</td><td>扫码自动带出品类/型号/历史记录，一屏完成检测，10 项打勾即出建议档位</td><td>30–40 台</td></tr>
+        <tr><td><b>定价员</b></td><td>价格凭什么这么定</td><td>基准价取数来源 + 系数规则 + 毛利校验，低于底价自动拦</td><td>40–100 台</td></tr>
+        <tr><td><b>仓管</b></td><td>别拿错货</td><td>库位×等级双维分拣，拣货扫码校验，错货当场拦</td><td>全天</td></tr>
+        <tr><td><b>售后</b></td><td>报修的货去哪了</td><td>待修台账 + 超时预警 + 凭证号可追溯，费用垫付挂账</td><td>5–15 单</td></tr>
+        <tr><td><b>主管</b></td><td>货卖了多少、钱收回来没</td><td>分级分布、毛利、报修时效、呆滞账龄、残值回收率</td><td>看板为主</td></tr>
+        <tr><td><b>财务</b></td><td>成本和收入对得上吗</td><td>按批次/品类出成本报表，残值单独核算</td><td>周/月</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>1.2 与分级标准的关系（复用而非重造）</h2>
+    <p class="d">分级标准是「业务规则」，本系统是「规则的执行引擎」。规则来自已确认的 5 档标准，映射关系如下。</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:70px">等级</th><th style="width:130px">业务定义</th><th style="width:150px">系统状态</th><th style="width:120px">默认仓位</th><th>系统动作</th></tr></thead>
+      <tbody>
+        <tr><td><div class="lvt"><i class="lv S">S</i>完美</div></td><td>零使用痕迹，电池≥85%</td><td><span class="st st3">可售 SELLABLE</span></td><td>可售仓</td><td>套系数 1.00，可直接上架</td></tr>
+        <tr><td><div class="lvt"><i class="lv A">A</i>微瑕</div></td><td>仅外观瑕疵，电池 80–84%</td><td><span class="st st3">可售 SELLABLE</span></td><td>可售仓（微瑕区）</td><td>套系数 0.85–0.92，<b>强制填瑕疵描述</b></td></tr>
+        <tr><td><div class="lvt"><i class="lv B">B</i>小修</div></td><td>厂内可修，不必送官方</td><td><span class="st st5">待修 REPAIR</span></td><td>维修仓</td><td>生成维修工单，领料，修完复检重新定级</td></tr>
+        <tr><td><div class="lvt"><i class="lv C">C</i>报修</div></td><td>必须官方修</td><td><span class="st st6">报修在外 OUT_REPAIR</span></td><td>报修仓（在外）</td><td>生成报修工单（线上/线下），跟踪时效与费用</td></tr>
+        <tr><td><div class="lvt"><i class="lv D">D</i>报废</div></td><td>无维修价值或安全风险</td><td><span class="st st7">拆机件 PARTS</span> / <span class="st st8">危废 HAZARD</span></td><td>拆机件仓 / 危废区</td><td>强制逐件估值，残值入账</td></tr>
+        <tr><td><span class="st st9">W 待测</span></td><td>已建档未检测</td><td><span class="st st1">待检 PENDING</span></td><td>待检仓</td><td>仅内部可见，<b>禁止上架/出库</b></td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>状态与等级的映射关系要点：</b>等级是<b>永久属性</b>（这台货永远是 B），状态是<b>当前处境</b>（B 修好后变成 S 并进入可售）。所以字段要分开存：<code class="mono">grade</code>（等级，只由检测决定）与 <code class="mono">status</code>（状态，由作业流转决定）。<b>混在一起是这类系统最常见的设计错误</b>——会导致「B 档待修」和「B 档可售」无法区分。</div>
+  </div>
+</div>
+
+<!-- ============ 2 业务全流程 ============ -->
+<div class="page printable" id="p3">
+  <div class="card">
+    <h2>2. 业务全流程</h2>
+    <p class="d">主干 6 步 + 5 类异常分支。异常分支的处理往往才是系统价值所在。</p>
+    <div class="flow">
+      <div class="step"><div class="n">STEP 1</div><div class="t">建档</div><div class="d">批次单 → 领用号段 → 逐台扫码建档，状态 PENDING，等级 W</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 2</div><div class="t">检测</div><div class="d">11 项逐台过机，留痕 + 拍照，产出建议档位</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 3</div><div class="t">定级定价</div><div class="d">人工确认档位 → 套系数出价 → 定价员复核</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 4</div><div class="t">贴标入库</div><div class="d">打正式标签 → 贴 → 扫码复核 → 移入对应仓</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 5</div><div class="t">在库运营</div><div class="d">上架/锁定/调拨/报修送修/拆机件拆解</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 6</div><div class="t">出库结案</div><div class="d">销售/拆机件出库 → 结转成本 → 毛利核算</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>2.1 关键流程的时序与卡点</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:70px">步骤</th><th style="width:120px">执行角色</th><th>系统动作</th><th style="width:160px">卡点/校验（不通过则阻断）</th></tr></thead>
+      <tbody>
+        <tr><td>1 建档</td><td>仓管</td><td>生成条码 → 写 items 表（status=PENDING, grade=W）→ 写入库流水</td><td>条码唯一性校验；<b>重号直接拒绝</b></td></tr>
+        <tr><td>2 检测</td><td>检测员</td><td>写 test_records + 明细 + 照片 → 引擎算建议档位</td><td>不合格项未填描述则不允许提交</td></tr>
+        <tr><td>3 定级定价</td><td>检测员→定价员</td><td>确认 grade → 套系数出价 → 低于底价则需审批</td><td>存疑「?」不允许定价；<b>底价以下自动拦</b></td></tr>
+        <tr><td>4 贴标</td><td>仓管</td><td>生成标签 → 贴标 → 扫码复核 → 移仓 → 状态机流转</td><td><b>扫码结果≠系统等级 → 阻断</b></td></tr>
+        <tr><td>5 在库</td><td>仓管/售后</td><td>上架/锁定/调拨/送修/拆解，各自写流水</td><td>待检仓的货不允许出库</td></tr>
+        <tr><td>6 出库</td><td>仓管</td><td>拣货扫码校验 → 出库流水 → 结转成本 → 状态置为已出库</td><td>等级不符/被锁定/账实不符 → 拦截</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>2.2 五类异常分支</h2>
+    <div class="grid2">
+      <div>
+        <div class="acc on"><div class="ah"><span class="no">E1</span>检测存疑（判「?」）</div><div class="ab">
+          <ul>
+            <li>自动进入<strong>复检池</strong>，状态仍 PENDING</li>
+            <li>指派资深检测员复检，<b>不隔夜</b>（系统标记超时）</li>
+            <li>复检结论覆盖建议档位，两次记录都留痕</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">E2</span>检测中发现安全红线</div><div class="ab">
+          <ul>
+            <li>鼓包/漏液/异味/漏电/焦糊/火烧痕迹</li>
+            <li>状态直接置 <span class="st st8">危废 HAZARD</span>，<b>禁止充电与任何流转</b></li>
+            <li>强制拍照 + 危废台账 + 单独仓位</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">E3</span>贴标后复核不通过</div><div class="ab">
+          <ul>
+            <li>扫码读出等级 ≠ 系统等级 → <b>阻断入库</b></li>
+            <li>生成补打任务，记录补打原因与次数</li>
+            <li>同批标签错贴超阈值 → 告警升级主管</li>
+          </ul>
+        </div></div>
+      </div>
+      <div>
+        <div class="acc"><div class="ah"><span class="no">E4</span>报修超时未回</div><div class="ab">
+          <ul>
+            <li>按承诺时效倒计时，默认 <b>15 天</b>预警</li>
+            <li>超时进「待处理」列表：联系客服撤单 / 转 D 拆件</li>
+            <li>撤单后机器回仓需<b>重新检测定级</b>（可能降档）</li>
+          </ul>
+        </div></div>
+        <div class="acc"><div class="ah"><span class="no">E5</span>盘点差异</div><div class="ab">
+          <ul>
+            <li>生成差异单，<b>不允许直接改库存</b></li>
+            <li>需审批 → 生成盘盈/盘亏调整流水</li>
+            <li>差异率超阈值（如 &gt;0.5%）自动升级主管核查</li>
+          </ul>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 3 分级标准全文 ============ -->
+<div class="page printable" id="p14">
+  <div class="card">
+    <h2>3. 分级标准（业务口径全文）</h2>
+    <p class="d">这一章是<b>检测员判定作业的唯一依据</b>，也是 Tab 11 分级引擎规则表的<b>数据来源</b>。建议打印上墙。</p>
+    <div class="note ok"><b>本章与 Tab 11 的关系：</b>本章是<b>人工口径</b>（给检测员看、判断标准是什么）；Tab 11 是<b>系统实现</b>（把这些规则写成 <code class="mono">dict_grade_rule</code> 配置表自动计算）。<b>两者必须同源</b>——标准改一次，两边同步改。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.1 五档分级总表（检测员判定依据）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:62px">档</th><th>判定条件（全部满足）</th><th style="width:200px">处置动作</th><th style="width:110px">定价</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><div class="lvt"><i class="lv S">S</i></div></td>
+          <td>① 全部功能正常无异常<br>② <b>零使用痕迹</b>：屏幕无划痕、机身无磕碰、无掉漆、边框无磨损<br>③ 电池健康 <b>≥ 85%</b><br>④ 无拆修、无进水、无换屏<br>⑤ 配件齐全、附件无损</td>
+          <td>拍实物图 → 定基准价 → 上架</td>
+          <td class="lvc">系数 <b>1.00</b></td>
+        </tr>
+        <tr>
+          <td><div class="lvt"><i class="lv A">A</i></div></td>
+          <td>① 功能全好，<b>仅外观问题</b><br>② 允许：细微划痕（<b>屏面划痕 ≤ 2 条且不影响显示</b>）、边框/后盖轻微磕碰掉漆、按键轻微磨损<br>③ 电池健康 <b>80%–84%</b><br>④ 屏幕显示无色斑、无亮点、无烧屏</td>
+          <td>拍瑕疵特写图 → 微瑕专区 → <b>价格下拉 8–15%</b></td>
+          <td class="lvc">系数 <b>0.85–0.92</b></td>
+        </tr>
+        <tr>
+          <td><div class="lvt"><i class="lv B">B</i></div></td>
+          <td>① 故障命中「厂内可修清单」（见 3.2）<br>② 主板完好、无进水、无烧痕<br>③ 修完可恢复 S/A 状态<br>④ 预估修复成本 &lt; 整机价 × <b>15%</b></td>
+          <td>开维修工单 → 领料 → 修 → 复检 → 重新定级贴标</td>
+          <td>修后成本 + 8~12% 毛利</td>
+        </tr>
+        <tr>
+          <td><div class="lvt"><i class="lv C">C</i></div></td>
+          <td>① 故障<b>超出厂内能力</b>或官方要求原厂件/授权认证<br>② 修后价值 &gt; 修复成本 × <b>1.5</b>（值得修）<br>③ 无安全风险<br>④ 具体分流见 3.3</td>
+          <td>见 <b>C1 线上 / C2 线下</b> 分流表；挂「待修」<b>不得上架</b></td>
+          <td>官方报价 − 风险预留 5%</td>
+        </tr>
+        <tr>
+          <td><div class="lvt"><i class="lv D">D</i></div></td>
+          <td><b>命中任一即报废（不再评估维修）</b>：<br>
+            ① <b>电池鼓包 / 漏液 / 变形 / 异味</b>（安全红线，无条件）<br>
+            ② 屏总成报废且官方换屏报价 &gt; 整机价 × 60%<br>
+            ③ 主板烧毁 / 进水腐蚀 / 无信号无供电，修后价值 &lt; 成本<br>
+            ④ <b>火烧 / 进液 / 严重变形</b>（结构性损伤）<br>
+            ⑤ 无法正常开机且无维修价值<br>
+            ⑥ 缺主板/缺屏/缺电池等主要部件，按拆件处理<br>
+            ⑦ 账号锁/FRP 锁/运营商锁无法依法解除且无配件价值</td>
+          <td><b>立即贴 D 标 + 入拆机件仓</b>，按「配件残值」建档，<b>不得流入可售仓</b></td>
+          <td>残值 30–60% 整机价</td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div class="note warn"><b>判定优先级：安全 &gt; 核心功能 &gt; 次要功能 &gt; 外观。任一项触发更高等级，按最高等级归类（就高不就低）。</b><br>
+    例：外观全新但屏碎 → <b>C 报修</b>，不是 A 微瑕。例：功能全好但电池鼓包 → <b>D 报废</b>，不是 C。</div>
+    <div class="note bad"><b>⚠ D 档不是「废品」：</b>玻璃碎屏、缺主板的机器，主板/摄像头/电池/屏总成仍值整机 30–60%。<b>必须建档、贴标、单独入库为「拆机件」</b>，否则等于把已付费的货当废品扔掉——这是本批货最大的一块隐性损失。详见 Tab 6 库存口径。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.2 B 档：厂内可修清单（不用送官方）</h2>
+    <p class="d">这些是我们自己能干、成本可控的，<b>命中即判 B，不要上报修</b>。</p>
+    <div class="grid2">
+      <div>
+        <h4 style="color:#93b4e8">硬件类</h4>
+        <ul>
+          <li><b>电池更换</b>（非原拆，质量合格，贴标并留电池健康记录）</li>
+          <li><b>充电口 / 尾插</b> 更换、排线松动、脏污清理（<b>先清理再判断</b>）</li>
+          <li><b>按键</b> 更换、按键膜/导电胶修复</li>
+          <li><b>扬声器 / 听筒 / 麦克风</b> 更换，网孔清灰</li>
+          <li><b>拧螺丝</b>、卡扣复位、变形外壳整形</li>
+          <li><b>排线</b> 松动/更换（屏幕排线、电池排线、指纹排线）</li>
+          <li><b>外壳 / 后盖 / 中框</b> 更换或贴合</li>
+          <li><b>玻璃盖板</b>（外置玻璃，<b>非内屏总成</b>）更换</li>
+          <li><b>密封圈</b> 更换（防水机型必做）</li>
+        </ul>
+      </div>
+      <div>
+        <h4 style="color:#93b4e8">软件类</h4>
+        <ul>
+          <li>系统重装 / 恢复出厂 / 清除数据（<b>必须解账号锁</b>）</li>
+          <li>账号锁 / FRP / 激活锁处理（<b>不得留他人账号</b>）</li>
+          <li>系统升级异常、卡砖、无限重启修复</li>
+          <li>应用配置、网络 / 蓝牙故障修复</li>
+          <li>贴膜 / 换屏幕保护膜</li>
+          <li><b>清洁除尘、消毒</b>（小家电必做，出厂卫生要求）</li>
+        </ul>
+        <h4 style="color:#f0a071">成本红线</h4>
+        <ul>
+          <li>单件修复成本 &lt; <b>整机基准价 × 15%</b> → 可修</li>
+          <li>超出 → 升级评估，走 C 或 D</li>
+          <li>拆机件再组装复用（配件流转）须<b>单独登记</b></li>
+        </ul>
+      </div>
+    </div>
+    <div class="note bad"><b>⚠ 严禁清单（判 D 或走 C，绝不可厂内私自做）：</b>内屏总成更换、主板维修/焊接扩容/刷机改码、电池鼓包处理、摄像头模组更换、进水机强开。<b>这些必须走官方或直接判 D，属于合规红线。</b></div>
+  </div>
+
+  <div class="card">
+    <h2>3.3 C 档：报修分流表（线上 / 线下）</h2>
+    <p class="d">先按故障类型分流，再按成本决定修不修。<b>C 档一律挂「待修」，禁止上架、禁止调价、禁止当作可售库存出售。</b></p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:180px">故障类型</th><th style="width:90px">分流</th><th>操作要点</th><th style="width:140px">凭证要求</th></tr></thead>
+      <tbody>
+        <tr><td>内屏总成损坏（显示异常/触控乱跳/色斑/烧屏）</td><td class="lvc"><b>C2 线下</b>优先<br>量大走 C1</td><td>京东搜品牌售后进官方旗舰店客服报修，或打 400；线下送授权网点，<b>先电话问网点是否受理该机型/该故障</b>，避免白跑</td><td>购买凭证 / 序列号 / 故障视频</td></tr>
+        <tr><td>摄像头模组故障（拍照糊/前置不开）</td><td><b>C2 线下</b></td><td>多数品牌官方不单换模组，需整机换新评估 → <b>先询价，超整机价 60% 即转 D</b></td><td>序列号 + 故障照片</td></tr>
+        <tr><td>主板故障（不开机/无信号/反复重启/烧毁）</td><td><b>C2 线下</b></td><td>官方主板更换费用高。<b>若官方报价 &gt; 整机价 × 60% → 直接转 D 拆件</b></td><td>序列号 + 主板故障视频</td></tr>
+        <tr><td>进水（液体腐蚀）</td><td><b>C2 线下</b></td><td>官方通常不给进水保修，<b>基本等同 D</b>；主板有价值的走配件渠道</td><td>进水照片 + 序列号</td></tr>
+        <tr><td><b>电池鼓包 / 漏液 / 异常发热</b></td><td><b>直接 D</b>（安全红线）</td><td><b>禁止充电、禁止测试</b>，<b>单独危废存放</b>，不得流入任何可售渠道</td><td>单独危废台账</td></tr>
+        <tr><td>品牌不受理（小家电 / 配件缺货 / 停产）</td><td><b>C1 线上 → 转 D</b></td><td>线上渠道确认无维修方案后，直接转 D 拆件，登记「官方不受理」原因</td><td>客服工单号</td></tr>
+        <tr><td>笔记本：屏轴断裂 / 键盘整套失效</td><td><b>C2 或 B</b></td><td>轴类件多为配件厂可换 → <b>可回 B 判定</b>；先问官方再定</td><td>型号 + 序列号</td></tr>
+        <tr><td>笔记本：无法充电 / 电池不识别</td><td><b>B 优先</b></td><td>先换同规格电池自测；换后正常 → 判 B（修完 A/S）</td><td>电池规格记录</td></tr>
+        <tr><td>平板：触控失灵但显示正常</td><td><b>C2 线下</b></td><td>触控层单价低可修；官方报价合理则修</td><td>序列号</td></tr>
+        <tr><td>手表：进水 / 心率传感器失效</td><td><b>C2 线下</b></td><td>小众品牌多为不受理 → 转 D 拆件（表芯、电池有价值）</td><td>序列号</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note"><b>线上（C1）走法：</b>京东搜「品牌名 + 售后/报修」进官方旗舰店客服 → 提交订单号（无订单用序列号 + 购买截图）→ 客服建单寄修 → 跟踪取件单号。费用先垫付，凭单据入账。<br>
+    <b>线下（C2）走法：</b>先用 400 或官网查<b>本地授权网点</b> → 电话确认「受理机型 + 是否需预约 + 带什么凭证」→ 送修取联单 → 留好维修单据做凭证。</div>
+    <div class="note bad"><b>⚠ C 档修后红线：</b>官方修后价若 <b>&lt; 基准价 × 45%</b>，<b>不建议修</b>，直接转 D 走拆件——省时间、占资金少、无售后纠纷风险。<br>
+    <b>⚠ 超时机制：</b>寄出后按承诺时效倒计时（默认 15 天），到期未回自动进「待处理」列表，主管可一键撤单或转 D。<b>不建待修台账，货寄出去就等于丢了</b>——钱垫着、货在别人手里、没人跟进。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.4 各品类必检项清单（逐项打勾）</h2>
+    <p class="d">「必检项」为该品类全项通检，<b>任一不合格即降档</b>。Tab 4 的检测记录单会按品类动态渲染对应检项。</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:88px">品类</th><th>必检项（逐项打勾）</th><th style="width:160px">本类特有雷区</th></tr></thead>
+      <tbody>
+        <tr><td><b>手机</b></td><td>开机·充电·充电速度·充满时长·待机耗电·电池健康·屏幕显示（纯白/纯黑/彩图）·多点触控·听筒·扬声器·外放音量·麦克风·前后摄像头拍照/录像/对焦·指纹或面容解锁·蓝牙·WiFi·NFC·定位·通话/上网信号·接口/尾插·震动·按键·防水气密（机型支持时）·外观·序列号/IMEI 核对</td><td>电池鼓包（红线）·屏幕幽灵/烧屏·主板烧（进水后）·账号锁未解</td></tr>
+        <tr><td><b>平板</b></td><td>上述手机项 + 屏幕总成显示均匀度（大屏亮点/色斑更易发现）·触控笔（如支持）·四扬声器·手写/笔吸附·横竖屏·Type-C 双向·外接键盘·电池续航体感·屏幕色温</td><td>大屏总成成本高 → 换屏报价超 60% 直接 D；屏幕压合不良（跳点）</td></tr>
+        <tr><td><b>笔记本</b></td><td>开机·电源适配器（充/不充）·电池识别与健康·键帽全键位逐个敲·屏幕显示与亮度·触控板（含左右键）·指点杆·各类接口（USB/HDMI/Type-C/网口/读卡器/3.5）·网线/WiFi/蓝牙·声卡双声道·摄像头·风扇散热·键盘背光·硬盘健康与容量·BIOS 正常进系统·外观/转轴/底盖螺丝</td><td>转轴断裂·键盘支架·进水键盘失灵（多数可换 B）·电池鼓包（红线）·硬盘 SMART 报错</td></tr>
+        <tr><td><b>手表</b></td><td>开机·充电（触点/无线）·电池健康·触控/旋钮/侧键·抬腕亮屏·心率/血氧/GPS（如支持）·蓝牙通话·<b>防水气密（重点，涉水必测）</b>·表带完整·外观·系统升级/恢复·序列号</td><td>进水（表气密）·表芯价值高（报废可拆表芯）·电池续航骤降</td></tr>
+        <tr><td><b>小家电</b></td><td>通电·功能全项（制冷/加热/吸力/转速/程序运行）·运行噪音与异响·功率实测（如条件允许）·<b>清洁度与消毒（食品接触类必做）</b>·电源线与插头·附件（水箱/滤芯/刀头）·外观·能效/噪音标识</td><td>漏电/焦味（红线）·电机烧（噪音异常+不转）·<b>异味未除（转卖投诉重灾区）</b>·缺附件影响二次销售</td></tr>
+        <tr><td><b>其他家电</b></td><td>通电·各档位切换·显示与按键·制冷/制热实测·密封/噪音·电源与安全保护·附件·外观·能耗档位标识</td><td>漏电/安全保护失效（红线）·高压部件（不自行拆，交官方）</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note dgr" style="background:#1a0f0f;border-left:3px solid var(--D)"><b style="color:#ff9d9d">⛔ 全品类安全红线（命中即 D，不得修、不得售、不得流入任何渠道）：</b>电池鼓包 / 漏液 / 异味冒烟 / 漏电打火 / 焦糊味 / 高压部件破损 / 有燃烧痕迹。<br>
+    <b>处理要求：</b>单独隔离存放 + 登记危废台账 + 拍照留档，<b>不得混入普通报废件</b>。系统内状态置 <code class="mono">HAZARD</code>，出库接口强制拦截。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.5 品类代码表（编码的基础）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:70px">代码</th><th style="width:120px">品类</th><th style="width:70px">代码</th><th style="width:120px">品类</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">PH</td><td>手机</td><td class="mono">WT</td><td>智能手表</td><td rowspan="5">新增品类只加代码，<b>不改编码结构</b>，历史编码继续有效</td></tr>
+        <tr><td class="mono">TB</td><td>平板</td><td class="mono">HA</td><td>小家电</td><td style="color:var(--tx3);font-size:12px">↑ 数码 3C 类</td></tr>
+        <tr><td class="mono">NB</td><td>笔记本</td><td class="mono">OA</td><td>其他家电</td><td style="color:var(--tx3);font-size:12px">↑ 家电类</td></tr>
+        <tr><td class="mono">EP</td><td>耳机/影音</td><td class="mono">GD</td><td>游戏机/配件</td><td style="color:var(--tx3);font-size:12px">↑ 配件类</td></tr>
+        <tr><td class="mono">AC</td><td>电脑配件/外设</td><td class="mono">OT</td><td>其他</td><td style="color:var(--tx3);font-size:12px">↑ 兜底</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>3.6 编码结构（8 段定长 · 一码到底）</h2>
+    <div class="code" style="font-size:15px;padding:16px">QC&#8202;-&#8202;<span style="color:#a78bfa">PH</span>&#8202;-&#8202;<span style="color:#fbbf24">S</span>&#8202;-&#8202;<span style="color:#34d399">2610</span>&#8202;-&#8202;<span style="color:#f87171">0012</span></div>
+    <div class="tw" style="margin-top:14px"><table>
+      <thead><tr><th style="width:70px">段位</th><th style="width:90px">示例</th><th>含义</th><th style="width:250px">规则</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="mono">QC</td><td>系统标识（前参谋）</td><td>固定 <code class="mono">QC</code>，不可变。改用其他 ERP 时统一换前缀</td></tr>
+        <tr><td>2</td><td class="mono">PH</td><td>品类代码</td><td>见 3.5 品类代码表</td></tr>
+        <tr><td>3</td><td class="mono">S</td><td>等级代码</td><td><b>W 待测</b> / S 完美 / A 微瑕 / B 小修 / C 报修 / D 报废</td></tr>
+        <tr><td>4</td><td class="mono">2610</td><td>批次年月</td><td><code class="mono">YYMM</code>，如 2610 = 2026 年 10 月</td></tr>
+        <tr><td>5</td><td class="mono">0012</td><td>批次内流水</td><td>4 位，从 0001 起，<b>全批不重号</b>，报废件也占用号</td></tr>
+      </tbody>
+    </table></div>
+    <div class="code">-- 条码本体（扫码读到的，无分隔符）
+QCPHS26100012
+-- 解析规则
+前缀(2) + 品类(2) + 等级(1) + 批次(4) + 流水(4)</div>
+    <div class="note ok"><b>为什么等级段要「可改」：</b>入库时并不知道最终等级，条码却必须先打。所以用 <b>W 占位</b>——测完定级后，<b>只改中台字段 + 重打正式标签</b>，条码主体 <code class="mono">QC-PH-2610-0012</code> <b>全程不变</b>，账、库存、检测记录三处永远对得上。<br>
+    <b>⚠ 流水超 9999 必须换批次号</b>，否则会重号（系统应加 alert 拦截）。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.7 价格系数表</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:62px">档</th><th style="width:150px">系数</th><th>算法</th><th style="width:190px">说明</th></tr></thead>
+      <tbody>
+        <tr><td><div class="lvt"><i class="lv S">S</i></div></td><td class="mono lvc"><b>1.00</b></td><td>基准价 × 1.00</td><td>基准价 = 同款同期市场价（近 7 天）</td></tr>
+        <tr><td><div class="lvt"><i class="lv A">A</i></div></td><td class="mono lvc"><b>0.85–0.92</b></td><td>基准价 × 系数</td><td>划痕越多越明显系数越低；<b>每个瑕疵点降 2%</b>，封顶 0.85</td></tr>
+        <tr><td><div class="lvt"><i class="lv B">B</i></div></td><td class="mono lvc">修后成本 + 8~12%</td><td>(配件+工时) × 1.10</td><td>修完按复检结果再落 S 或 A 价</td></tr>
+        <tr><td><div class="lvt"><i class="lv C">C</i></div></td><td class="mono lvc">官方报价 − 风险预留</td><td>修后价 = 基准价 − (官方报价 + 风险预留 5%)</td><td><b>修后必须复检重新定级</b>，不沿用原档</td></tr>
+        <tr><td><div class="lvt"><i class="lv D">D</i></div></td><td class="mono lvc"><b>0.30–0.60</b></td><td>Σ 配件市场价 × 0.8（打包出）</td><td>主板/屏/电池/摄像头/尾插逐件估值，加总后打折</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note warn"><b>两条定价红线：</b>① C 档官方修后价 &lt; 基准价 × 45% → <b>不建议修</b>，直接转 D；② 售价低于底价 → <b>主管审批</b>（Tab 13 权限设计）。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.8 抽检与质量控制</h2>
+    <div class="grid2">
+      <div>
+        <h4>抽检机制</h4>
+        <ul>
+          <li>每定级 <b>50 台</b>，资深检测员随机抽 <b>10%</b> 复检</li>
+          <li>重点抽：<b>高价值（&gt;¥3000）</b>、<b>S 档</b>（虚报高发）、<b>D 档</b>（怕被误报废）</li>
+          <li>连续 <b>3 次误判 → 停线重训</b></li>
+          <li>存疑判「?」→ 自动进复检池，<b>不隔夜</b>，当天复检</li>
+        </ul>
+      </div>
+      <div>
+        <h4>三项质量指标（进管理看板）</h4>
+        <ul>
+          <li><b>误判率</b> = 复检不一致台数 / 抽检台数（目标 &lt; 3%）</li>
+          <li><b>漏检率</b> = 售后返修台数 / 已售台数（目标 &lt; 1.5%）</li>
+          <li><b>引擎一致率</b> = 建议档=最终档台数 / 总台数（低则规则需调）</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note bad"><b>⚠ S 档是虚报重灾区：</b>「零使用痕迹」是主观判断，检测员为了好卖容易放宽。<b>必须靠侧光验屏 + 显微镜看划痕 + 拍照留证</b>三件事硬约束，否则 A 档当 S 档卖，纠纷和退货成本远超那点价差。</div>
+  </div>
+
+  <div class="card">
+    <h2>3.9 五种最易踩的损耗（务必逐条核对）</h2>
+    <div class="grid2">
+      <div>
+        <h4 style="color:#ff9d9d">① 把 D 档当废品扔了</h4>
+        <p style="color:var(--tx2);font-size:12.5px">整机判废前必须逐件估值。一台屏碎主板好的手机，主板能值整机 40%。<b>本批货若有 200 台判 D，按残值 30% 算就是几万块</b>——这是最大一块隐性损失。</p>
+        <h4 style="color:#f0a071">② 标签贴错 / 贴反</h4>
+        <p style="color:var(--tx2);font-size:12.5px">等级色块是分拣指令，贴错会导致高价机当微瑕卖（少赚）或低价值当完美卖（退货+差评）。<b>贴标必须扫码复核</b>，不匹配直接阻断（见 3.11 与 Tab 9 硬件接入）。</p>
+        <h4 style="color:#c39ce0">③ 报告修但没跟进</h4>
+        <p style="color:var(--tx2);font-size:12.5px">C 档发出后<b>必须建「待修台账」</b>：凭证号、承诺时效、费用、状态。超过 15 天未回直接联系客服撤单或转 D，<b>否则货压在别人手里，钱也垫着</b>。</p>
+      </div>
+      <div>
+        <h4 style="color:#93d977">④ 账号锁 / 数据没清</h4>
+        <p style="color:var(--tx2);font-size:12.5px">二手流通最典型的纠纷：买家登录你的账号。原机主账号未解绑 → 只能判 D。检测时<b>必做「设置-账号-退出全部账号 + 恢复出厂」并录像</b>。</p>
+        <h4 style="color:#93b4e8">⑤ 小家电异味未除</h4>
+        <p style="color:var(--tx2);font-size:12.5px">清洁消毒必做，这是转卖投诉重灾区。上一批机器若有异味，下一批买家投诉会连带影响店铺信誉。</p>
+        <h4 style="color:#e5c768">⑥ 报修白跑一趟</h4>
+        <p style="color:var(--tx2);font-size:12.5px">线下送修前<b>务必先电话确认网点是否受理该机型/该故障</b>，避免机器白带、路费白花、时间白耗。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3.10 日间执行节奏</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:110px">环节</th><th style="width:110px">建议人时</th><th>动作</th><th style="width:130px">产出</th></tr></thead>
+      <tbody>
+        <tr><td><b>清点建档</b></td><td>1 人 × 0.5 天</td><td>按品类清点、拍库位照、生成号段</td><td>批次表 + 流水预留</td></tr>
+        <tr><td><b>打临时码</b></td><td>1 人 × 0.5 天</td><td>批量生成 W 标签并贴上；<b>边打边贴，不要先全打完</b></td><td>一机一码</td></tr>
+        <tr><td><b>逐台检测</b></td><td>2 人 × 1–3 天<br><span style="color:var(--tx3);font-size:11.5px">约 30–40 台/人/天</span></td><td>全项过机 + 填单；<b>高价值机（&gt;¥3000）与争议机优先检</b></td><td>检测记录单</td></tr>
+        <tr><td><b>定级定价</b></td><td>1 人 × 0.5 天</td><td>对照标准定档、套价格系数、算残值</td><td>分级结果 + 价格</td></tr>
+        <tr><td><b>贴正式标</b></td><td>1 人 × 0.5 天</td><td>按等级分色重打正式标签，<b>W 标划线作废（不撕）</b></td><td>正式身份码</td></tr>
+        <tr><td><b>处置分流</b></td><td>按队列推进</td><td>S/A 入可售仓；B 开工单；C 送修；D 入拆机仓</td><td>分仓完成</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>3.11 贴标复核与标签补打</h2>
+    <div class="flow">
+      <div class="step"><div class="n">1</div><div class="t">打正式码</div><div class="d">等级定好后按批次/等级批量打，色块对应等级</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">2</div><div class="t">贴标</div><div class="d"><b>W 标划横线作废，不要撕</b>（保留流转痕迹）</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">3</div><div class="t">扫码复核</div><div class="d">扫新码 → 系统读出等级，与实物核对</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">4</div><div class="t">放行 / 阻断</div><div class="d">一致 → 入库；<b>不一致 → 直接阻断</b></div></div>
+    </div>
+    <div class="code">复核 3 项强校验（任一不符即拒收）：
+① 新码解析出的 barcode 是否存在        否则「未知条码，拒收」
+② 新码等级 == 该货品当前系统等级        否则「等级不符：系统=S，实扫=A，拒收」
+③ 新码 barcode == 该货品原 barcode      否则「张冠李戴，检查是否贴错机器」</div>
+    <div class="note bad"><b>⚠ 补打要受控：</b>标签损坏/丢失需补打时，<b>必须填原因</b>并记入 <code class="mono">label_print_log</code>。同批补打率 &gt; 1% 说明前面流程有问题，要告警排查，别让补打变成常态。</div>
+  </div>
+</div>
+
+<!-- ============ 4 标签与记录单工具 ============ -->
+<div class="page printable" id="p15">
+  <div class="card">
+    <h2>4. 标签生成与检测记录单（可直接使用）</h2>
+    <p class="d">本章把《二手货品检测分级标准 V1.0》的作业工具<b>直接并入方案</b>，不必再开第二个文件。填好品类/等级/流水即可批量生成标签；检测记录单可打印下发。</p>
+  </div>
+
+  <div class="card">
+    <h2 style="justify-content:space-between">4.1 标签生成器（60 × 40 mm 不干胶）<span class="noprint" style="font-size:12px;font-weight:400;color:var(--tx2)">
+      <input id="lt-cat" placeholder="PH" value="PH" style="width:50px;margin:0 4px">
+      <input id="lt-serial" placeholder="0012" value="0012" style="width:62px;margin:0 4px">
+      <input id="lt-batch" placeholder="2610" style="width:62px;margin:0 4px">
+      <select id="lt-grade" style="margin:0 4px">
+        <option value="S">S 完美</option><option value="A">A 微瑕</option><option value="B">B 小修</option>
+        <option value="C">C 报修</option><option value="D">D 报废</option><option value="W">W 待测</option>
+      </select>
+      <select id="lt-n" style="margin:0 4px"><option>6</option><option>12</option><option>24</option></select>
+      <button class="btn" onclick="renderLbl()">生成</button>
+      <button class="btn g" onclick="window.print()">🖨 打印标签</button>
+    </span></h2>
+    <p class="d">条码为 <b>Code 128</b>（激光/影像扫码枪均可识别），下方同时打印人可读编码，条码万一扫不出也能手工敲入。<b>条码已通过编解码往返验证</b>，宽度自适应不会超出标签。</p>
+    <div id="lblbox" class="lblgrid"></div>
+    <div class="note" style="margin-top:14px">
+      <b>标签各区含义：</b>左上色块 = 等级（S绿 / A黄 / B蓝 / C橙 / D红 / W灰，<b>颜色即指令，仓管不用看字就知道怎么走</b>）；右上 = 处置动作一句话；中下 = 条码；底栏 = 编码 + 日期。<br>
+      <b>建议用荧光色不干胶</b>，S/A 用亮色、B/C/D 用深色，分拣台一眼分层。
+    </div>
+    <div class="note bad"><b>⚠ 打印后必须用扫码枪回扫实体标签</b>，一张一张扫，全部识别才算通过。「打印出来看着正常」≠「条码能扫」——跳过这步，出库时才发现扫不出，几十上百台货全卡在仓里。验收标准见 Tab 9 硬件接入 7.8。</div>
+  </div>
+
+  <div class="card">
+    <h2 style="justify-content:space-between">4.2 检测记录单（每单 20 台 · A4 可打印）<span class="noprint" style="font-size:12px;font-weight:400;color:var(--tx2)">
+      <input id="tester" placeholder="检测人" style="width:80px;margin:0 4px">
+      <input id="tdate" type="date" style="width:130px;margin:0 4px">
+      <input id="batch" placeholder="批次号 2610-01" style="width:110px;margin:0 4px">
+      <button class="btn" onclick="window.print()">🖨 打印</button>
+      <button class="btn g" onclick="exportCsv()">⬇ 导出已录数据 CSV</button>
+    </span></h2>
+    <p class="d">逐台全项过机。<b>任一项不合格 → 立即在「不合格项描述」写明 → 定级栏打勾</b>。等级有疑问对照 Tab 3 分级标准。</p>
+    <div class="tw"><table id="sheet" class="fixw">
+      <thead><tr>
+        <th class="c-idx">#</th><th class="c-code">编码（可扫码/手填）</th><th class="c-cat">品类</th>
+        <th>开机</th><th>充电</th><th>屏幕</th><th>触控</th><th class="c-bh">电池%</th><th>按键接口</th><th>摄像</th><th>网络蓝牙</th><th>声学</th><th>外观</th><th>序列号核对</th>
+        <th class="c-note">不合格项描述</th><th class="c-grade">等级</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table></div>
+    <div class="note" style="margin-top:12px">
+      <b>填表口径：</b>合格打「√」，不合格打「×」并在该行写原因；<b>不适用</b>（如无摄像头机型）写「/」。<br>
+      <b>等级栏只填一个字：</b><span class="lvc">S</span> 完美 / <span class="lvc A">A</span> 微瑕 / <span class="lvc B">B</span> 小修 / <span class="lvc C">C</span> 报修 / <span class="lvc D">D</span> 报废 / <span style="color:var(--tx2)">?</span> 待定（存疑打问号，交二检）<br>
+      <b>存疑处理：</b>「?」的机器单独放置，<b>不隔夜</b>，当天交资深检测员复检定级，避免压货。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4.3 CSV 导出字段（与 Tab 12 中台对接一致）</h2>
+    <p class="d">检测单录完后导出，即为中台导入模板。<b>对方系统列名不同时只改表头，数据顺序不动。</b>导入前必做三项校验：条码去重、W 等级拦截、D 档残值完整性。</p>
+    <div class="code">商品编码 | 显示编码 | 品类 | 品牌型号 | 等级 | 处置路径 | 检测结论 | 电池健康% | 基准价 | 销售价残值 | 检测人 | 检测日期 | 报修渠道凭证 | 配件残值明细 | 外观瑕疵 | 含配件 | 实拍图
+
+QCPHS26100012 | QC-PH-S-2610-0012 | 手机 | iPhone 13 128G | S | 可售 | 全项通过，无使用痕迹 | 87 | 3280 | 3280 | 张三 | 2026-10-03 | | | | 是 | 4 张
+QCPHA26100013 | QC-PH-A-2610-0013 | 手机 | 华为 P40 128G   | A | 微瑕专区 | 功能全好，后盖右下 3mm 磕碰 | 83 | 1180 | 1050 | 张三 | 2026-10-03 | | | 后盖右下角磕碰，已拍照 | 是 | 6 张
+QCOTD26100014 | QC-OT-D-2610-0014 | 手机 | 小米 9 64G      | D | 拆机件 | 主板烧毁不可修，屏碎 | — | 420 | 230 | 李四 | 2026-10-03 | | 主板¥120/电池¥80/摄���头¥30 | | 否 | 3 张</div>
+  </div>
+</div>
+
+<!-- ============ 5 生命周期状态机 ============ -->
+<div class="page printable" id="p4">
+  <div class="card">
+    <h2>3. 货品生命周期状态机（10 状态）</h2>
+    <p class="d">这是系统的骨架。<strong>状态只能按图流转，任何跳跃式修改都是 bug。</strong>所有流转都会写审计日志 + 库存流水。</p>
+    <div class="fig">
+      <svg viewBox="0 0 1250 560" width="100%" style="min-width:1190px" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#5b6373"/></marker>
+          <marker id="ar2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#ef4444"/></marker>
+          <marker id="ar3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#22c55e"/></marker>
+        </defs>
+        <text x="20" y="26" fill="#8b93a3" font-size="12" font-family="sans-serif">主流程（横）· 修复回流（绿）· 终止态（红）</text>
+
+        <!-- S1 -->
+        <rect x="20" y="60" width="126" height="52" rx="8" fill="#16233c" stroke="#2d3f5e"/>
+        <text x="83" y="82" fill="#93b4e8" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">PENDING</text>
+        <text x="83" y="99" fill="#7d8aa0" font-size="10.5" text-anchor="middle" font-family="sans-serif">待检测 · 等级W</text>
+        <!-- S2 -->
+        <rect x="188" y="60" width="126" height="52" rx="8" fill="#2a2410" stroke="#5a4a17"/>
+        <text x="251" y="82" fill="#e5c768" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">GRADED</text>
+        <text x="251" y="99" fill="#8d7f4a" font-size="10.5" text-anchor="middle" font-family="sans-serif">已定级·待贴标</text>
+        <!-- S3 -->
+        <rect x="356" y="60" width="132" height="52" rx="8" fill="#12291c" stroke="#1f4a30"/>
+        <text x="422" y="82" fill="#6ed99a" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">SELLABLE</text>
+        <text x="422" y="99" fill="#5f8f74" font-size="10.5" text-anchor="middle" font-family="sans-serif">可售 S/A</text>
+        <!-- S4 -->
+        <rect x="530" y="60" width="126" height="52" rx="8" fill="#1a2f14" stroke="#2f5220"/>
+        <text x="593" y="82" fill="#93d977" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">LOCKED</text>
+        <text x="593" y="99" fill="#6a8f57" font-size="10.5" text-anchor="middle" font-family="sans-serif">已锁·待出库</text>
+        <!-- S5 终态 -->
+        <rect x="700" y="60" width="118" height="52" rx="8" fill="#2b1414" stroke="#5c2828"/>
+        <text x="759" y="82" fill="#f08a8a" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">SOLD</text>
+        <text x="759" y="99" fill="#a06a6a" font-size="10.5" text-anchor="middle" font-family="sans-serif">已销售（终态）</text>
+
+        <line x1="146" y1="86" x2="186" y2="86" stroke="#5b6373" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="166" y="78" fill="#8b93a3" font-size="9.5" text-anchor="middle" font-family="sans-serif">检测</text>
+        <line x1="314" y1="86" x2="354" y2="86" stroke="#5b6373" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="334" y="78" fill="#8b93a3" font-size="9.5" text-anchor="middle" font-family="sans-serif">贴标</text>
+        <line x1="488" y1="86" x2="528" y2="86" stroke="#5b6373" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="508" y="78" fill="#8b93a3" font-size="9.5" text-anchor="middle" font-family="sans-serif">上架</text>
+        <line x1="656" y1="86" x2="698" y2="86" stroke="#5b6373" stroke-width="1.6" marker-end="url(#ar)"/>
+        <text x="677" y="78" fill="#8b93a3" font-size="9.5" text-anchor="middle" font-family="sans-serif">拣货</text>
+
+        <!-- 维修线 -->
+        <rect x="356" y="196" width="132" height="50" rx="8" fill="#2a1f10" stroke="#5c3f18"/>
+        <text x="422" y="218" fill="#e8ac6a" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">REPAIR</text>
+        <text x="422" y="234" fill="#96764a" font-size="10.5" text-anchor="middle" font-family="sans-serif">B档厂修中</text>
+
+        <rect x="530" y="196" width="126" height="50" rx="8" fill="#251a2e" stroke="#3f2b52"/>
+        <text x="593" y="218" fill="#c39ce0" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">OUT_REPAIR</text>
+        <text x="593" y="234" fill="#8d6fa3" font-size="10.5" text-anchor="middle" font-family="sans-serif">C档报修在外</text>
+
+        <rect x="700" y="196" width="118" height="50" rx="8" fill="#1a1a1f" stroke="#3a3a44"/>
+        <text x="759" y="218" fill="#b8bec8" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">CLOSED</text>
+        <text x="759" y="234" fill="#7a8090" font-size="10.5" text-anchor="middle" font-family="sans-serif">工单关闭</text>
+
+        <rect x="356" y="300" width="132" height="50" rx="8" fill="#2b1a10" stroke="#5c3418"/>
+        <text x="422" y="322" fill="#f0a071" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">REWORK</text>
+        <text x="422" y="338" fill="#a1705a" font-size="10.5" text-anchor="middle" font-family="sans-serif">返工/复检池</text>
+
+        <rect x="880" y="196" width="120" height="50" rx="8" fill="#1a1526" stroke="#3d2f55"/>
+        <text x="940" y="218" fill="#c3a8e8" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">RECALL</text>
+        <text x="940" y="234" fill="#8a72ab" font-size="10.5" text-anchor="middle" font-family="sans-serif">退货召回</text>
+
+        <!-- 拆机件/危废 -->
+        <rect x="880" y="60" width="120" height="52" rx="8" fill="#2a1a3a" stroke="#4a2f63"/>
+        <text x="940" y="82" fill="#c99ae8" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">PARTS</text>
+        <text x="940" y="99" fill="#91699f" font-size="10.5" text-anchor="middle" font-family="sans-serif">D档拆机件</text>
+
+        <rect x="880" y="300" width="120" height="50" rx="8" fill="#3a1414" stroke="#6b2020"/>
+        <text x="940" y="322" fill="#ff9d9d" font-size="13" font-weight="bold" text-anchor="middle" font-family="sans-serif">HAZARD</text>
+        <text x="940" y="338" fill="#b06a6a" font-size="10.5" text-anchor="middle" font-family="sans-serif">危废（终态）</text>
+
+        <!-- 流转线 -->
+        <path d="M 251 112 L 251 160 L 422 160 L 422 194" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <text x="290" y="153" fill="#e5c768" font-size="9.5" font-family="sans-serif">判 B / C / D</text>
+
+        <path d="M 488 221 L 528 221" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <text x="508" y="213" fill="#8b93a3" font-size="9.5" text-anchor="middle" font-family="sans-serif">超能力</text>
+
+        <path d="M 656 221 L 698 221" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <text x="677" y="213" fill="#8b93a3" font-size="9.5" text-anchor="middle" font-family="sans-serif">修回</text>
+
+        <path d="M 422 246 L 422 298" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <text x="432" y="278" fill="#8b93a3" font-size="9.5" font-family="sans-serif">修不好/超成本</text>
+
+        <path d="M 356 325 L 200 325 L 200 115 L 186 115" stroke="#22c55e" stroke-width="1.6" fill="none" marker-end="url(#ar3)"/>
+        <text x="206" y="318" fill="#6ed99a" font-size="9.5" font-family="sans-serif">重检</text>
+
+        <!-- D 档 → 拆机件：走下方独立通道，避开 SOLD -->
+        <path d="M 422 112 L 422 152 L 840 152 L 840 74 L 878 74" stroke="#22c55e" stroke-width="1.6" fill="none" marker-end="url(#ar3)"/>
+        <text x="600" y="146" fill="#6ed99a" font-size="9.5" text-anchor="middle" font-family="sans-serif">D 档 → 拆机件</text>
+
+        <path d="M 251 60 L 251 40 L 1010 40 L 1010 298" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#ar2)"/>
+        <text x="600" y="33" fill="#f08a8a" font-size="9.5" text-anchor="middle" font-family="sans-serif">安全红线 → 危废（禁止充电与流转）</text>
+
+        <!-- 召回：单独走右侧通道 -->
+        <path d="M 1000 221 L 1035 221" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 1050 196 L 1090 196 L 1090 130 L 83 130 L 83 114" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <text x="1097" y="165" fill="#8b93a3" font-size="9.5" font-family="sans-serif">召回后重检</text>
+
+        <path d="M 940 300 L 940 114" stroke="#5b6373" stroke-width="1.5" fill="none" marker-end="url(#ar)"/>
+        <path d="M 759 246 L 759 288" stroke="#ef4444" stroke-width="1.5" fill="none" marker-end="url(#ar2)"/>
+        <text x="768" y="272" fill="#f08a8a" font-size="9.5" font-family="sans-serif">撤单/无法修复 → 危废</text>
+
+        <!-- 图例 -->
+        <g transform="translate(20,392)">
+          <text x="0" y="0" fill="#8b93a3" font-size="11.5" font-weight="bold" font-family="sans-serif">状态说明</text>
+          <rect x="0" y="12" width="200" height="26" rx="6" fill="#16233c"/><text x="10" y="29" fill="#93b4e8" font-size="10.5" font-family="sans-serif">待检 PENDING — 已建档未测</text>
+          <rect x="212" y="12" width="200" height="26" rx="6" fill="#2a2410"/><text x="222" y="29" fill="#e5c768" font-size="10.5" font-family="sans-serif">已定级 GRADED — 待贴标</text>
+          <rect x="424" y="12" width="200" height="26" rx="6" fill="#12291c"/><text x="434" y="29" fill="#6ed99a" font-size="10.5" font-family="sans-serif">可售 SELLABLE — 可上架/锁</text>
+          <rect x="636" y="12" width="200" height="26" rx="6" fill="#1a2f14"/><text x="646" y="29" fill="#93d977" font-size="10.5" font-family="sans-serif">已锁 LOCKED — 待出库</text>
+          <rect x="848" y="12" width="200" height="26" rx="6" fill="#2a1f10"/><text x="858" y="29" fill="#e8ac6a" font-size="10.5" font-family="sans-serif">厂修 REPAIR — B 档在厂</text>
+          <rect x="0" y="46" width="200" height="26" rx="6" fill="#251a2e"/><text x="10" y="63" fill="#c39ce0" font-size="10.5" font-family="sans-serif">报修在外 OUT_REPAIR</text>
+          <rect x="212" y="46" width="200" height="26" rx="6" fill="#2b1a10"/><text x="222" y="63" fill="#f0a071" font-size="10.5" font-family="sans-serif">返工 REWORK — 复检池</text>
+          <rect x="424" y="46" width="200" height="26" rx="6" fill="#2a1a3a"/><text x="434" y="63" fill="#c99ae8" font-size="10.5" font-family="sans-serif">拆机件 PARTS — D 档</text>
+          <rect x="636" y="46" width="200" height="26" rx="6" fill="#3a1414"/><text x="646" y="63" fill="#ff9d9d" font-size="10.5" font-family="sans-serif">危废 HAZARD — 终态</text>
+          <rect x="848" y="46" width="200" height="26" rx="6" fill="#2b1414"/><text x="858" y="63" fill="#f08a8a" font-size="10.5" font-family="sans-serif">已售 SOLD — 终态</text>
+        </g>
+      </svg>
+      <div class="figcap">图 1 · 货品生命周期状态机（终态不可逆，终态之间互不流转）</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>3.1 状态流转表（后端按此表做白名单校验）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:130px">源状态</th><th style="width:120px">目标状态</th><th>触发动作</th><th style="width:110px">操作角色</th><th style="width:150px">系统校验</th></tr></thead>
+      <tbody>
+        <tr><td><span class="st st9">(新建)</span></td><td><span class="st st1">PENDING</span></td><td>扫码建档</td><td>仓管</td><td>条码唯一、未重复</td></tr>
+        <tr><td><span class="st st1">PENDING</span></td><td><span class="st st2">GRADED</span></td><td>提交检测 + 定级</td><td>检测员</td><td>必检项全填、不合格项有描述</td></tr>
+        <tr><td><span class="st st1">PENDING</span></td><td><span class="st st8">HAZARD</span></td><td>命中安全红线</td><td>检测员</td><td>必须拍照 + 危废登记</td></tr>
+        <tr><td><span class="st st2">GRADED</span></td><td><span class="st st3">SELLABLE</span></td><td>贴标复核通过</td><td>仓管</td><td><b>扫码等级 = 系统等级</b></td></tr>
+        <tr><td><span class="st st2">GRADED</span></td><td><span class="st st5">REPAIR</span></td><td>B 档开维修工单</td><td>售后</td><td>修复成本 &lt; 整机价 15%</td></tr>
+        <tr><td><span class="st st2">GRADED</span></td><td><span class="st st6">OUT_REPAIR</span></td><td>C 档发起报修</td><td>售后</td><td>已录凭证号 + 承诺时效</td></tr>
+        <tr><td><span class="st st2">GRADED</span></td><td><span class="st st7">PARTS</span></td><td>D 档判报废</td><td>定价员</td><td><b>残值明细已填</b></td></tr>
+        <tr><td><span class="st st3">SELLABLE</span></td><td><span class="st st4">LOCKED</span></td><td>订单占用/拍品锁</td><td>仓管</td><td>未被其他单占用</td></tr>
+        <tr><td><span class="st st4">LOCKED</span></td><td><span class="st st3">SELLABLE</span></td><td>取消订单/超时释放</td><td>系统</td><td>未出库</td></tr>
+        <tr><td><span class="st st4">LOCKED</span></td><td><span class="st st9">SOLD</span></td><td>出库核销</td><td>仓管</td><td>已生成面单 + 物流单号</td></tr>
+        <tr><td><span class="st st5">REPAIR</span></td><td><span class="st st2">GRADED</span></td><td>修好复检定级</td><td>检测员</td><td>重跑必检项，<b>允许降档</b></td></tr>
+        <tr><td><span class="st st5">REPAIR</span></td><td><span class="st st7">PARTS</span></td><td>修不好/超成本</td><td>定价员</td><td>残值明细已填</td></tr>
+        <tr><td><span class="st st6">OUT_REPAIR</span></td><td><span class="st st2">GRADED</span></td><td>官方修回复检</td><td>检测员</td><td>重新定级 + 重新定价</td></tr>
+        <tr><td><span class="st st6">OUT_REPAIR</span></td><td><span class="st st7">PARTS</span></td><td>官方判定不可修</td><td>售后</td><td>凭证截图存档</td></tr>
+        <tr><td><span class="st st6">OUT_REPAIR</span></td><td><span class="st st8">HAZARD</span></td><td>撤单/无法修复</td><td>售后</td><td>主管审批</td></tr>
+        <tr><td><span class="st st7">PARTS</span></td><td><span class="st st9">(拆件出库)</span></td><td>拆机件销售</td><td>仓管</td><td>逐件清单核对</td></tr>
+        <tr><td><span class="st st10">SOLD</span></td><td><span class="st st11">RECALL</span></td><td>买家退货</td><td>售后</td><td>仅 S/A 状态可召回</td></tr>
+        <tr><td><span class="st st11">RECALL</span></td><td><span class="st st1">PENDING</span></td><td>召回后重检</td><td>检测员</td><td>全项重测</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>关键约束：</b>① <code class="mono">SOLD</code> 与 <code class="mono">HAZARD</code> 为终态，不可流出；② <code class="mono">PENDING</code> 与 <code class="mono">REWORK</code> 状态<b>禁止任何出库</b>（后端出库接口必须校验）；③ 报修回库必须重新定级，<b>不得沿用送修前等级</b>（维修过程可能引入新伤）。</div>
+  </div>
+</div>
+
+<!-- ============ 4 库存模型 ============ -->
+<div class="page printable" id="p5">
+  <div class="card">
+    <h2>4. 库存模型（账实一致的核心设计）</h2>
+    <p class="d">二手货的特殊性：<strong>同一台货会在多个状态间来回移动</strong>（待检→可售→锁定→销售，修不好还要退回）。如果用「数量字段直接加减」，必然对不上。</p>
+  </div>
+
+  <div class="card">
+    <h2>4.1 三个必备原则</h2>
+    <div class="grid3">
+      <div>
+        <h4 style="color:#93b4e8">① 余额由流水算出</h4>
+        <p style="color:var(--tx2);font-size:12.5px">库存数量 = SUM(流水). <b>数据库层面禁止直接 UPDATE items.stock 字段</b>，用触发器抛异常或撤销 UPDATE 权限。这样任何库存变动都有据可查。</p>
+      </div>
+      <div>
+        <h4 style="color:#93b4e8">② 强制扫码，禁改数量</h4>
+        <p style="color:var(--tx2);font-size:12.5px">所有出库/入库/移库都要求扫条码。<b>没有条码的操作一律拒绝</b>，防止「一错百错」——错一个数量，整批账都歪。</p>
+      </div>
+      <div>
+        <h4 style="color:#93b4e8">③ 在途库存单独计</h4>
+        <p style="color:var(--tx2);font-size:12.5px">报修寄出的货物理上不在你手上，但钱已垫付。必须单列 <code class="mono">in_transit</code> 口径，不能算在「可售」里。</p>
+      </div>
+    </div>
+    <div class="code">-- 库存余额表（由流水汇总，写入时校验）
+stock_balance(item_id, warehouse_code, status, qty, in_transit_qty, last_ledger_id, updated_at)
+
+-- 库存流水表（只增不改，append-only）
+stock_ledger(
+  id, item_id,             -- 货品
+  biz_type,                -- INBOUND/GRADE/LABEL/UP/MOVE/OUT/LOCK/UNLOCK/SCRAP/ADJUST
+  biz_id,                  -- 关联单据
+  from_warehouse, to_warehouse, from_status, to_status,
+  qty_delta,               -- 数量变化（通常 ±1）
+  operator_id, operated_at,
+  remark,                  -- 必填场景：补打/盘盈/盘亏/报废
+  _idempotent_key          -- 幂等键，防重复提交
+)</div>
+  </div>
+
+  <div class="card">
+    <h2>4.2 库存口径定义（报表统一用这套算法）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:130px">口径</th><th>计算方式</th><th style="width:180px">用途</th><th style="width:90px">是否上架</th></tr></thead>
+      <tbody>
+        <tr><td><b>在库总数</b></td><td>SUM(所有仓所有状态数量) − 已销售 − 已出库报修</td><td>资产盘点、货值核算</td><td>—</td></tr>
+        <tr><td><b>可售库存</b></td><td>status = SELLABLE 且 grade ∈ (S, A)</td><td>商城上架、渠道供货</td><td>✅ 可</td></tr>
+        <tr><td><b>待检库存</b></td><td>status = PENDING</td><td>检测进度看板</td><td>❌ 禁</td></tr>
+        <tr><td><b>锁定库存</b></td><td>status = LOCKED</td><td>已拍未发，超时释放</td><td>❌ 禁</td></tr>
+        <tr><td><b>维修库存</b></td><td>status = REPAIR（在厂内）</td><td>维修工单跟踪</td><td>❌ 禁</td></tr>
+        <tr><td><b>在外报修</b></td><td>status = OUT_REPAIR（<b>货不在手上</b>）</td><td>在途资产、垫付资金</td><td>❌ 禁</td></tr>
+        <tr><td><b>拆机件库存</b></td><td>status = PARTS</td><td>配件销售</td><td>⚠️ 走拆机件渠道</td></tr>
+        <tr><td><b>危废库存</b></td><td>status = HAZARD</td><td>安全台账（不计价值）</td><td>❌ 永久禁</td></tr>
+        <tr><td><b>呆滞库存</b></td><td>可售 且 最近 30 天无出库</td><td>促销决策、降价清仓</td><td>✅ 可</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note warn"><b>最容易搞错的一点：</b>「在库总数」<b>不包含</b>在外报修的货，但<b>要包含</b>拆机件。财务口径与实物口径不同，报表里必须分开列，不要合并成一个「总库存」数字。</div>
+  </div>
+
+  <div class="card">
+    <h2>4.3 库位设计（防拿错货）</h2>
+    <div class="grid2">
+      <div>
+        <h3>仓库分层</h3>
+        <div class="tw"><table>
+          <thead><tr><th style="width:96px">仓库</th><th>存放</th><th style="width:80px">可否出库</th></tr></thead>
+          <tbody>
+            <tr><td>待检仓</td><td>W 状态货品</td><td>❌</td></tr>
+            <tr><td>可售仓-A 区</td><td>S 完美</td><td>✅</td></tr>
+            <tr><td>可售仓-B 区</td><td>A 微瑕（隔离，避免混淆）</td><td>✅</td></tr>
+            <tr><td>维修仓</td><td>B 档在修</td><td>❌</td></tr>
+            <tr><td>报修仓</td><td>C 档待送修（在库部分）</td><td>⚠️ 仅报修出库</td></tr>
+            <tr><td>拆机件仓</td><td>D 档待拆</td><td>⚠️ 仅拆机件出库</td></tr>
+            <tr><td>危废区</td><td>安全红线品</td><td>❌ 永久</td></tr>
+            <tr><td>退货暂存区</td><td>召回待检</td><td>❌</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+      <div>
+        <h3>库位编码规则</h3>
+        <div class="code">可售仓-A区-货架01-层03-位05
+ └仓库┘└区┘└货架┘ └层┘ └位┘</div>
+        <ul>
+          <li><b>区</b>按等级划分（A/B 区物理隔离是防错拿的关键）</li>
+          <li><b>库位</b>可选粒度：不启用库位时按「仓库+等级」管理</li>
+          <li><b>强制校验</b>：出库时系统比对「实际库位等级」与「货品等级」，不一致直接告警</li>
+        </ul>
+        <div class="note ok"><b>低成本高收益：</b>即使一期不启用库位，<b>也必须做「仓库+等级」两级隔离</b>。二手货价格差异大，A 档和 S 档混在一堆货架上，仓管拿错一单就是几百块。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>4.4 盘点机制</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:90px">类型</th><th style="width:130px">范围</th><th style="width:80px">频率</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>循环盘点</td><td>按库位/按等级</td><td>每天 1 个区</td><td>每天固定盘一个区，不需全员停工</td></tr>
+        <tr><td>批次盘点</td><td>新入库批次</td><td>入库后 7 天</td><td>新货最易出错，早盘早发现</td></tr>
+        <tr><td>月度全盘</td><td>全部</td><td>月末</td><td>财务对账口径</td></tr>
+        <tr><td>专项盘点</td><td>高价值货（&gt;¥3000）</td><td>每周</td><td>高价值单件核对</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>差异处理红线：</b>① 盘盈盘亏<b>必须生成调整流水</b>并附原因说明；② 单笔差异 &gt; 货值 500 元或差异率 &gt; 0.5%，<b>自动升级主管审批</b>；③ <b>严禁为了对平而直接改 items 表</b>——这是所有库存系统腐化的起点。</div>
+  </div>
+</div>
+
+<!-- ============ 5 数据模型 ============ -->
+<div class="page printable" id="p6">
+  <div class="card">
+    <h2>5. 数据模型（17 张核心表）</h2>
+    <p class="d">按「主数据 → 货品 → 检测 → 单据 → 库存 → 支撑」分层。<b>加 ★ 的是必须先建的表。</b></p>
+
+    <h3>5.1 ER 关系概览</h3>
+    <div class="fig">
+      <svg viewBox="0 0 1150 420" width="100%" style="min-width:1000px" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="e1" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#5b6373"/></marker></defs>
+        <!-- L1 -->
+        <rect x="20" y="30" width="150" height="46" rx="7" fill="#1c2536" stroke="#2d3f5e"/>
+        <text x="95" y="49" fill="#93b4e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">warehouse ★</text>
+        <text x="95" y="65" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">仓库/库位</text>
+        <rect x="20" y="96" width="150" height="46" rx="7" fill="#1c2536" stroke="#2d3f5e"/>
+        <text x="95" y="115" fill="#93b4e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">dict_grade_rule ★</text>
+        <text x="95" y="131" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">分级规则配置</text>
+        <rect x="20" y="162" width="150" height="46" rx="7" fill="#1c2536" stroke="#2d3f5e"/>
+        <text x="95" y="181" fill="#93b4e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">dict_price_rule</text>
+        <text x="95" y="197" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">价格系数</text>
+        <rect x="20" y="228" width="150" height="46" rx="7" fill="#1c2536" stroke="#2d3f5e"/>
+        <text x="95" y="247" fill="#93b4e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">supplier</text>
+        <text x="95" y="263" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">供应商/来源</text>
+        <rect x="20" y="294" width="150" height="46" rx="7" fill="#1c2536" stroke="#2d3f5e"/>
+        <text x="95" y="313" fill="#93b4e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">user / role</text>
+        <text x="95" y="329" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">用户与权限</text>
+
+        <!-- batch -->
+        <rect x="230" y="30" width="160" height="46" rx="7" fill="#2a2410" stroke="#5a4a17"/>
+        <text x="310" y="49" fill="#e5c768" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">batch ★</text>
+        <text x="310" y="65" fill="#8d7f4a" font-size="10" text-anchor="middle" font-family="sans-serif">批次（号段管理）</text>
+        <rect x="230" y="96" width="160" height="46" rx="7" fill="#2a2410" stroke="#5a4a17"/>
+        <text x="310" y="115" fill="#e5c768" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">inbound_order ★</text>
+        <text x="310" y="131" fill="#8d7f4a" font-size="10" text-anchor="middle" font-family="sans-serif">入库单</text>
+
+        <!-- item -->
+        <rect x="450" y="30" width="170" height="60" rx="7" fill="#12291c" stroke="#1f4a30"/>
+        <text x="535" y="52" fill="#6ed99a" font-size="12.5" font-weight="bold" text-anchor="middle" font-family="sans-serif">item ★</text>
+        <text x="535" y="68" fill="#5f8f74" font-size="10" text-anchor="middle" font-family="sans-serif">货品主表（一机一码）</text>
+        <text x="535" y="82" fill="#5f8f74" font-size="9.5" text-anchor="middle" font-family="sans-serif">barcode/grade/status</text>
+
+        <!-- 检测 -->
+        <rect x="680" y="30" width="165" height="60" rx="7" fill="#1a1526" stroke="#3d2f55"/>
+        <text x="762" y="52" fill="#c3a8e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">test_record ★</text>
+        <text x="762" y="68" fill="#8a72ab" font-size="10" text-anchor="middle" font-family="sans-serif">检测记录（多次）</text>
+        <text x="762" y="82" fill="#8a72ab" font-size="9.5" text-anchor="middle" font-family="sans-serif">含复检/复检人</text>
+        <rect x="905" y="30" width="150" height="60" rx="7" fill="#1a1526" stroke="#3d2f55"/>
+        <text x="980" y="52" fill="#c3a8e8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">test_item</text>
+        <text x="980" y="68" fill="#8a72ab" font-size="10" text-anchor="middle" font-family="sans-serif">逐项结果</text>
+        <text x="980" y="82" fill="#8a72ab" font-size="9.5" text-anchor="middle" font-family="sans-serif">√/×/不适用</text>
+
+        <!-- 库存 -->
+        <rect x="450" y="150" width="170" height="60" rx="7" fill="#251a2e" stroke="#3f2b52"/>
+        <text x="535" y="172" fill="#c39ce0" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">stock_balance ★</text>
+        <text x="535" y="188" fill="#8d6fa3" font-size="10" text-anchor="middle" font-family="sans-serif">库存余额（汇总）</text>
+        <text x="535" y="202" fill="#8d6fa3" font-size="9.5" text-anchor="middle" font-family="sans-serif">仓库×状态×在途</text>
+        <rect x="450" y="234" width="170" height="60" rx="7" fill="#251a2e" stroke="#3f2b52"/>
+        <text x="535" y="256" fill="#c39ce0" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">stock_ledger ★</text>
+        <text x="535" y="272" fill="#8d6fa3" font-size="10" text-anchor="middle" font-family="sans-serif">库存流水（只增）</text>
+        <text x="535" y="286" fill="#8d6fa3" font-size="9.5" text-anchor="middle" font-family="sans-serif">幂等键防重复</text>
+
+        <!-- 单据 -->
+        <rect x="680" y="150" width="165" height="52" rx="7" fill="#2a1f10" stroke="#5c3f18"/>
+        <text x="762" y="170" fill="#e8ac6a" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">outbound_order ★</text>
+        <text x="762" y="186" fill="#96764a" font-size="10" text-anchor="middle" font-family="sans-serif">出库单（4 类）</text>
+        <rect x="680" y="216" width="165" height="52" rx="7" fill="#2a1f10" stroke="#5c3f18"/>
+        <text x="762" y="236" fill="#e8ac6a" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">outbound_item</text>
+        <text x="762" y="252" fill="#96764a" font-size="10" text-anchor="middle" font-family="sans-serif">明细（含拣货校验）</text>
+        <rect x="905" y="150" width="150" height="52" rx="7" fill="#2a1f10" stroke="#5c3f18"/>
+        <text x="980" y="170" fill="#e8ac6a" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">express_order</text>
+        <text x="980" y="186" fill="#96764a" font-size="10" text-anchor="middle" font-family="sans-serif">快递面单</text>
+        <rect x="905" y="216" width="150" height="52" rx="7" fill="#2a1f10" stroke="#5c3f18"/>
+        <text x="980" y="236" fill="#e8ac6a" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">label_print_log</text>
+        <text x="980" y="252" fill="#96764a" font-size="10" text-anchor="middle" font-family="sans-serif">标签打印/补打</text>
+
+        <!-- 维修/拆机件 -->
+        <rect x="230" y="200" width="160" height="52" rx="7" fill="#2b1a10" stroke="#5c3418"/>
+        <text x="310" y="220" fill="#f0a071" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">repair_order ★</text>
+        <text x="310" y="236" fill="#a1705a" font-size="10" text-anchor="middle" font-family="sans-serif">报修工单（C1/C2）</text>
+        <rect x="230" y="266" width="160" height="52" rx="7" fill="#2b1a10" stroke="#5c3418"/>
+        <text x="310" y="286" fill="#f0a071" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">repair_part</text>
+        <text x="310" y="302" fill="#a1705a" font-size="10" text-anchor="middle" font-family="sans-serif">备件与费用</text>
+        <rect x="230" y="332" width="160" height="52" rx="7" fill="#2a1a3a" stroke="#4a2f63"/>
+        <text x="310" y="352" fill="#c99ae8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">parts_item ★</text>
+        <text x="310" y="368" fill="#91699f" font-size="10" text-anchor="middle" font-family="sans-serif">D档残值明细</text>
+
+        <!-- 支撑 -->
+        <rect x="680" y="300" width="165" height="46" rx="7" fill="#1a1a1f" stroke="#3a3a44"/>
+        <text x="762" y="318" fill="#b8bec8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">stocktake ★</text>
+        <text x="762" y="334" fill="#7a8090" font-size="10" text-anchor="middle" font-family="sans-serif">盘点与差异</text>
+        <rect x="905" y="300" width="150" height="46" rx="7" fill="#1a1a1f" stroke="#3a3a44"/>
+        <text x="980" y="318" fill="#b8bec8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">audit_log ★</text>
+        <text x="980" y="334" fill="#7a8090" font-size="10" text-anchor="middle" font-family="sans-serif">审计日志</text>
+        <rect x="905" y="356" width="150" height="46" rx="7" fill="#1a1a1f" stroke="#3a3a44"/>
+        <text x="980" y="374" fill="#b8bec8" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">erp_sync_log</text>
+        <text x="980" y="390" fill="#7a8090" font-size="10" text-anchor="middle" font-family="sans-serif">中台同步</text>
+
+        <line x1="170" y1="53" x2="228" y2="53" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="170" y1="119" x2="228" y2="119" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="170" y1="185" x2="228" y2="185" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="170" y1="251" x2="200" y2="251" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="170" y1="317" x2="200" y2="317" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="310" y1="76" x2="310" y2="94" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="390" y1="119" x2="420" y2="119" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="390" y1="53" x2="448" y2="53" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="620" y1="53" x2="678" y2="53" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="845" y1="53" x2="903" y2="53" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="535" y1="90" x2="535" y2="148" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="535" y1="210" x2="535" y2="232" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="678" y1="176" x2="620" y2="176" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="762" y1="202" x2="762" y2="214" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="845" y1="176" x2="903" y2="176" stroke="#5b6373" stroke-width="1.3" marker-end="url(#e1)"/>
+        <line x1="390" y1="226" x2="678" y2="176" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="535" y1="60" x2="310" y2="200" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="620" y1="290" x2="762" y2="300" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+        <line x1="390" y1="358" x2="448" y2="190" stroke="#5b6373" stroke-width="1.3" stroke-dasharray="3 3"/>
+      </svg>
+      <div class="figcap">图 2 · 核心表关系（实线=强依赖，虚线=弱引用）</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>5.2 item 货品主表（系统的心脏）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:170px">字段</th><th style="width:80px">类型</th><th>说明</th><th style="width:100px">必填</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">id</td><td>uuid</td><td>内部主键</td><td>自动</td></tr>
+        <tr><td class="mono">barcode</td><td>varchar(24)</td><td><b>条码本体</b>，如 QCPHS26100012。<b>唯一索引，终生不变</b></td><td>★</td></tr>
+        <tr><td class="mono">display_code</td><td>varchar(32)</td><td>显示编码 QC-PH-S-2610-0012（含横杠，人看）</td><td>★</td></tr>
+        <tr><td class="mono">batch_id</td><td>uuid</td><td>所属批次</td><td>★</td></tr>
+        <tr><td class="mono">category</td><td>char(2)</td><td>品类 PH/TB/NB/WT/HA/OA</td><td>★</td></tr>
+        <tr><td class="mono">brand / model / spec</td><td>varchar</td><td>品牌、型号、规格（如 iPhone 13 128G）</td><td>★</td></tr>
+        <tr><td class="mono">serial_no</td><td>varchar</td><td>机器序列号 / IMEI（报修必填）</td><td>建议</td></tr>
+        <tr><td class="mono">grade</td><td>char(1)</td><td><b>等级：W/S/A/B/C/D</b>。只由检测决定</td><td>★</td></tr>
+        <tr><td class="mono">status</td><td>varchar(16)</td><td><b>状态：PENDING/GRADED/SELLABLE/…</b>。由作业决定</td><td>★</td></tr>
+        <tr><td class="mono">warehouse_code</td><td>varchar(16)</td><td>当前所在仓</td><td>★</td></tr>
+        <tr><td class="mono">location_code</td><td>varchar(24)</td><td>库位（可选）</td><td>选</td></tr>
+        <tr><td class="mono">purchase_cost</td><td>numeric(10,2)</td><td>采购/回收成本</td><td>★</td></tr>
+        <tr><td class="mono">base_price</td><td>numeric(10,2)</td><td>基准价（同款同期市场价）</td><td>★</td></tr>
+        <tr><td class="mono">selling_price</td><td>numeric(10,2)</td><td>销售价（SELLABLE 后有效）</td><td>条件</td></tr>
+        <tr><td class="mono">residual_value</td><td>numeric(10,2)</td><td>残值（D 档/拆机件）</td><td>条件</td></tr>
+        <tr><td class="mono">battery_health</td><td>smallint</td><td>电池健康 %（影响定级）</td><td>选</td></tr>
+        <tr><td class="mono">grade_reason</td><td>text</td><td><b>定级依据</b>（不合格项汇总）</td><td>★</td></tr>
+        <tr><td class="mono">flaw_desc</td><td>text</td><td>外观瑕疵描述（A 档发布必填）</td><td>条件</td></tr>
+        <tr><td class="mono">photos</td><td>jsonb</td><td>图片 URL 数组（含瑕疵特写）</td><td>★</td></tr>
+        <tr><td class="mono">locked_by</td><td>uuid</td><td>被哪个订单锁定</td><td>—</td></tr>
+        <tr><td class="mono">ver</td><td>int</td><td>乐观锁版本号，防并发覆盖</td><td>自动</td></tr>
+        <tr><td class="mono">created_at / updated_at</td><td>timestamptz</td><td>创建/更新（<b>带时区</b>，多地协同必需）</td><td>自动</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note"><b>三个字段最容易被忽略但很关键：</b>① <code class="mono">barcode</code> 必须<b>唯一索引</b>，这是全系统的主键语义；② <code class="mono">ver</code> 乐观锁防止两个检测员同时改同一条记录；③ 时间戳<b>必须带时区</b>（timestamptz），否则跨时区报表对不上。</div>
+  </div>
+
+  <div class="card">
+    <h2>5.3 其余关键表要点</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:150px">表</th><th>核心字段</th><th style="width:190px">设计要点</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">batch ★</td><td>batch_no, category, source_type(采购/回收/清仓/退换), supplier_id, qty_expected, serial_start, serial_end, status</td><td><b>号段管理</b>：入库时预留号段，避免边入库边生成导致重号</td></tr>
+        <tr><td class="mono">inbound_order</td><td>batch_id, warehouse, total_qty, checker_id, status(草稿/待检/已完成), remark</td><td>入库单与批次分离：可整批入，也可分次入</td></tr>
+        <tr><td class="mono">test_record ★</td><td>item_id, round(第几次检测), result_json, suggest_grade, final_grade, tester_id, tested_at, is_recheck, photo_urls</td><td><b>支持多次检测</b>（返工/复检），保留历史，不覆盖</td></tr>
+        <tr><td class="mono">test_item</td><td>record_id, item_key(开机/充电/…), result(√/×/N/A), fail_desc</td><td>逐项结果独立存，便于统计「哪项最常坏」</td></tr>
+        <tr><td class="mono">stock_ledger ★</td><td>见 Tab 4 全字段；含 idempotent_key 唯一索引</td><td><b>append-only</b>，禁改禁删；幂等键防网络重试造成重复扣减</td></tr>
+        <tr><td class="mono">stock_balance ★</td><td>item_id, warehouse, status, qty, in_transit_qty</td><td>由流水触发器/定时任务汇总，不允许手工改</td></tr>
+        <tr><td class="mono">outbound_order ★</td><td>type(SALE/REPAIR/TRANSFER/PARTS), target_no, warehouse, item_count, status, express_company, waybill_no</td><td>4 类出库统一表，用 type 区分；报修出库带凭证号</td></tr>
+        <tr><td class="mono">repair_order ★</td><td>item_id, channel(C1线上/C2线下), vendor(京东/400/网点), ticket_no(凭证号), promise_date, paid_amount(垫付), status, closed_at, timeout_flag</td><td><b>承诺时效 + 超时标记</b>，解决报修黑洞；离线网点存电话与地址</td></tr>
+        <tr><td class="mono">parts_item ★</td><td>item_id, part_type(主板/屏/电池/摄像/尾插), est_value, actual_sold_price, sold_at</td><td>D 档<b>强制逐件估值</b>，无明细不允许关闭工单</td></tr>
+        <tr><td class="mono">dict_grade_rule ★</td><td>category, conditions(json: 电池≥85 且 无瑕疵), grade, priority, effective_from/to, enabled</td><td><b>规则可配置</b>：改分级标准不改代码，支持生效期</td></tr>
+        <tr><td class="mono">dict_price_rule</td><td>grade, factor(1.00/0.88/…), min_margin, need_approval_below</td><td>价格系数与审批线</td></tr>
+        <tr><td class="mono">stocktake ★</td><td>scope(库位/批次/等级), plan_qty, actual_qty, diff_qty, diff_rate, approver, status</td><td>差异率超阈值自动升级</td></tr>
+        <tr><td class="mono">audit_log ★</td><td>entity, entity_id, action(改档/改价/盘盈/撤单), before, after, operator, ip, at</td><td><b>关键操作全留痕</b>，可追溯责任</td></tr>
+        <tr><td class="mono">erp_sync_log</td><td>item_id, target(前参谋/中台), payload, status, retry_count, synced_at</td><td>同步失败重试 + 死信告警</td></tr>
+        <tr><td class="mono">label_print_log</td><td>item_id, label_type(W/正式/补打), printed_at, operator, reason(补打必填)</td><td>补打要留原因，防止标签乱印</td></tr>
+        <tr><td class="mono">user / role</td><td>role(检测员/定价员/仓管/售后/管理员), warehouse_scope(数据权限)</td><td><b>行级数据权限</b>：仓管只能看自己仓</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ============ 6 功能模块 ============ -->
+<div class="page printable" id="p7">
+  <div class="card">
+    <h2>6. 功能模块详细设计</h2>
+    <p class="d">按开发优先级排序。每个模块给「核心能力 / 关键设计 / 验收标准」。</p>
+
+    <div class="acc on"><div class="ah"><span class="no">1</span>批次与建档<span class="tag">P0 · 库存起点</span></div><div class="ab">
+      <h4>核心能力</h4>
+      <ul>
+        <li>建批次单：来源类型、供应商、品类、预计数量、批次号</li>
+        <li>号段预留：系统分配 <code class="mono">YYMM-NN-0001~9999</code>，全批不重号</li>
+        <li>两种入库模式：<b>一机一码</b>（每台生成唯一码）/ <b>按型号批量</b>（同型号多台，仅序列号不同）</li>
+        <li>入库即拍照，作为后续争议凭证</li>
+      </ul>
+      <h4>关键设计</h4>
+      <ul>
+        <li>条码生成必须<b>服务端</b>，客户端不参与（防重号）</li>
+        <li>号段用数据库序列或行锁分配，<b>禁止并发下重复发号</b></li>
+        <li>批量模式支持 Excel 导入序列号，导入时校验格式与重复</li>
+      </ul>
+      <div class="accept"><b>验收标准：</b>① 100 台同批建档零重号；② 并发 10 路同时建档不重号；③ 批量导入 1000 条错误能在 3 秒内定位到具体行</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">2</span>扫码检测工作台<span class="tag">P0 · 最高频</span></div><div class="ab">
+      <h4>核心能力（检测员一天用 6 小时的主界面）</h4>
+      <ul>
+        <li><b>扫码即载入</b>：扫 W 占位码 → 自动带出品类、品牌型号、批次、历史检测记录</li>
+        <li><b>一屏完成</b>：11 个检测项下拉（√/×/不适用）+ 电池% + 不合格描述 + 建议档位实时刷新</li>
+        <li><b>档位建议引擎</b>：按规则实时算建议档位与依据（如「电池 78% 低于 A 档阈值 80% → 建议 B」）</li>
+        <li><b>离线可用</b>：断网时本地暂存，网络恢复自动补传</li>
+        <li><b>防错</b>：不合格项未填描述不允许提交；命中安全红线立即弹危废流程</li>
+        <li>音效 + 色块反馈，检测员可盲操作</li>
+      </ul>
+      <h4>关键设计</h4>
+      <ul>
+        <li>为 <b>PWA</b>，支持扫码枪（USB 键盘模式）与摄像头扫码</li>
+        <li>检测项<b>按品类动态渲染</b>（手机/笔记本/家电检项不同）</li>
+        <li>连续录入不刷新页面，焦点自动跳下一台，<b>不打断节奏</b></li>
+        <li>「?」存疑一键标记，自动进复检池</li>
+      </ul>
+      <div class="accept"><b>验收标准：</b>① 熟练工 ≥40 台/人/天；② 断网检测 20 台后恢复，数据 100% 补传无丢失；③ 不合格项未填描述无法提交；④ 扫码到载入档案 &lt; 300ms</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">3</span>分级与定价引擎<span class="tag">P0 · 规则可配置</span></div><div class="ab">
+      <h4>核心能力</h4>
+      <ul>
+        <li>分级规则<b>配置化</b>：管理员在后台改规则，<b>不改代码</b>，即时生效</li>
+        <li>支持生效期：换标准时历史数据按当时规则保留</li>
+        <li>定价：基准价 × 系数 → 销售价；<b>低于底价自动拦截需审批</b></li>
+        <li>毛利率校验：售价低于成本 × (1+最低毛利率) 时警告</li>
+      </ul>
+      <h4>规则示例（可配置）</h4>
+      <div class="code">S 完美：全部检项通过 AND 电池≥85 AND 零外观瑕疵
+A 微瑕：功能全过 AND 仅外观瑕疵 AND 电池 80~84
+B 小修：故障命中「厂内可修清单」AND 修后成本 &lt; 整机价×15%
+C 报修：命中「必须官方修清单」AND 修后值 &gt; 成本×1.5
+D 报废：命中安全红线 OR 修后价值不足 OR 缺件严重</div>
+      <div class="accept"><b>验收标准：</b>① 改一条规则不重启生效；② 系统建议档位与人工判定不一致时自动记录，用于分析规则松紧</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">4</span>贴标与建档<span class="tag">P0 · 身份唯一</span></div><div class="ab">
+      <ul>
+        <li>批量生成标签（60×40mm，等级色块 + 编码 + 处置指令），支持按批次/按等级批量打</li>
+        <li>打印队列 + <b>补打记录</b>（补打必填原因，防乱印）</li>
+        <li><b>贴标复核：扫码读出等级 ≠ 系统等级 → 直接阻断入库</b></li>
+        <li>同批错误率超阈值（如 &gt;1%）自动暂停该批打印并告警</li>
+      </ul>
+      <div class="accept"><b>验收标准：</b>① 故意贴错等级，系统 100% 拦截；② 补打记录可追溯到人、时间、原因</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">5</span>库存账本与仓库<span class="tag">P0 · 数据地基</span></div><div class="ab">
+      <ul>
+        <li>库位管理：仓库 → 区 → 货架 → 层 → 位 五级</li>
+        <li>移库/上架/下架，全部扫码，写流水</li>
+        <li>库存查询：多维筛选（仓库/等级/状态/批次/品牌/价格区间/库龄）</li>
+        <li>负库存告警、在途库存视图、呆滞库存视图</li>
+        <li><b>库位与等级双重校验</b>：出库时比对实际库位等级与货品等级</li>
+      </ul>
+      <div class="accept"><b>验收标准：</b>① 任意货品 3 秒内查到「在哪、什么状态、什么价」；② A 档货品放进 S 档区，系统告警</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">6</span>盘点与差异<span class="tag">P1</span></div><div class="ab">
+      <ul>
+        <li>四类盘点：循环/批次/全盘/专项（见 Tab 4.4）</li>
+        <li>扫码盘点：扫一个记一个，未扫到的不自动算盘亏（<b>防误判</b>）</li>
+        <li>差异单 → 审批 → 生成调整流水，<b>禁止无单据调整</b></li>
+        <li>差异率超阈值自动升级主管</li>
+      </ul>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">7</span>报修管理（C 档）<span class="tag">P1 · 防黑洞</span></div><div class="ab">
+      <ul>
+        <li><b>C1 线上</b>：京东/400 渠道，工单号、寄修单号、预计时效</li>
+        <li><b>C2 线下</b>：授权网点，存网点名/电话/地址/联系人，<b>送修前必须电话确认受理</b></li>
+        <li>费用垫付登记与对账，挂财务账</li>
+        <li><b>承诺时效倒计时 + 超时预警</b>（默认 15 天），超时进「待处理」</li>
+        <li>修回 → 强制重新检测定级（<b>不允许直接改回可售</b>）</li>
+        <li>撤单 / 转 D 拆件流程，含主管审批</li>
+      </ul>
+      <div class="accept"><b>验收标准：</b>① 任何在途报修货超过承诺时效自动出现在待办；② 报修回库后系统强制要求重检，无法跳过</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">8</span>拆机件与残值（D 档）<span class="tag">P1 · 止损</span></div><div class="ab">
+      <ul>
+        <li>D 档<b>强制逐件估值</b>：主板/屏总成/电池/摄像头/尾插/喇叭…，无明细不能关闭工单</li>
+        <li>残值 = Σ 配件市场价 × 0.8（打包出）</li>
+        <li>拆机件仓独立管理，支持拆机件单独销售出库</li>
+        <li><b>危废品特殊处理</b>：安全红线品单独台账，禁止充电/流转，拍照存档</li>
+        <li>残值回收率报表：<code class="mono">实际变现金额 / 理论残值</code>，衡量损失</li>
+      </ul>
+      <div class="accept"><b>验收标准：</b>① D 档工单无法在无残值明细时关闭；② 残值回收率可按品类/批次统计</div>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">9</span>出库管理（4 类）<span class="tag">P0 · 详见 Tab 7</span></div><div class="ab">
+      <ul>
+        <li>销售出库 / 报修出库 / 调拨出库 / 拆机件出库</li>
+        <li>拣货扫码校验、错货错等级拦截</li>
+        <li>面单打印（快递鸟/快递100）</li>
+      </ul>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">10</span>退货与召回<span class="tag">P1</span></div><div class="ab">
+      <ul>
+        <li>买家退货 → 状态置 <code class="mono">RECALL</code>，<b>强制全项重检</b></li>
+        <li>退货品分三路：可再售（回可售仓）/ 有瑕疵（降 A 档）/ 无法再售（转 D）</li>
+        <li>退货原因归集，作为供应商/检测员质量反馈</li>
+      </ul>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">11</span>报表中心<span class="tag">P1</span></div><div class="ab">
+      <ul>
+        <li>分级分布、检测产能、报修时效、库存账龄、残值回收率</li>
+        <li><b>检测员准确率</b>：抽检复检与系统建议档位的一致率，用于绩效</li>
+        <li>呆滞预警、低周转预警、高价值货动销</li>
+      </ul>
+    </div></div>
+
+    <div class="acc"><div class="ah"><span class="no">12</span>权限与审计<span class="tag">P0 · 合规底线</span></div><div class="ab">
+      <ul>
+        <li>5 角色 RBAC + <b>行级数据权限</b>（按仓库隔离）</li>
+        <li>关键操作审计：改档、改价、盘盈盘亏、报修撤单、危废处理</li>
+        <li>审批流：低于底价、差异超阈值、危废处理、撤单</li>
+      </ul>
+    </div></div>
+  </div>
+
+  <div class="card">
+    <h2>6.13 硬件接入（详见 Tab 7）</h2>
+    <p class="d">扫码枪与标签打印的完整实现方案，含实测验证的检测器代码、TSPL 指令、三条打印链路对比与部署检查清单。</p>
+    <div class="grid2">
+      <div>
+        <ul>
+          <li><b>扫码枪</b>：USB 键盘楔形模式，零驱动零 SDK，时间间隔算法区分扫码与手打（已实测 4 场景）</li>
+          <li><b>检测工作台</b>：单键热键录入 + 整屏色块反馈 + 音效，连续作业不打断</li>
+        </ul>
+      </div>
+      <div>
+        <ul>
+          <li><b>标签打印</b>：指令适配器（TSPL/ZPL）+ 打印队列 + 断网兜底</li>
+          <li><b>贴码复核</b>：3 项强校验，等级不符 100% 阻断入库</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note warn"><b>两个最易踩的坑：</b>① <b>macOS 上标签机基本没有官方驱动</b>，用 CUPS 通用驱动会导致尺寸每次复位、条码模糊不可扫 → 标签机务必选网口机型走 9100；② 扫码枪末尾的<b>自动回车会误触发表单提交</b> → 必须 <code class="mono">preventDefault()</code> 且输入框设 <code class="mono">readonly</code>。</div>
+  </div>
+</div>
+
+<!-- ============ 7 硬件接入 ============ -->
+<div class="page printable" id="p13">
+  <div class="card">
+    <h2>7. 硬件接入：扫码枪 · 标签打印机 · 贴码</h2>
+    <p class="d">这一章是<b>能不能真跑起来</b>的关键。所有结论都在本机实测验证过（Chromium + 本机 CUPS + 端口探测），不是理论推导。</p>
+
+    <div class="grid3">
+      <div class="acc" style="margin:0">
+        <div class="ah" style="cursor:default"><span class="no" style="background:#22c55e">A</span>扫码枪入库</div>
+        <div class="ab" style="display:block">
+          <p style="font-size:12.5px;color:var(--tx2)"><b>零成本 · 最高可靠</b><br>USB 键盘模式，即插即用，无需驱动</p>
+        </div>
+      </div>
+      <div class="acc" style="margin:0">
+        <div class="ah" style="cursor:default"><span class="no" style="background:#f97316">B</span>标签打印</div>
+        <div class="ab" style="display:block">
+          <p style="font-size:12.5px;color:var(--tx2)"><b>需选对机型</b><br>三条链路各有代价，见 7.3 对比</p>
+        </div>
+      </div>
+      <div class="acc" style="margin:0">
+        <div class="ah" style="cursor:default"><span class="no" style="background:#a855f7">C</span>贴新码复核</div>
+        <div class="ab" style="display:block">
+          <p style="font-size:12.5px;color:var(--tx2)"><b>防错最后一道闸</b><br>扫错直接阻断入库</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>7.1 扫码枪接入（键盘楔形模式 · 零成本）</h2>
+    <p class="d">扫码枪本质是「高速键盘」：扫一次码 = 极快地敲一串字符 + 自动回车。<b>不用驱动、不用 SDK，一个键盘事件监听就搞定。</b></p>
+
+    <h3>核心原理：用时间间隔区分「扫码」与「手打」</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:150px">来源</th><th style="width:130px">相邻字符间隔</th><th style="width:110px">结束符</th><th>特征</th></tr></thead>
+      <tbody>
+        <tr><td><b>扫码枪</b></td><td class="lvc"><b>5–20ms</b></td><td>自动回车</td><td>极快、连续、不可中断</td></tr>
+        <tr><td>人工打字</td><td class="lvc">≥ 80ms</td><td>手动回车</td><td>慢、有停顿、可能有退格</td></tr>
+        <tr><td>粘贴</td><td>无（一次性）</td><td>手动</td><td>首字符即完整串，间隔为 0</td></tr>
+      </tbody>
+    </table></div>
+    <div class="code">// ✅ 已实测通过 4 个场景的检测器（可直接抄进项目）
+class ScannerDetector {
+  constructor(opts = {}) {
+    this.maxGap = opts.maxGap ?? 45;   // 扫码相邻字符最大间隔(ms)
+    this.minLen = opts.minLen ?? 8;     // 最短条码长度，过滤误触
+    this.onScan = opts.onScan;
+    this.buf = ''; this.last = 0; this.firing = false;
+  }
+  handle(e) {
+    const k = e.key;
+    // 结束符：回车 / Tab
+    if (k === 'Enter' || k === 'Tab') {
+      if (this.firing && this.buf.length >= this.minLen) this.onScan(this.buf);
+      this.reset(); e.preventDefault(); return;
+    }
+    if (k.length !== 1) return;              // 忽略控制键
+    const now = e.timeStamp || performance.now();
+    // 间隔超时 → 判定为人工输入，清空重来
+    if (this.firing && now - this.last > this.maxGap) { this.firing = false; this.buf = ''; }
+    if (!this.firing) { this.firing = true; this.buf = ''; }
+    this.buf += k; this.last = now;
+  }
+  reset() { this.firing = false; this.buf = ''; }
+  start(target = document) {
+    this._h = e => this.handle(e);
+    target.addEventListener('keydown', this._h, true);  // 捕获阶段，能抢在输入框之前
+  }
+  stop(target = document) { target.removeEventListener('keydown', this._h, true); }
+}
+// 用法：全局挂载，检测员无需对准任何输入框，扫即触发
+const scanner = new ScannerDetector({ onScan: code => onBarcodeScanned(code) });
+scanner.start();</div>
+    <div class="note ok"><b>实测验证结果（4 场景全通过）：</b><br>
+    ① 扫码枪 8ms 间隔 13 位 → ✅ 正确识别 <code class="mono">QCPHS26100012</code><br>
+    ② 人工打字 150ms 间隔 → ✅ 正确忽略（不误判为扫码）<br>
+    ③ 先误按 1 个噪声键再扫 → ✅ 噪声被超时重置丢弃，不产生脏数据<br>
+    ④ 边界 38ms 慢速扫码 → ✅ 正常识别（说明 45ms 阈值留了余量，合理）</div>
+    <div class="note"><b>为什么用 <code class="mono">e.timeStamp</code> 而不是 <code class="mono">Date.now()</code>：</b>前者是事件硬件时间戳，不受主线程繁忙导致的 JS 执行延迟影响。检测高峰期（连续扫几十台）时 <code class="mono">Date.now()</code> 可能因为渲染阻塞而误判为人工输入，<code class="mono">timeStamp</code> 不会。</div>
+
+    <h3>检测员工作台的扫码交互（关键：不用鼠标）</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:70px">环节</th><th>行为设计</th><th style="width:120px">为什么这样</th></tr></thead>
+      <tbody>
+        <tr><td>① 扫码</td><td>扫 W 占位码 → <b>自动载入</b>该货品档案（品类/型号/批次/历史）</td><td>检测员不用手填任何东西</td></tr>
+        <tr><td>② 录入</td><td>11 个检测项用<b>单键热键</b>：按 <code class="mono">1</code>=合格、<code class="mono">2</code>=不合格、<code class="mono">3</code>=不适用，<code class="mono">空格</code>=下一项</td><td>双手不离开键盘，节奏不被打断</td></tr>
+        <tr><td>③ 提交</td><td>按 <code class="mono">Enter</code> 提交，<b>自动清空并聚焦下一台</b></td><td>连续作业不被打断</td></tr>
+        <tr><td>④ 反馈</td><td>绿/黄/橙/红<b>整屏色块</b> + 音效（可关）</td><td>余光即可确认等级，不需读字</td></tr>
+        <tr><td>⑤ 存疑</td><td><code class="mono">?</code> 键标存疑 → 自动进复检池</td><td>拿不准的不硬判</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note warn"><b>⚠ 必做的两个防误操作：</b>① <code class="mono">preventDefault()</code> 必须开，否则扫码末尾的回车会<b>误触发表单提交或跳到下一个输入框</b>；② <b>输入框要设 <code class="mono">readonly</code> 或 <code class="mono">disabled</code></b>，强制所有数据来自扫码，杜绝手打混入脏数据。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.2 扫码枪配置清单（买错会有坑）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:160px">配置项</th><th style="width:200px">必须设为</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td>键盘模式</td><td><b>HID / USB 键盘模式</b></td><td>不是 RS232/串口模式！插上就当键盘用，零配置</td></tr>
+        <tr><td>结束符</td><td><b>回车（CR）或 Tab</b></td><td>本方案按回车设计。若用 Tab，检测器已兼容</td></tr>
+        <tr><td>前导/结束码</td><td><b>关闭</b></td><td>有些枪默认带 \r\n 或 FNC 字符，会污染条码</td></tr>
+        <tr><td>扫码速度</td><td>中或高（<b>不建议最高</b>）</td><td>太快时 USB 键盘模式偶发丢字符</td></tr>
+        <tr><td>蜂鸣与灯光</td><td>开启</td><td>提升检测员效率与准确率</td></tr>
+        <tr><td>自动感应</td><td>可选开启</td><td>放上去自动读，适合流水线</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note ok"><b>选型建议：</b>二维影像扫码枪（如 Newland/Zebra Symbol 系列，200–400 元档）比一维激光枪强：<b>一维枪扫不出手机/笔记本上的小标签，屏幕上的条码也扫不了</b>。二手货标签是 Code128 一维码，但纸面常被划伤/污渍，二维影像枪容错更高。<b>建议买二维影像枪（支持 1D+2D）</b>，别买纯一维激光枪。</div>
+    <div class="note bad"><b>⚠ 必须现场配一遍的坑：</b>① 部分扫码枪在 macOS 上会「多输一个字符」（回车变 CRLF）；② 中文输入法开着时扫码会变成拼音；③ USB 口供电不足导致扫到一半断连。<b>解决：系统设置里关掉扫码枪的输入法、锁定英文键盘、检测台配 USB 延长线带独立供电。</b></div>
+  </div>
+
+  <div class="card">
+    <h2>7.3 标签打印：三条链路对比（<b>选型最关键的一节</b>）</h2>
+    <p class="d">本机实测：CUPS 服务正常（HTTP 200，已装多台打印机），但 <code class="mono">9100</code> 端口无监听 —— 说明<b>当前没有网口标签机</b>。以下三条链路需要你按现有设备选一条。</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:56px">优先</th><th style="width:120px">链路</th><th>原理与代价</th><th style="width:130px">浏览器要求</th><th style="width:110px">推荐场景</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="lvc"><b>A</b></td>
+          <td><b>RAW 9100 直连</b><br>网口标签机</td>
+          <td>服务端/客户端 socket 直发 TSPL 字节流，<b>完全不经过系统打印队列</b><br>✅ 标签尺寸精确 60×40mm、条码绝对可扫、不装任何驱动<br>❌ 需打印机有网口/WiFi 且支持 RAW 9100</td>
+          <td><b>无限制</b><br>（服务端转发）</td>
+          <td><b>多台设备、多人共用<br>→ 首选</b></td>
+        </tr>
+        <tr>
+          <td><b>B</b></td>
+          <td>Web Serial<br>USB 串口标签机</td>
+          <td>浏览器直连串口发 TSPL<br>✅ 不装驱动、网络波动也能打<br>❌ <b>仅 Chromium</b>（Chrome/Edge 89+）；Safari 永久不支持；需一次性授权选端口</td>
+          <td>Chrome/Edge<br>Safari ❌</td>
+          <td>单机使用、<br>且设备是 USB 口</td>
+        </tr>
+        <tr>
+          <td><b>C</b></td>
+          <td>WebUSB<br>USB 标签机</td>
+          <td>浏览器直连 USB 读写<br>✅ 绕过驱动<br>❌ <b>仅 Chromium</b>；Safari/Firefox 永久不支持</td>
+          <td>Chrome/Edge<br>Safari ❌</td>
+          <td>不推荐<br>（兼容性最差）</td>
+        </tr>
+        <tr>
+          <td class="lvc"><b>✔</b></td>
+          <td><b>CUPS 通用驱动</b></td>
+          <td>本机实测可用（HTTP 200）<br>✅ 最简单，A4 检测单直接打<br>❌ <b>标签专用机用它会出事</b>：尺寸不准、无 DPI 设置、<b>条码扫不出</b>、尺寸每次复位</td>
+          <td>无限制</td>
+          <td><b>只用于 A4 检测单</b><br>不用于标签</td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>⚠ 关于 macOS 的重要事实（本机已确认）：</b>Zebra、TSC(TSE)、芯烨(Xprinter)、佳博(Gprinter) 等标签机品牌<b>在 macOS 上基本没有官方驱动</b>。用 CUPS「通用打印机」添加会得到一个能打印但<b>尺寸每次复位、条码模糊不可扫</b>的队列——<b>标签机切勿走 CUPS</b>。<br>
+    实测可行解：① <b>买带网口的标签机</b>走 9100（最稳，且可多设备共享）；或 ② 装厂商 macOS 工具（如芯烨 XPrinter Mac 版）做打印代理；或 ③ 用 Windows 机器做打印服务端。</div>
+    <div class="note warn"><b>⚠ Web Serial / WebUSB 是单厂商技术（仅 Chromium）：</b>Firefox 与 WebKit 已公开将其列为「有害 API」，Safari 明确永久不支持。所以走链路 B/C 就<b>必须锁定用 Chrome 或 Edge</b>，检测员不能随便换浏览器。这是选型时要接受的约束。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.4 TSPL 标签指令（国内标签机通用，已校验）</h2>
+    <p class="d">国内主流标签机（芯烨/佳博/汉印/TSC）大多兼容 <b>TSPL</b> 指令集。直接发指令即可打印，不用 SDK。</p>
+    <div class="code">SIZE 60 mm, 40 mm        ← 标签物理尺寸（必须与实际标签一致）
+GAP  2 mm, 0 mm          ← 间隙高度与偏移
+DIRECTION 1             ← 打印方向
+CLS                     ← 清空打印缓冲区（必须在内容之前）
+TEXT x,y,"字号",粗细,倍数,"内容"
+  TEXT 15,30,"3",0,1,1,"S"                          ← 等级大字
+  TEXT 80,30,"2",0,1,1,"手机"                        ← 品类
+  TEXT 15,48,"1",0,1,1,"QC-PH-S-2610-0012"           ← 人可读编码
+BARCODE x,y,"码制",模块宽,高,方向,校验,比例,"内容"
+  BARCODE 15,52,"128",42,1,0,2,2,"QCPHS26100012"    ← 核心：条码
+PRINT 1,1                ← 打印并走纸 1 份（必放最后）</div>
+    <div class="note ok"><b>已校验：</b>① 指令齐全 SIZE/GAP/CLS/BARCODE/PRINT；② 顺序正确（CLS 在 PRINT 之前）；③ 我们的条码 <code class="mono">QCPHS26100012</code> 编码后 178 模块，按 0.19mm/模块约 33.8mm，<b>远小于 60mm 标签宽度，条码可扫</b>。<br>
+    <b>注意：</b>TSPL 的 <code class="mono">BARCODE</code> 由打印机自己生成 Code128，<b>不需要我们传模块串</b>——直接把明文传进去即可，比自绘 SVG 更可靠（打印机有专门的条码合成电路）。</div>
+    <div class="note"><b>ZPL（斑马系）指令对照：</b><code class="mono">^XA ... ^XZ</code> 包裹整个标签，条码用 <code class="mono">^FO x,y ^BY w,h ^BCN,高,校验,行 ^FD 条码 ^FS</code>。如果买的是斑马或兼容 ZPL 的机型，指令换一套即可，<b>业务逻辑完全不变</b>——所以建议做一层<b>打印指令适配器</b>（见 7.5）。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.5 打印架构：指令适配器 + 打印队列</h2>
+    <p class="d">不要把 TSPL 硬写在业务代码里。抽一层适配器，换机型只改一个文件。</p>
+    <div class="fig">
+      <svg viewBox="0 0 1150 300" width="100%" style="min-width:1050px" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="ha" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#5b6373"/></marker></defs>
+        <!-- 业务层 -->
+        <rect x="20" y="40" width="150" height="56" rx="8" fill="#12291c" stroke="#1f4a30"/>
+        <text x="95" y="62" fill="#6ed99a" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">业务层</text>
+        <text x="95" y="80" fill="#5f8f74" font-size="10" text-anchor="middle" font-family="sans-serif">「给这批货打标签」</text>
+        <!-- 队列 -->
+        <rect x="230" y="40" width="170" height="56" rx="8" fill="#2a2410" stroke="#5a4a17"/>
+        <text x="315" y="62" fill="#e5c768" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">打印队列</text>
+        <text x="315" y="80" fill="#8d7f4a" font-size="10" text-anchor="middle" font-family="sans-serif">label_print_log / 幂等</text>
+        <!-- 适配层 -->
+        <rect x="460" y="30" width="180" height="76" rx="8" fill="#251a2e" stroke="#3f2b52"/>
+        <text x="550" y="52" fill="#c39ce0" font-size="12" font-weight="bold" text-anchor="middle" font-family="sans-serif">指令适配器</text>
+        <text x="550" y="70" fill="#8d6fa3" font-size="10" text-anchor="middle" font-family="sans-serif">TSPL / ZPL / CPCL</text>
+        <text x="550" y="86" fill="#8d6fa3" font-size="9.5" text-anchor="middle" font-family="sans-serif">换机型只改这里</text>
+        <!-- 三条出口 -->
+        <rect x="710" y="14" width="190" height="46" rx="8" fill="#16233c" stroke="#2d3f5e"/>
+        <text x="805" y="34" fill="#93b4e8" font-size="11.5" font-weight="bold" text-anchor="middle" font-family="sans-serif">链路A · RAW 9100</text>
+        <text x="805" y="50" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">net:// ip:9100（推荐）</text>
+        <rect x="710" y="70" width="190" height="46" rx="8" fill="#16233c" stroke="#2d3f5e"/>
+        <text x="805" y="90" fill="#93b4e8" font-size="11.5" font-weight="bold" text-anchor="middle" font-family="sans-serif">链路B · Web Serial</text>
+        <text x="805" y="106" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">仅 Chromium</text>
+        <rect x="710" y="126" width="190" height="46" rx="8" fill="#16233c" stroke="#2d3f5e"/>
+        <text x="805" y="146" fill="#93b4e8" font-size="11.5" font-weight="bold" text-anchor="middle" font-family="sans-serif">链路D · CUPS</text>
+        <text x="805" y="162" fill="#7d8aa0" font-size="10" text-anchor="middle" font-family="sans-serif">仅 A4 检测单</text>
+        <!-- 浏览器直连旁路 -->
+        <rect x="960" y="70" width="170" height="46" rx="8" fill="#2b1a10" stroke="#5c3418"/>
+        <text x="1045" y="90" fill="#f0a071" font-size="11.5" font-weight="bold" text-anchor="middle" font-family="sans-serif">离线兜底</text>
+        <text x="1045" y="106" fill="#a1705a" font-size="10" text-anchor="middle" font-family="sans-serif">断网时浏览器直连</text>
+
+        <line x1="170" y1="68" x2="228" y2="68" stroke="#5b6373" stroke-width="1.5" marker-end="url(#ha)"/>
+        <line x1="400" y1="68" x2="458" y2="68" stroke="#5b6373" stroke-width="1.5" marker-end="url(#ha)"/>
+        <line x1="640" y1="60" x2="708" y2="37" stroke="#5b6373" stroke-width="1.5" marker-end="url(#ha)"/>
+        <line x1="640" y1="68" x2="708" y2="93" stroke="#5b6373" stroke-width="1.5" marker-end="url(#ha)"/>
+        <line x1="640" y1="76" x2="708" y2="149" stroke="#5b6373" stroke-width="1.5" marker-end="url(#ha)"/>
+        <line x1="900" y1="93" x2="958" y2="93" stroke="#f97316" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#ha)"/>
+        <text x="925" y="84" fill="#f0a071" font-size="9.5" text-anchor="middle" font-family="sans-serif">断网时</text>
+        <text x="95" y="130" fill="#8b93a3" font-size="9.5" font-family="sans-serif">业务代码只调 adapter.print(labelData)，不关心指令集与链路</text>
+      </svg>
+      <div class="figcap">图 3 · 打印链路架构（适配层隔离机型差异）</div>
+    </div>
+    <div class="code">// 指令适配器接口（换机型只实现这一个）
+class LabelAdapter {
+  // 指令集：'TSPL' | 'ZPL'
+  // 链路：  'NET9100' | 'WEBSERIAL' | 'CUPS'
+  buildCommand(label, dialect) { /* 返回打印机指令字符串 */ }
+  async send(bytes, transport)  { /* 发出：socket / WebSerial / 打印队列 */ }
+}
+
+// 标签数据结构（与打印无关，业务层只产出这个）
+const label = {
+  size: { w: 60, h: 40 },      // mm
+  grade: 'S',                   // 等级 → 色块
+  categoryName: '手机',
+  barcode: 'QCPHS26100012',    // 条码本体（不带横杠）
+  displayCode: 'QC-PH-S-2610-0012',
+  action: '直接上架',            // 处置指令
+  date: '2026-10-03'
+};</div>
+    <div class="note warn"><b>为什么打印要走队列而不是直接发：</b>① <b>幂等</b>——重复点打印不会多打一张（贴错重打要留记录）；② <b>断网兜底</b>——服务端挂了就走浏览器直连；③ <b>多设备</b>——同一批货可以分发到多台标签机；④ <b>可追溯</b>——谁在什么时候打了多少张，全部有记录（防乱印）。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.6 贴新码复核（防错最后一道闸）</h2>
+    <p class="d">前面建档打的是 <b>W 占位码</b>，定级后要<b>贴正式码</b>。这一步做错（贴错等级）会导致 A 档当 S 档卖，差价几百且必纠纷。</p>
+    <div class="flow">
+      <div class="step"><div class="n">1</div><div class="t">打正式码</div><div class="d">等级定好后按批次/等级批量打，色块对应等级</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">2</div><div class="t">贴标</div><div class="d">撕掉 W 标，贴正式码（<b>建议不撕，W 标覆盖划线作废</b>）</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">3</div><div class="t">扫码复核</div><div class="d">扫新码 → 系统读出等级，<b>与实物核对</b></div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">4</div><div class="t">放行 / 阻断</div><div class="d">一致 → 入库；<b>不一致 → 直接阻断</b></div></div>
+    </div>
+    <h3>复核的 3 项强校验</h3>
+    <div class="code">扫到新码后，后端校验：
+① 新码解析出的 barcode 是否存在          否则「未知条码，拒收」
+② 新码等级 == 该货品当前系统等级          否则「等级不符：系统=S，实扫=A，拒收」
+③ 新码 barcode == 该货品原 barcode        否则「张冠李戴，检查是否贴错机器」
+全部通过 → status 置 GRADED/SELLABLE，移入对应仓 → 打印记录落库</div>
+    <div class="note ok"><b>操作建议：不要撕掉 W 占位标。</b>在 W 标上划一道横线作废即可。理由：① 撕标签容易连机器边缘的旧胶一起扯下来；② 保留痕迹便于事后追溯这批货的流转过程；③ 减少一次操作就减少一次出错机会。</div>
+    <div class="note bad"><b>⚠ 补打要受控：</b>标签损坏/丢失需要补打时，<b>必须填原因</b>并记录到 <code class="mono">label_print_log</code>。同批补打率 &gt; 1% 说明前面流程有问题，要告警排查，别让补打变成常态。</div>
+    <div class="note"><b>为什么标签机不能省：</b>前面提过——面单打单纸粘性差、防水差、字会褪。<b>货品身份码要跟着机器流转两三年，必须用不干胶。</b>而且正式码上的等级色块是<b>分拣指令</b>，仓管不用看字就知道这批货该去哪个架。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.7 硬件链路自检工具（部署时先跑这个）</h2>
+    <p class="d">上线前对着真实设备跑一遍，判断当前环境能不能用哪条链路。<b>点「检测」即可，会直接读本机浏览器能力与设备状态。</b></p>
+    <div class="row noprint" style="margin-bottom:14px">
+      <button class="btn" onclick="runHwCheck()">▶ 开始自检</button>
+      <button class="btn g" onclick="testScanSim()">模拟一次扫码</button>
+      <button class="btn g" onclick="testTsplOut()">生成 TSPL 并试连 9100</button>
+    </div>
+    <div id="hw-out" style="font-size:12.5px"></div>
+
+    <h3>7.7.1 链路选择决策树</h3>
+    <div class="code">标签打印机是什么接口？
+│
+├─ 有网口 / WiFi，且厂商文档写明支持 RAW 9100
+│    → 【链路A】服务端 socket 直连  ✅ 最稳，可多设备共享
+│
+├─ 只有 USB，但设备是串口(TSPL/ESC-POS)
+│    ├─ 全部检测台都是 Chrome/Edge → 【链路B】Web Serial 可用
+│    └─ 有 Mac 或 Safari 用户        → 装厂商 macOS 工具做代理，或换网口机型
+│
+├─ 只有 USB 且不确定
+│    → 先【试连 9100】，不行再走 Web Serial
+│
+└─ 打印机是「面单打印机」而非标签机
+     → 那是给快递面单用的，不能贴货品码，货品标签请另买标签机
+
+A4 检测单 → 【链路D】CUPS / 浏览器打印，与标签机无关</div>
+
+    <h3>7.7.2 部署检查清单（逐项打钩再上线）</h3>
+    <div class="tw"><table>
+      <thead><tr><th style="width:44px">#</th><th style="width:150px">检查项</th><th>通过标准</th><th style="width:90px">结果</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>扫码枪模式</td><td>设为 <b>USB 键盘/HID 模式</b>，插上即出字符</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>2</td><td>结束符</td><td>设为 <b>回车</b>；关闭前导码/结束码</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>3</td><td>输入法冲突</td><td>检测台<b>关闭中文输入法</b>，锁定英文键盘</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>4</td><td>供电</td><td>USB 延长线/集线器带独立供电，连扫 100 次不断连</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>5</td><td>纸张匹配</td><td>打印机支持 <b>60mm 纸宽</b>，标签实际尺寸 60×40mm</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>6</td><td>TSPL 支持</td><td>能打印出 <code class="mono">SIZE/CLS/BARCODE/PRINT</code> 测试页</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>7</td><td><b>条码回扫</b></td><td><b>打印后用扫码枪回扫 50 张，全部识别</b></td><td style="background:#0a0c11"></td></tr>
+        <tr><td>8</td><td>链路自检</td><td>上方工具显示 9100 可连（或 Web Serial 可授权）</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>9</td><td>断网兜底</td><td>断网时仍能打印（浏览器直连生效）</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>10</td><td>浏览器统一</td><td>检测台<b>全部用同一浏览器</b>（走 Web Serial 时必须 Chromium）</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>11</td><td>粘贴测试</td><td>打印 1 张正式标签，<b>扫码枪回扫该实物标签</b>能读出正确编码</td><td style="background:#0a0c11"></td></tr>
+        <tr><td>12</td><td>贴标演练</td><td>故意贴错 1 台，<b>系统 100% 拦截</b></td><td style="background:#0a0c11"></td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>⚠ 第 7 项和第 11 项是最容易被跳过、也最致命的两项：</b>「打印出来看着没问题」不等于「条码能扫」。<b>必须用扫码枪回扫打印好的实体标签</b>，一张一张扫。这一步跳过，等到出库时才发现扫不出，几十上百台货全部卡在仓里出不去。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.8 硬件清单与预算</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:170px">设备</th><th style="width:120px">建议规格</th><th style="width:90px">数量</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><b>二维影像扫码枪</b></td><td>USB 键盘模式，支持 1D+2D，有线优先</td><td>每检测工位 1 把</td><td>200–400 元/把。<b>不要买纯一维激光枪</b>（扫不出小标签、容错低）</td></tr>
+        <tr><td><b>标签打印机</b></td><td><b>优先选带网口</b>（支持 RAW 9100），<br>分辨率 ≥203dpi，60mm 纸宽</td><td>1 台起步</td><td>芯烨/佳博/Xprinter/TSC 均可。<b>务必确认支持 TSPL 或 ZPL</b></td></tr>
+        <tr><td>不干胶标签</td><td>60×40mm，三防（防水防油防刮）<br>300 张/卷</td><td>按量备货</td><td>便宜货一擦就掉，务必买三防</td></tr>
+        <tr><td>条码不干胶标签机<br>（选配）</td><td>与标签打印机不同，用于超小标签</td><td>—</td><td>普通标签机即可，不必单独买</td></tr>
+        <tr><td>A4 打印机</td><td>本机已有 Canon/HP 喷墨</td><td>已有</td><td>只打检测单，<b>不用标签机打 A4</b></td></tr>
+        <tr><td>USB 延长线/集线器</td><td>带独立供电</td><td>每工位 1</td><td>防止供电不足导致扫到一半断连</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note"><b>标签纸规格必须与打印机匹配：</b>买打印机时先确认它支持 60mm 纸宽（很多便携标签机只支持 58mm 或 40mm）。<b>标签宽度买错 = 白买打印机</b>。建议先打样测试再批量采购。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.8 硬件接入的验收标准</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:150px">验收项</th><th>标准</th><th style="width:110px">验证方式</th></tr></thead>
+      <tbody>
+        <tr><td>扫码识别率</td><td>连续扫 100 次，识别率 100%，0 误判</td><td>实测</td></tr>
+        <tr><td>噪声过滤</td><td>手打 20 次、误触 20 次，<b>0 次被误判为扫码</b></td><td>实测</td></tr>
+        <tr><td>连续作业不中断</td><td>不停录入 100 台，<b>无失焦、无漏录</b></td><td>实测</td></tr>
+        <tr><td>回车不误提交</td><td>扫码末尾回车<b>不触发表单提交</b></td><td>实测</td></tr>
+        <tr><td>标签尺寸</td><td>实测 60×40mm，误差 &lt;±0.5mm</td><td>卡尺量</td></tr>
+        <tr><td><b>条码可扫性</b></td><td><b>打印后用扫码枪回扫 100 张，全部识别</b></td><td><b>回扫（必做）</b></td></tr>
+        <tr><td>批量打印</td><td>连打 50 张，0 卡纸、0 偏移、0 重号</td><td>实测</td></tr>
+        <tr><td>断网兜底</td><td>断网时标签<b>仍能打印</b>（浏览器直连）</td><td>实测</td></tr>
+        <tr><td>贴标复核</td><td>故意贴错等级，<b>100% 被拦截</b></td><td>故意测</td></tr>
+        <tr><td>macOS 兼容性</td><td>Safari/Chrome/Edge 各测一遍，行为一致</td><td>实测</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>⚠ 最容易被跳过、但绝不能省的一项：打印后回扫。</b>标签打出来「看起来正常」不等于条码能扫。<b>必须用扫码枪把打印好的标签回扫一遍</b>，100 张全部识别才算通过。这一步跳过，出库时才发现扫不出，几十上百台货就卡住了。</div>
+  </div>
+</div>
+
+<!-- ============ 8 出库 ============ -->
+<div class="page printable" id="p8">
+  <div class="card">
+    <h2>7. 出库与履约（4 类出库）</h2>
+    <p class="d">出库是<b>唯一会让货离开你手</b>的动作，所以这里的校验必须最严。四类出库共一张表，用 <code class="mono">type</code> 区分，但校验规则不同。</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:90px">类型</th><th style="width:170px">场景</th><th>前置校验</th><th style="width:130px">后置动作</th></tr></thead>
+      <tbody>
+        <tr><td><b>销售出库</b><br><span class="mono" style="color:#93b4e8">SALE</span></td><td>商城/闲鱼/线下成交发货</td><td>status=SELLABLE · grade∈(S,A) · 未被锁 · 账实一致 · 已拍定级匹配</td><td>置 SOLD · 结转成本 · 生成面单 · 回写订单号</td></tr>
+        <tr><td><b>报修出库</b><br><span class="mono" style="color:#e8ac6a">REPAIR</span></td><td>C 档送官方/网点</td><td>status=OUT_REPAIR · <b>凭证号已录</b> · 承诺时效已填 · 序列号已录</td><td>计<b>在途库存</b> · 登记垫付费用 · 启动时效倒计时</td></tr>
+        <tr><td><b>调拨出库</b><br><span class="mono" style="color:#93d977">TRANSFER</span></td><td>跨仓/跨店调拨</td><td>两端仓库均已启用 · 不改变 grade 只改仓</td><td>在途 → 到仓确认 · 双方确认闭环</td></tr>
+        <tr><td><b>拆机件出库</b><br><span class="mono" style="color:#c39ce0">PARTS</span></td><td>D 档配件销售</td><td>status=PARTS · <b>逐件清单已核对</b> · 残值明细完整</td><td>记实际售价 · <b>回写残值回收率</b></td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>最容易出事的地方：</b>销售出库时<b>只校验「能不能卖」，没校验「等级对不对」</b>。A 档货当 S 档发出去，差价几百块且买家收货后必然纠纷。<b>拣货必须扫「货品条码 + 订单要求等级」双重校验</b>，不一致当场拦。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.1 销售出库完整流程</h2>
+    <div class="flow">
+      <div class="step"><div class="n">1</div><div class="t">订单锁货</div><div class="d">SELLABLE → LOCKED，记 locked_by</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">2</div><div class="t">生成拣货单</div><div class="d">按库位+等级排序，提示最优拣货路径</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">3</div><div class="t">扫码校验</div><div class="d"><b>错货/错等级当场拦</b></div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">4</div><div class="t">打面单</div><div class="d">对接快递，取运单号</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">5</div><div class="t">出库核销</div><div class="d">LOCKED → SOLD，写流水结转成本</div></div>
+    </div>
+    <h3>拣货校验规则（后端强制）</h3>
+    <div class="code">-- 每次扫码校验 5 项
+1. 该条码状态 == LOCKED 且 locked_by == 当前订单     否则「这货不是本单的」
+2. 该条码未被其他订单锁定                          否则「已被占用」
+3. 该货品 grade == 订单要求的 grade                 否则「等级不符：需 S，实扫 A」
+4. 该货品所在库位等级区 == 该货品 grade              否则「分区存放错误」
+5. 该货品账实一致（有流水支撑）                    否则「账实不符，先盘点」</div>
+    <div class="note ok"><b>超时自动释放：</b>LOCKED 超过 <b>30 分钟</b>（拍品锁）或订单取消，自动回 SELLABLE，避免货被长期占用下架。系统需配一个定时任务扫描超时锁。</div>
+  </div>
+
+  <div class="card">
+    <h2>7.2 报修出库与回库（最容易失控的环节）</h2>
+    <div class="grid2">
+      <div>
+        <h3 style="color:#e8ac6a">出库前必须齐备</h3>
+        <ul>
+          <li>故障描述 + 故障照片/视频（争议时是唯一凭证）</li>
+          <li>序列号 / IMEI（官方无凭证不受理）</li>
+          <li>购买凭证截图（有订单号优先）</li>
+          <li><b>C1</b>：京东/400 工单号、寄修单号</li>
+          <li><b>C2</b>：网点名称、电话、地址、<b>受理确认记录</b></li>
+          <li>承诺时效（默认 15 天，可按品牌调整）</li>
+          <li>预估费用（超成本阈值需审批）</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color:#93b4e8">回库处理</h3>
+        <ul>
+          <li>状态 OUT_REPAIR → <b>强制重新检测</b>，不可直接回可售</li>
+          <li>重新定级（可能降档，维修可能引入新伤）</li>
+          <li>重新定价（原售价不再沿用）</li>
+          <li>费用核销：官方报价 vs 垫付金额 vs 最终残值</li>
+          <li>若官方判定不可修 → <b>转 D 拆件</b>，凭证截图存档</li>
+          <li>若撤单回仓 → 重新入检测流程</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note warn"><b>超时机制（务必配定时任务）：</b>① 接近承诺时效（如剩 3 天）提醒；② 超过承诺时效标 <code class="mono">timeout_flag=true</code> 并进「待处理」列表；③ 主管可一键「联系客服撤单」或「转 D 拆件」，全部留痕。<br>
+    <b>真实教训：</b>不建待修台账，货寄出去就等于丢了——钱垫着、货在别人手里、没人跟进。</div>
+  </div>
+</div>
+
+<!-- ============ 8 分级引擎 ============ -->
+<div class="page printable" id="p9">
+  <div class="card">
+    <h2>8. 分级引擎（规则如何真正跑起来）</h2>
+    <p class="d">分级不是写死在代码里的 if-else，而是<b>存在数据库里的配置</b>。这样业务口径变化（电池阈值从 85% 调到 82%）不需要改代码发版。</p>
+  </div>
+
+  <div class="card">
+    <h2>8.1 规则数据结构</h2>
+    <div class="code">dict_grade_rule
+├─ id, priority          优先级（小数字先匹配）
+├─ category              适用品类（PH/TB/NB/...，* = 通用）
+├─ conditions (jsonb)    条件表达式，见下
+├─ grade                 命中后判定的等级 S/A/B/C/D
+├─ safety_flag           是否为安全红线规则（true 时直接判 D）
+├─ effective_from / to   生效期（换标准不丢历史）
+└─ enabled               启停开关
+
+-- conditions 示例
+{"all_of":[
+   {"field":"battery_health","op":">=","value":85},
+   {"field":"all_items_pass","op":"==","value":true},
+   {"field":"flaw_count","op":"==","value":0}
+ ]}
+
+{"any_of":[
+   {"field":"safety_hit","op":"==","value":true}
+ ],"safety_flag":true,"grade":"D"}</div>
+    <div class="note"><b>为什么要保留生效期：</b>今天定 S 的货，按旧标准存；下月标准改成 90%，历史货不该被追溯重判。<code class="mono">test_record</code> 里要<b>快照当时命中的规则 ID</b>，保证可复现。</div>
+  </div>
+
+  <div class="card">
+    <h2>8.2 引擎执行流程</h2>
+    <div class="flow">
+      <div class="step"><div class="n">STEP 1</div><div class="t">取规则</div><div class="d">按品类 + 生效期取启用规则，按 priority 排序</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 2</div><div class="t">优先安全</div><div class="d"><b>安全红线规则永远第一匹配</b>，命中即 D（危废）</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 3</div><div class="t">逐条比对</div><div class="d">按 priority 找第一条完全命中的规则</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 4</div><div class="t">出建议档</div><div class="d">返回 suggest_grade + <b>命中依据</b></div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 5</div><div class="t">套价格</div><div class="d">按等级套系数 → 毛利校验 → 出建议价</div></div>
+      <div class="arr">→</div>
+      <div class="step"><div class="n">STEP 6</div><div class="t">人工确认</div><div class="d">检测员确认（<b>可覆盖，但需填理由</b>）</div></div>
+    </div>
+    <h3>引擎必须返回「依据」，不能只返回档位</h3>
+    <div class="code">✅ 好的返回：
+{ "suggest_grade": "A",
+  "reasons": [
+    "电池健康 82%，在 A 档区间 80~84",
+    "外观瑕疵 2 处（后盖磕碰、右下角划痕）",
+    "功能检项全部通过"
+  ],
+  "blocked": false }
+
+❌ 差的返回：{ "grade": "A" }   ← 检测员不知道为什么，无法学习与复核</div>
+    <div class="note warn"><b>人工覆盖引擎建议时，必须填「覆盖理由」</b>。这笔数据是规则调优的唯一依据——如果引擎长期与人工不符，说明规则该改了，而不是人该听系统的。</div>
+  </div>
+
+  <div class="card">
+    <h2>8.3 规则与人工的分工（谁说了算）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:130px">环节</th><th style="width:110px">谁决定</th><th>系统职责</th></tr></thead>
+      <tbody>
+        <tr><td>分级标准定义</td><td>业务负责人</td><td>后台配置规则，不写代码；变更走审批</td></tr>
+        <tr><td>单台定级</td><td><b>检测员（可覆盖引擎）</b></td><td>给建议 + 给依据；记录覆盖理由；超权限需上级确认</td></tr>
+        <tr><td>存疑复检</td><td>资深检测员</td><td>自动进复检池，不隔夜</td></tr>
+        <tr><td>最终定价</td><td>定价员</td><td>套系数 + 底价拦截 + 毛利校验</td></tr>
+        <tr><td>低于底价</td><td>主管审批</td><td>强制审批流，留痕</td></tr>
+        <tr><td>规则有效性</td><td>业务负责人</td><td>系统输出「引擎建议 vs 人工最终」一致率，低于阈值提示复核规则</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>8.4 抽检与质量控制</h2>
+    <div class="grid2">
+      <div>
+        <h4>抽检机制</h4>
+        <ul>
+          <li>每定级 <b>50 台</b>，资深检测员随机抽 <b>10%</b> 复检</li>
+          <li>重点抽：<b>高价值（&gt;¥3000）</b>、S 档（虚报高发）、D 档（怕被误报废）</li>
+          <li>连续 <b>3 次误判 → 停线重训</b></li>
+        </ul>
+      </div>
+      <div>
+        <h4>三项质量指标（进管理看板）</h4>
+        <ul>
+          <li><b>误判率</b> = 复检不一致台数 / 抽检台数（目标 &lt; 3%）</li>
+          <li><b>漏检率</b> = 售后返修台数 / 已售台数（目标 &lt; 1.5%）</li>
+          <li><b>引擎一致率</b> = 建议档=最终档台数 / 总台数（低则规则需调）</li>
+        </ul>
+      </div>
+    </div>
+    <div class="note bad"><b>S 档是虚报重灾区：</b>「零使用痕迹」是主观判断，检测员为了好卖容易放宽。<b>必须靠侧光验屏 + 显微镜看划痕 + 拍照留证</b>三件事硬约束，否则 A 档当 S 档卖，纠纷和退货成本远超那点价差。</div>
+  </div>
+</div>
+
+<!-- ============ 9 中台对接 ============ -->
+<div class="page printable" id="p10">
+  <div class="card">
+    <h2>9. 中台 / 前参谋对接</h2>
+    <p class="d">本系统是<b>库存真相来源</b>，中台是<b>业务协作层</b>。二者不互相替代，靠同步保持一致。</p>
+  </div>
+
+  <div class="card">
+    <h2>9.1 职责划分</h2>
+    <div class="grid2">
+      <div>
+        <h3 style="color:#6ed99a">本系统负责（权威数据）</h3>
+        <ul>
+          <li>货品实体与条码（唯一键）</li>
+          <li>等级 / 状态 / 所在仓</li>
+          <li>检测记录与定级依据</li>
+          <li>库存余额与流水</li>
+          <li>报修工单与在途</li>
+          <li>残值与拆机件</li>
+        </ul>
+        <div class="note ok">这些数据<b>只能从本系统取</b>，中台的录入一律视为无效。</div>
+      </div>
+      <div>
+        <h3 style="color:#93b4e8">中台负责</h3>
+        <ul>
+          <li>商品上架/下架与展示</li>
+          <li>价格对外呈现（促销、渠道价）</li>
+          <li>渠道/分销/订单流</li>
+          <li>供应链采购与调拨计划</li>
+          <li>财务对账汇总</li>
+        </ul>
+        <div class="note warn">中台若要改等级/状态，<b>必须回传本系统走流程</b>，不能直接改，否则账立刻对不上。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>9.2 同步方向与频率</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:90px">方向</th><th style="width:170px">数据</th><th style="width:90px">方式</th><th style="width:80px">频率</th><th>说明</th></tr></thead>
+      <tbody>
+        <tr><td><b>出</b>→</td><td>货品 + 等级 + 可售状态</td><td>API/CSV</td><td>实时或 5 分钟</td><td>等级变化才推，避免全量刷</td></tr>
+        <tr><td><b>出</b>→</td><td>库存余额</td><td>API</td><td>5 分钟</td><td>按仓库+等级维度</td></tr>
+        <tr><td><b>出</b>→</td><td>销售出库（售出记录）</td><td>API</td><td>实时</td><td>含订单号、售价、成本</td></tr>
+        <tr><td><b>出</b>→</td><td>报修工单状态</td><td>API</td><td>变更时</td><td>在途、时效、费用</td></tr>
+        <tr><td><b>入</b>←</td><td>订单/渠道信息</td><td>API</td><td>实时</td><td>用于锁货与出库校验</td></tr>
+        <tr><td><b>入</b>←</td><td>采购/调拨计划</td><td>CSV</td><td>每天</td><td>转成批次单</td></tr>
+        <tr><td><b>入</b>←</td><td>基准价参考</td><td>API</td><td>每天</td><td>行情数据，可选</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note"><b>同步必须幂等：</b>每条推送带 <code class="mono">idempotent_key</code>（如 item_id + 更新时间戳），对方重复收到也不重复处理。同步失败进重试队列（指数退避），<b>连续 3 次失败进死信并告警</b>，不能静默丢弃。</div>
+  </div>
+
+  <div class="card">
+    <h2>9.3 字段映射与导入模板</h2>
+    <p class="d">17 列标准字段，<b>对方列名不同时只改表头，数据顺序不动</b>。导入前必做三项校验：条码去重、W 等级拦截、D 档残值完整性。</p>
+    <div class="tw"><table>
+      <thead><tr><th style="width:140px">我方标准字段</th><th style="width:80px">类型</th><th>示例</th><th style="width:110px">对方列名</th><th style="width:90px">必填</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">商品编码</td><td>文本</td><td class="mono">QCPHS26100012</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">显示编码</td><td>文本</td><td class="mono">QC-PH-S-2610-0012</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">品类</td><td>枚举</td><td>手机</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">品牌型号</td><td>文本</td><td>Apple iPhone 13 128G</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">序列号/IMEI</td><td>文本</td><td>IMEI: 35xxxxxx</td><td style="background:#0a0c11"></td><td>C档必填</td></tr>
+        <tr><td class="mono">等级</td><td>枚举</td><td>S / A / B / C / D</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">处置路径</td><td>枚举</td><td>可售/微瑕专区/厂修/线上报修/线下网点/拆机件/危废</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">状态</td><td>枚举</td><td>SELLABLE / LOCKED …</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">所在仓</td><td>文本</td><td>可售仓-B区</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">检测结论</td><td>长文本</td><td>全项通过，无使用痕迹</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">定级依据</td><td>长文本</td><td>电池87%；功能全过；零瑕疵</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">电池健康%</td><td>数值</td><td>87</td><td style="background:#0a0c11"></td><td>建议</td></tr>
+        <tr><td class="mono">基准价</td><td>金额</td><td>3280</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">销售价/残值</td><td>金额</td><td>3280 / 0</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">采购成本</td><td>金额</td><td>2100</td><td style="background:#0a0c11"></td><td>★</td></tr>
+        <tr><td class="mono">报修渠道凭证</td><td>文本</td><td>C1京东 / 网点 + 联单号</td><td style="background:#0a0c11"></td><td>C档★</td></tr>
+        <tr><td class="mono">配件残值明细</td><td>长文本</td><td>主板¥620/电池¥180</td><td style="background:#0a0c11"></td><td>D档★</td></tr>
+        <tr><td class="mono">检测人/日期</td><td>文本</td><td>张三 / 2026-10-03</td><td style="background:#0a0c11"></td><td>★</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>最容易卡的一步：枚举字典必须先让对方建好。</b>很多系统要求字典项（等级 5 值、处置路径 7 值、状态 10 值）<b>预先存在才能导入</b>，这是对接最常被卡住的地方，务必提前确认。</div>
+  </div>
+</div>
+
+<!-- ============ 10 权限报表风控 ============ -->
+<div class="page printable" id="p11">
+  <div class="card">
+    <h2>10. 权限 · 报表 · 风控</h2>
+  </div>
+
+  <div class="card">
+    <h2>10.1 角色权限矩阵（RBAC + 行级数据权限）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:130px">功能</th><th>检测员</th><th>定价员</th><th>仓管</th><th>售后</th><th>主管</th><th>管理员</th></tr></thead>
+      <tbody>
+        <tr><td>扫码检测 / 提交</td><td>✅</td><td>✅</td><td>—</td><td>—</td><td>查看</td><td>✅</td></tr>
+        <tr><td>定级（可覆盖引擎）</td><td>✅ 建议</td><td>✅</td><td>—</td><td>—</td><td>复核</td><td>✅</td></tr>
+        <tr><td>改价 / 低于底价</td><td>—</td><td>✅</td><td>—</td><td>—</td><td>审批</td><td>✅</td></tr>
+        <tr><td>改分级规则</td><td>—</td><td>—</td><td>—</td><td>—</td><td>审批</td><td>✅</td></tr>
+        <tr><td>入库 / 贴标 / 移库</td><td>—</td><td>—</td><td>✅</td><td>—</td><td>查看</td><td>✅</td></tr>
+        <tr><td>销售出库 / 打面单</td><td>—</td><td>—</td><td>✅</td><td>—</td><td>查看</td><td>✅</td></tr>
+        <tr><td>报修工单（送修/撤单）</td><td>—</td><td>—</td><td>—</td><td>✅</td><td>审批撤单</td><td>✅</td></tr>
+        <tr><td>残值估值 / 拆机件出库</td><td>—</td><td>✅</td><td>出库</td><td>—</td><td>审批</td><td>✅</td></tr>
+        <tr><td>危废处理</td><td>登记</td><td>—</td><td>登记</td><td>—</td><td>✅ 审批</td><td>✅</td></tr>
+        <tr><td>盘点 / 差异审批</td><td>—</td><td>—</td><td>✅ 盘点</td><td>—</td><td>✅ 审批</td><td>✅</td></tr>
+        <tr><td>改库存数量（禁止）</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td><td>❌</td></tr>
+        <tr><td>看全部仓</td><td>仅本仓</td><td>全部</td><td>仅本仓</td><td>全部</td><td>全部</td><td>全部</td></tr>
+        <tr><td>看成本/毛利</td><td>❌</td><td>✅</td><td>❌</td><td>❌</td><td>✅</td><td>✅</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note bad"><b>三条不可授权的红线：</b>① <b>任何人都不能直接改库存数量</b>（含管理员），只能走流水；② <b>检测员看不到成本与毛利</b>（避免影响定级 objectivity）；③ <b>D 档判废与危废处理必须主管审批</b>，防止随意报废。</div>
+  </div>
+
+  <div class="card">
+    <h2>10.2 核心报表（管理层视角）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:120px">报表</th><th>回答什么问题</th><th style="width:150px">关键指标</th><th style="width:70px">频率</th></tr></thead>
+      <tbody>
+        <tr><td>库存总览</td><td>现在有多少货、值多少钱</td><td>各仓数量/货值/在途/拆机件</td><td>实时</td></tr>
+        <tr><td>分级分布</td><td>这批货质量如何</td><td>S/A/B/C/D 占比（<b>按批次对比</b>）</td><td>每天</td></tr>
+        <tr><td>检测产能</td><td>人效与瓶颈</td><td>人均台数/一次通过率/复检率</td><td>每天</td></tr>
+        <tr><td>检测员准确率</td><td>分级质量是否可控</td><td>误判率/建议一致率</td><td>周</td></tr>
+        <tr><td>库存账龄</td><td>哪些货压死了</td><td>0-30/31-60/61-90/90+ 天分布</td><td>周</td></tr>
+        <tr><td>呆滞预警</td><td>该降价清哪些</td><td>可售但 30 天未动 + 金额</td><td>周</td></tr>
+        <tr><td>报修时效</td><td>报修黑洞多严重</td><td>平均天数/超时单数/撤单率/垫付总额</td><td>周</td></tr>
+        <tr><td>报修成功率</td><td>修了值不值</td><td>修好后可售比例/修后降档比例</td><td>月</td></tr>
+        <tr><td><b>残值回收率</b></td><td><b>报废止损做得怎样</b></td><td>实际变现金额 / 理论残值</td><td>月</td></tr>
+        <tr><td>毛利分析</td><td>赚在哪亏在哪</td><td>按品类/等级/批次的毛利率</td><td>月</td></tr>
+        <tr><td>供应商质量</td><td>谁的货问题多</td><td>退货率/漏检率/批次不良率</td><td>月</td></tr>
+        <tr><td>盘点差异</td><td>账实差在哪</td><td>差异率/高发库位/责任人</td><td>月</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note ok"><b>两个最该盯的数：</b>① <b>残值回收率</b> —— 直接反映 D 档有没有被当废品扔掉；② <b>报修超时单数</b> —— 直接反映在途货有多少悬在别人手里。这两个数一恶化，现金流立刻出问题。</div>
+  </div>
+
+  <div class="card">
+    <h2>10.3 风控规则（自动拦截清单）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:200px">场景</th><th>系统动作</th><th style="width:110px">级别</th></tr></thead>
+      <tbody>
+        <tr><td>条码重复</td><td>直接拒绝建档</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>待检仓（PENDING）货品出库</td><td>拒绝出库</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>扫到非本单货品</td><td>拒绝拣货，提示正确编码</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>等级与订单不符</td><td>拒绝出库</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>贴标等级 ≠ 系统等级</td><td>拒绝入库，要求补打</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>不合格项未填描述</td><td>拒绝提交检测</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>D 档无残值明细</td><td>拒绝关闭工单</td><td><span class="st st8">阻断</span></td></tr>
+        <tr><td>命中安全红线（鼓包/漏液）</td><td>强制转危废，禁充电禁流转</td><td><span class="st st8">强制</span></td></tr>
+        <tr><td>售价低于底价</td><td>需主管审批</td><td><span class="st st5">审批</span></td></tr>
+        <tr><td>毛利率低于下限</td><td>告警 + 需填写原因</td><td><span class="st st5">审批</span></td></tr>
+        <tr><td>报修超承诺时效</td><td>进待处理列表 + 通知主管</td><td><span class="st st2">告警</span></td></tr>
+        <tr><td>报修单挂账超时（&gt;15 天）</td><td>催办 + 升级</td><td><span class="st st2">告警</span></td></tr>
+        <tr><td>盘点差异率 &gt; 0.5%</td><td>升级主管核查</td><td><span class="st st2">告警</span></td></tr>
+        <tr><td>同批标签错贴 &gt; 1%</td><td>暂停该批打印</td><td><span class="st st2">告警</span></td></tr>
+        <tr><td>库存负数</td><td>告警 + 禁止该仓出库</td><td><span class="st st2">告警</span></td></tr>
+        <tr><td>高价值货（&gt;¥3000）被修改</td><td>强制二次确认 + 审计</td><td><span class="st st2">告警</span></td></tr>
+        <tr><td>超时锁货（&gt;30 分钟）</td><td>自动释放</td><td><span class="st st4">自动</span></td></tr>
+        <tr><td>库存账实不符时出库</td><td>拒绝，要求先盘点</td><td><span class="st st8">阻断</span></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<!-- ============ 11 实施与选型 ============ -->
+<div class="page printable" id="p12">
+  <div class="card">
+    <h2>11. 实施路径与技术选型</h2>
+  </div>
+
+  <div class="card">
+    <h2>11.1 三期实施建议（务实路线）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:90px">阶段</th><th style="width:150px">范围</th><th>交付物</th><th style="width:190px">验收标准</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><b>一期</b><br><span style="color:#93b4e8">建账 + 检测</span></td>
+          <td>批次建档、条码生成、扫码检测工作台、分级引擎、贴标打印、基础报表</td>
+          <td>货品主数据体系、检测留痕、分级自动建议</td>
+          <td>① 1000 台建档零重号<br>② 人均 40 台/天<br>③ 分级建议准确率 ≥85%</td>
+        </tr>
+        <tr>
+          <td><b>二期</b><br><span style="color:#6ed99a">库存 + 出库</span></td>
+          <td>库存流水账本、仓库库位、销售出库、调拨、盘点、报修工单、拆机件残值</td>
+          <td>账实一致、四类出库闭环</td>
+          <td>① 账实一致率 99.9%<br>② 盘点差异 &lt;0.5%<br>③ 报修超时可追溯</td>
+        </tr>
+        <tr>
+          <td><b>三期</b><br><span style="color:#c39ce0">对接 + 提效</span></td>
+          <td>中台/前参谋同步、快递对接、权限审批流、AI 瑕疵辅助识别、BI 看板</td>
+          <td>全链路闭环、数据驱动决策</td>
+          <td>① 同步成功率 ≥99.9%<br>② 报表 T+0<br>③ 残值回收率可月跟踪</td>
+        </tr>
+      </tbody>
+    </table></div>
+    <div class="note"><b>为什么这样切：</b>一期解决「<b>分级不清 + 账实不明</b>」这个最痛的点，投入产出比最高，且不依赖任何外部系统对接就能独立产生价值。二期把「出库与报修」这个钱袋子管住。三期才是锦上添花。<b>不要一期就想着对接中台</b>——对方字段没确认前，对接只会拖慢进度。</div>
+  </div>
+
+  <div class="card">
+    <h2>11.2 技术选型（务实建议）</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:100px">层次</th><th style="width:180px">推荐</th><th>理由</th><th style="width:170px">备选</th></tr></thead>
+      <tbody>
+        <tr><td>数据库</td><td><b>PostgreSQL 15+</b></td><td>jsonb 存检测项、触发器做「禁改库存」、行级安全策略做数据权限、timestamptz 免时区坑</td><td>MySQL 8（需自建权限层）</td></tr>
+        <tr><td>后端</td><td>Node.js / NestJS<br>或 Python / FastAPI</td><td>与前端同语言，人力成本低；NestJS 内置权限/审计模块贴合需求</td><td>Java Spring（团队有 Java 存量时）</td></tr>
+        <tr><td>前端</td><td>React + Vite<br>扫码端做 PWA</td><td>检测工作台需离线与扫码枪支持，PWA 最合适；后台管理生态成熟</td><td>Vue 3（团队更熟时）</td></tr>
+        <tr><td>标签打印</td><td><b>RAW 9100 网口直连</b><br>（+ 指令适配器）</td><td>直接发 TSPL 指令，<b>不经系统打印队列</b>：尺寸精确、条码可扫、不装驱动、可多设备共享；断网可降级浏览器直连。<b>详见 Tab 7</b></td><td>Web Serial（仅 Chromium）</td></tr>
+        <tr><td>图片存储</td><td>对象存储（OSS/COS/S3）</td><td>检测照片多，需缩略图与 CDN</td><td>本地磁盘（仅内网小规模）</td></tr>
+        <tr><td>快递对接</td><td>快递鸟 / 快递100</td><td>面单打印 + 轨迹查询成熟，<b>一次对接省掉自研</b></td><td>各快递开放平台（多平台时）</td></tr>
+        <tr><td>部署</td><td>Docker Compose 或托管 PostgreSQL</td><td>数据是命脉，<b>必须有备份和恢复演练</b></td><td>云托管（Vercel + Supabase/Neon）</td></tr>
+      </tbody>
+    </table></div>
+    <div class="note warn"><b>选型的关键约束是「扫码必须能打」：</b>标签打印优先走 <b>网口 RAW 9100 直连</b>（见 Tab 7），不要设计成「点打印 → 请求服务端 → 服务端连打印机」的串行强依赖。必须内置<b>断网兜底</b>（浏览器直连），否则网络波动时检测员无法贴标，整条流程立刻卡住。<br>
+    <b>特别注意：</b>macOS 上标签机基本没有官方驱动，<b>切勿用 CUPS 通用驱动打标签</b>（尺寸每次复位、条码模糊不可扫）。CUPS 只用于打 A4 检测单。</div>
+  </div>
+
+  <div class="card">
+    <h2>11.3 数据安全与备份（不可省）</h2>
+    <div class="grid2">
+      <div>
+        <ul>
+          <li><b>每日全量 + 实时 WAL 归档</b>，异地保留 ≥30 天</li>
+          <li><b>每季度恢复演练</b>——没演练过的备份等于没有备份</li>
+          <li>敏感字段（客户信息、序列号）加密存储</li>
+          <li>操作日志与库存流水<b>只增不改</b>，防篡改</li>
+        </ul>
+      </div>
+      <div>
+        <ul>
+          <li>照片单独存对象存储，DB 只存 URL</li>
+          <li>高价值操作（改价/报废/撤单）二次确认 + 审批</li>
+          <li>账号强制密码策略，<b>禁用共享账号</b></li>
+          <li>内网访问 + VPN，禁止公网直连数据库</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>11.4 落地前必须确认的 6 个问题</h2>
+    <div class="tw"><table>
+      <thead><tr><th style="width:50px">#</th><th>问题</th><th style="width:230px">为什么必须先定</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>「前参谋」和中台<b>是同一个系统还是两个</b>？</td><td>决定对接要做几套、谁是主库</td></tr>
+        <tr><td>2</td><td>对方的<b>等级与状态枚举字典</b>是否已建好？</td><td>没建好导入会直接失败</td></tr>
+        <tr><td>3</td><td>是否启用<b>库位</b>（精确到货架位）？</td><td>影响一二期工作量与硬件投入</td></tr>
+        <tr><td>4</td><td>检测现场<b>网络是否稳定</b>？</td><td>决定离线优先方案的必要程度</td></tr>
+        <tr><td>5</td><td><b>标签打印机是什么型号、有没有网口？支持 TSPL 还是 ZPL？</b></td><td><b>决定打印链路走 9100 还是 Web Serial（Tab 7.3），是硬件接入的第一前提</b></td></tr>
+        <tr><td>6</td><td>现有货的<b>已分级结果是否已录入</b>在哪（Excel/纸单）？</td><td>决定要不要做历史数据迁移工具</td></tr>
+        <tr><td>7</td><td>检测台用什么操作系统（<b>macOS 还是 Windows</b>）？</td><td>macOS 标签机无驱动，链路选择与 Windows 不同（Tab 7.3）</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>11.5 与既有分级标准文档的关系</h2>
+    <p class="d">本方案的 5 档分级、报修分流、拆机件残值口径，<b>完全沿用《二手货品检测分级标准 V1.0》</b>，未做任何改动。两者关系：</p>
+    <div class="grid2">
+      <div>
+        <h3 style="color:#93b4e8">分级标准文档（业务侧）</h3>
+        <ul>
+          <li>给检测员看的<b>作业手册</b></li>
+          <li>判定条件、B/C 档清单、报修路径</li>
+          <li>可打印上墙、纸质留存</li>
+        </ul>
+      </div>
+      <div>
+        <h3 style="color:#6ed99a">管理系统（本方案，系统侧）</h3>
+        <ul>
+          <li>把标准<b>变成可执行规则</b>并自动计算</li>
+          <li>标准变更时改配置，<b>不改代码</b></li>
+          <li>标准里的每条判定都有<b>数据留痕与执行统计</b></li>
+        </ul>
+      </div>
+    </div>
+    <div class="note ok"><b>标准与系统必须同源：</b>建议把分级标准文档的判定条件，直接转成 <code class="mono">dict_grade_rule</code> 表的初始数据（脚本导入），<b>保证纸质标准与系统规则完全一致</b>。以后改标准，两边同步改，避免出现「纸上写 85%、系统判 82%」的混乱。</div>
+  </div>
+</div>
+
+</div>
+<script>
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>{
+  if(b.dataset.p==='print'){document.querySelectorAll('.page').forEach(p=>p.classList.add('printable'));window.print();setTimeout(()=>document.querySelectorAll('.page').forEach(p=>p.classList.remove('printable')),800);return;}
+  document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');document.getElementById(b.dataset.p).classList.add('on');window.scrollTo(0,0);
+}));
+document.querySelectorAll('.acc>.ah').forEach(h=>h.addEventListener('click',()=>h.parentElement.classList.toggle('on')));
+
+/* ==================== 标签生成 / 检测记录单（Tab 4） ==================== */
+const GC={S:'#22c55e',A:'#eab308',B:'#3b82f6',C:'#f97316',D:'#ef4444',W:'#94a3b8'};
+const GN={S:'完美·直出',A:'微瑕·调价',B:'小修·厂内',C:'报修·分流',D:'报废·拆件',W:'待测'};
+const GA={S:'直接上架',A:'降 8-15% 价',B:'送厂修工位',C:'线上/线下报修',D:'入拆机件仓',W:'待检测'};
+const CATN={PH:'手机',TB:'平板',NB:'笔记本',WT:'智能手表',HA:'小家电',OA:'其他家电',EP:'耳机/影音',GD:'游戏机',AC:'电脑配件',OT:'其他'};
+
+/* Code128 权威二进制模块表（107 条，已通过编解码往返 + SVG 反推解码验证） */
+const C128BAR=["11011001100","11001101100","11001100110","10010011000","10010001100","10001001100","10011001000","10011000100","10001100100","11001001000","11001000100","11000100100","10110011100","10011011100","10011001110","10111001100","10011101100","10011100110","11001110010","11001011100","11001001110","11011100100","11001110100","11101101110","11101001100","11100101100","11100100110","11101100100","11100110100","11100110010","11011011000","11011000110","11000110110","10100011000","10001011000","10001000110","10110001000","10001101000","10001100010","11010001000","11000101000","11000100010","10110111000","10110001110","10001101110","10111011000","10111000110","10001110110","11101110110","11010001110","11000101110","11011101000","11011100010","11011101110","11101011000","11101000110","11100010110","11101101000","11101100010","11100011010","11101111010","11001000010","11110001010","10100110000","10100001100","10010110000","10010000110","10000101100","10000100110","10110010000","10110000100","10011010000","10011000010","10000110100","10000110010","11000010010","11001010000","11110111010","11000010100","10001111010","10100111100","10010111100","10010011110","10111100100","10011110100","10011110010","11110100100","11110010100","11110010010","11011011110","11011110110","11110110110","10101111000","10100011110","10001011110","10111101000","10111100010","11110101000","11110100010","10111011110","10111101110","11101011110","11110101110","11010000100","11010010000","11010011100","1100011101011"];
+
+function code128(text){
+  const v=[];for(const ch of text){const c=ch.charCodeAt(0);if(c<32||c>126)throw new Error('条码仅支持 ASCII 可打印字符');v.push(c-32);}
+  let sum=104;for(let i=0;i<v.length;i++)sum+=v[i]*(i+1);
+  return [104,...v,sum%103,106].map(i=>C128BAR[i]).join('');
+}
+/* 模块宽度自适应：始终压进 60mm 标签可打印宽度（≈206px）内 */
+const BC_MAXW=206;
+function barcode(text,hpx){
+  const d=code128(text);
+  const mod=Math.max(1,Math.min(2,BC_MAXW/d.length));
+  const wpx=Math.floor(d.length*mod),H=hpx||42;
+  let bars='';
+  for(let i=0;i<d.length;i++){if(d[i]==='1')bars+='<rect x="'+(i*mod)+'" y="0" width="'+mod+'" height="'+H+'" fill="#000"/>';}
+  return '<svg width="'+wpx+'" height="'+(H+11)+'" viewBox="0 0 '+wpx+' '+(H+11)+'" xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">'+bars+'</svg>';
+}
+
+function renderLbl(){
+  const box=$('lblbox'); if(!box) return;
+  const cat=$('lt-cat').value.toUpperCase()||'OT';
+  const g=$('lt-grade').value;
+  const b=$('lt-batch').value||'2610';
+  const st=parseInt($('lt-serial').value,10)||0;
+  const n=parseInt($('lt-n').value,10)||6;
+  const d=new Date();
+  const ymd=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  let h='';
+  for(let i=0;i<n;i++){
+    if(st+i>9999){alert('流水号已超过 4 位上限（9999），必须更换批次号，否则会重号！');break;}
+    const ss=String(st+i).padStart(4,'0');
+    const dp='QC-'+cat+'-'+g+'-'+b+'-'+ss, cd='QC'+cat+g+b+ss;
+    const hint=g==='C'?'先看C1/C2':g==='D'?'勿流入可售仓':g==='B'?'不必送官方':g==='A'?'瑕疵须披露':g==='W'?'待检测':'功能全正常';
+    h+='<div class="lbl">'
+      +'<div class="top">'
+      +'<div class="lvbox" style="background:'+GC[g]+'">'+g+'</div>'
+      +'<div class="cat">'+(CATN[cat]||cat)+'<small>'+GN[g]+'</small></div>'
+      +'<div class="act">'+GA[g]+'<small>'+hint+'</small></div>'
+      +'</div>'
+      +'<div class="bc">'+barcode(cd,42)+'<div class="bt">'+dp+'</div></div>'
+      +'<div class="ft"><span>'+cd+'</span><span>'+ymd+'</span></div>'
+      +'</div>';
+  }
+  box.innerHTML=h;
+}
+['lt-cat','lt-serial','lt-batch','lt-grade','lt-n'].forEach(id=>{
+  const el=document.getElementById(id);
+  if(el){el.addEventListener('input',renderLbl);el.addEventListener('change',renderLbl);}
+});
+
+/* ---------- 检测记录单 ---------- */
+const CATS=['PH','TB','NB','WT','HA','OA','OT'];
+const CHK=['','√','×','/'];
+const CHK_LBL=['开机','充电','屏幕','触控','按键/接口','摄像','网络蓝牙','声学','外观','序列号核对'];
+let sheet=[];
+function initSheet(){
+  sheet=Array.from({length:20},()=>({code:'',cat:'PH',b:Array(10).fill(''),bh:'',note:'',grade:''}));
+  drawSheet();
+}
+function drawSheet(){
+  const tb=document.getElementById('tbody'); if(!tb) return;
+  let h='';
+  sheet.forEach((r,i)=>{
+    h+='<tr><td class="mono" style="color:var(--tx3)">'+(i+1)+'</td>'
+      +'<td><input value="'+String(r.code).replace(/"/g,'&quot;')+'" onchange="sheet['+i+'].code=this.value.toUpperCase();autoCode('+i+')"></td>'
+      +'<td><select onchange="sheet['+i+'].cat=this.value">'+CATS.map(c=>'<option '+(c===r.cat?'selected':'')+'>'+c+'</option>').join('')+'</select></td>';
+    r.b.forEach((v,j)=>{
+      h+='<td><select onchange="sheet['+i+'].b['+j+']=this.value">'+CHK.map(x=>'<option '+(x===v?'selected':'')+'>'+x+'</option>').join('')+'</select></td>';
+    });
+    h+='<td><input value="'+String(r.bh).replace(/"/g,'&quot;')+'" onchange="sheet['+i+'].bh=this.value"></td>'
+      +'<td><input value="'+String(r.note).replace(/"/g,'&quot;')+'" onchange="sheet['+i+'].note=this.value"></td>'
+      +'<td><select onchange="sheet['+i+'].grade=this.value"><option value=""></option>'+['S','A','B','C','D','?'].map(g=>'<option '+(g===r.grade?'selected':'')+'>'+g+'</option>').join('')+'</select></td></tr>';
+  });
+  tb.innerHTML=h;
+}
+/* 从编码反推品类与等级：只更新数据与对应单元格，不重绘表格（避免输入框失焦） */
+function autoCode(i){
+  const c=String(sheet[i].code||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+  if(c.length<9)return;
+  const row=document.getElementById('tbody').rows[i];
+  if(!row)return;
+  const cat=c.substr(2,2),g=c[4];
+  if(CATS.indexOf(cat)>=0){sheet[i].cat=cat;row.cells[2].querySelector('select').value=cat;}
+  if('SABCDW'.indexOf(g)>=0){sheet[i].grade=g;row.cells[15].querySelector('select').value=g;}
+}
+
+function exportCsv(){
+  const t=($('tester')||{}).value||'', dt=($('tdate')||{}).value||'', bt=($('batch')||{}).value||'';
+  const hd=['商品编码','显示编码','品类','品牌型号','等级','处置路径','检测结论','电池健康%','基准价','销售价残值','检测人','检测日期','报修渠道凭证','配件残值明细','外观瑕疵','含配件','实拍图'];
+  const gpath={S:'可售',A:'微瑕专区',B:'厂修',C:'报修',D:'拆机件','?':''};
+  const bn={};CATS.forEach(c=>bn[c]=CATN[c]);
+  const rows=[];
+  if(sheet.some(r=>r.code||r.grade)){
+    sheet.forEach(r=>{
+      if(!r.code&&!r.grade)return;
+      const code=String(r.code||'').replace(/[^A-Za-z0-9]/g,'').toUpperCase();
+      const g=(r.grade||code[4]||'W').toUpperCase();
+      const cat=(r.cat||code.substr(2,2)||'OT').toUpperCase();
+      const bad=r.b.map((v,j)=>v==='×'?(CHK_LBL[j]||('项'+j)):null).filter(Boolean);
+      const concl=bad.length?('不合格：'+bad.join('、')+(r.note?'；'+r.note:'')):(r.note||'全项通过');
+      rows.push([code,'QC-'+cat+'-'+g+'-'+(code.substr(5,4)||'0000'),bn[cat]||cat,'',g,gpath[g]||'',concl,r.bh,'','',t,dt,'','',r.note,'','']);
+    });
+  }else{
+    rows.push(['QCPHS26100012','QC-PH-S-2610-0012','手机','iPhone 13 128G','S','可售','全项通过，无使用痕迹','87','3280','3280',t,dt,'','','','是','4 张']);
+    rows.push(['QCPHA26100013','QC-PH-A-2610-0013','手机','华为 P40 128G','A','微瑕专区','功能全好，后盖右下 3mm 磕碰','83','1180','1050',t,dt,'','','后盖右下角磕碰，已拍照','是','6 张']);
+    rows.push(['QCOTD26100014','QC-OT-D-2610-0014','手机','小米 9 64G','D','拆机件','主板烧毁不可修，屏碎','','420','230',t,dt,'','主板 ¥120 / 电池 ¥80 / 摄像头 ¥30','','否','3 张']);
+  }
+  if(!rows.length){alert('还没有录入任何数据。\n可直接点「导出 CSV」拿到 3 行示例数据作为模板。');return;}
+  if(rows.some(r=>r[4]==='W')){
+    if(!confirm('存在等级为 W（待测）的记录，它们不能上架。\n是否继续导出？'))return;
+  }
+  const csv='\ufeff'+[hd].concat(rows).map(r=>r.map(x=>'"'+String(x==null?'':x).replace(/"/g,'""')+'"').join(',')).join('\r\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+  a.download='中台导入表_'+bt+'_'+(dt||'')+'.csv';
+  a.click();
+}
+
+const $=(id)=>document.getElementById(String(id).replace(/^#/,''));
+const HC=$('hw-out');
+const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function hwRow(ok,txt,note){return `<div style="padding:5px 0;border-bottom:1px solid #222832;display:flex;gap:9px;align-items:flex-start">
+  <span style="color:${ok===true?'#6ed99a':ok===false?'#f08a8a':'#e5c768'};font-weight:700;flex:none">${ok===true?'✓ 可用':ok===false?'✗ 不可用':'! 需确认'}</span>
+  <span><b style="color:#e9ebef">${txt}</b>${note?`<br><span style="color:#8b93a3;font-size:11.5px">${esc(note)}</span>`:''}</span></div>`;}
+
+function runHwCheck(){
+  const ua=navigator.userAgent;
+  const isSafari=/^((?!chrome|android).)*safari/i.test(ua);
+  const isMac=/Mac OS X|Macintosh/i.test(ua);
+  const hasSerial=typeof navigator.serial!=='undefined';
+  const hasUsb=typeof navigator.usb!=='undefined';
+  const isChromium=hasSerial||hasUsb;   // 实质判断：能否用 Web Serial / WebUSB
+  let h='<div style="border:1px solid #2a3040;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#0c0f15">';
+  h+='<b style="color:#93b4e8">① 浏览器与 API 能力</b>';
+  h+=hwRow(true,'当前浏览器：'+ua.slice(0,72)+'…');
+  h+=hwRow(isMac,'操作系统：macOS','⚠ 标签机在 macOS 基本无官方驱动，优先选网口机型走 9100');
+  h+=hwRow(hasSerial,'Web Serial API','可用于 USB 串口标签机（链路B）。仅 Chromium 支持');
+  h+=hwRow(hasUsb,'WebUSB API','可用于 USB 标签机（链路C）。仅 Chromium 支持');
+  h+=hwRow(!isSafari,'标签打印浏览器兼容性',isSafari?'⚠ Safari 永久不支持 Web Serial/WebUSB，标签只能走 9100 网口':'非 Safari，浏览器直连方案可用');
+  h+=hwRow(typeof localStorage!=='undefined','本地存储','PWA 离线暂存依赖此能力');
+  h+='</div>';
+
+  h+='<div style="border:1px solid #2a3040;border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#0c0f15">';
+  h+='<b style="color:#93b4e8">② 条码编码能力（打印用）</b>';
+  h+=hwRow(true,'TSPL 指令生成','标签条码由打印机硬件自行合成，无需前端传模块串');
+  h+='</div>';
+
+  h+='<div style="border:1px solid #2a3040;border-radius:8px;padding:12px 14px;background:#0c0f15">';
+  h+='<b style="color:#93b4e8">③ 打印链路判断</b>';
+  h+=hwRow(null,'链路A · RAW 9100（推荐）','<b>在下方填打印机 IP 后点「试连 9100」</b>。网口机型最稳，可多设备共享');
+  h+=hwRow(isChromium,'链路B · Web Serial',isChromium?'可用：需在弹窗中授权选择串口':'当前浏览器不支持，请用 Chrome/Edge 或改走 9100');
+  h+=hwRow(hasUsb,'链路C · WebUSB',hasUsb?'可用（兼容性最差，不推荐）':'当前浏览器不支持');
+  h+=hwRow(true,'链路D · CUPS','可用于 A4 检测单。<b>切勿用于标签</b>（尺寸复位、条码不可扫）');
+  h+='</div>';
+  HC.innerHTML=h;
+}
+
+function testScanSim(){
+  const out=[];
+  let buf='',last=0,firing=false;
+  const maxGap=45,minLen=8;
+  const h0=document.createElement('div');
+  h0.style.cssText='border:1px solid #2a3040;border-radius:8px;padding:12px 14px;background:#0c0f15';
+  h0.innerHTML='<b style="color:#6ed99a">扫码模拟测试</b><div id="sc" style="font-family:ui-monospace,Menlo,monospace;font-size:15px;letter-spacing:1px;padding:12px 0;color:#7dd3fc">等待扫码…（请用扫码枪扫任意位置）</div>';
+  HC.innerHTML='';HC.appendChild(h0);
+  const el=document.getElementById('sc');
+  const h=e=>{
+    const k=e.key;
+    if(k==='Enter'||k==='Tab'){
+      if(firing&&buf.length>=minLen){
+        el.innerHTML='✅ 识别成功：<b>'+esc(buf)+'</b>（长度 '+buf.length+'，确认是扫码事件）';
+        el.style.color='#6ed99a';
+      }else if(firing){
+        el.innerHTML='⚠ 序列太短（'+buf.length+'），已忽略';el.style.color='#e5c768';
+      }
+      firing=false;buf='';e.preventDefault();return;
+    }
+    if(k.length!==1)return;
+    const now=e.timeStamp||performance.now();
+    if(firing&&now-last>maxGap){
+      el.innerHTML='检测到人工输入（间隔 '+Math.round(now-last)+'ms），已重置';
+      el.style.color='#e5c768';firing=false;buf='';
+    }
+    if(!firing){firing=true;buf='';}
+    buf+=k;last=now;
+    el.innerHTML='接收中… '+esc(buf);
+    el.style.color='#7dd3fc';
+  };
+  document.addEventListener('keydown',h,true);
+  setTimeout(()=>{document.removeEventListener('keydown',h,true);
+    if(firing){el.innerHTML='（已停止监听）';}},15000);
+}
+
+async function testTsplOut(){
+  HC.innerHTML='<div style="border:1px solid #2a3040;border-radius:8px;padding:12px 14px;background:#0c0f15"><b style="color:#93b4e8">TSPL 指令预览</b><div id="tp" style="font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#7dd3fc;white-space:pre;margin:10px 0"></div>'
+    +'<input id="pip" placeholder="打印机 IP，如 192.168.1.50" style="width:190px"><button class="btn" id="tgo" style="padding:6px 13px;margin-left:8px">试连 9100</button><div id="tr" style="margin-top:10px"></div></div>';
+  const t=['SIZE 60 mm, 40 mm','GAP 2 mm, 0 mm','DIRECTION 1','CLS',
+    'TEXT 20,25,"3",0,1,1,"S"','TEXT 90,25,"2",0,1,1,"手机"',
+    'TEXT 20,45,"1",0,1,1,"QC-PH-S-2610-0012"',
+    'BARCODE 20,52,"128",42,1,0,2,2,"QCPHS26100012"','PRINT 1,1'].join('\n');
+  document.getElementById('tp').textContent=t;
+  document.getElementById('tgo').onclick=()=>{
+    const ip=document.getElementById('pip').value.trim();
+    const tr=document.getElementById('tr');
+    if(!ip){tr.innerHTML='<span style="color:#f08a8a">请先填打印机 IP</span>';return;}
+    tr.innerHTML='<span style="color:#e5c768">浏览器出于安全限制无法直接打开 TCP 连接（需后端 socket 转发）。<br><br>'
+      +'<b>本机快速验证：</b>在终端执行 <code class="mono">nc '+esc(ip)+' 9100</code> 后粘贴上方指令即可试打。<br>'
+      +'<b>正式方案：</b>由后端服务建立 socket 发送这串指令（见 7.3 链路A），可多设备共享。</span>';
+  };
+}
+
+/* ==================== 初始化 ==================== */
+initSheet();
+renderLbl();
+(function(){
+  const td=document.getElementById('tdate');
+  if(td) td.value=new Date().toISOString().slice(0,10);
+  const lb=document.getElementById('lt-batch');
+  if(lb&&!lb.value) lb.value=new Date().toISOString().slice(2,4)+new Date().toISOString().slice(5,7);
+  const bt=document.getElementById('batch');
+  if(bt&&!bt.value){const s=lb?lb.value:'2610';bt.value=s+'-01';}
+})();
+</script>
+</body>
+</html>

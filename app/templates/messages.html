@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}飞书消息{% endblock %}
+{% block heading %}飞书消息{% endblock %}
+{% block sub %}共 {{ total }} 条消息{% endblock %}
+{% block actions %}
+  <button class="btn" data-sync data-days="1">同步最近 1 天</button>
+  <button class="btn primary" data-sync data-days="7">同步最近 7 天</button>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="row-between" style="margin-bottom:12px">
+    <div class="chips">
+      <span class="chip">待解析 <span class="n">{{ counts.pending }}</span></span>
+      <span class="chip">已处理 <span class="n">{{ counts.parsed }}</span></span>
+      <span class="chip">已过滤 <span class="n">{{ counts.filtered }}</span></span>
+      <span class="chip">失败 <span class="n">{{ counts.failed }}</span></span>
+      {% if counts.duplicate %}<span class="chip" title="内容与已归档订单完全一致的重复消息">重复内容 <span class="n">{{ counts.duplicate }}</span></span>{% endif %}
+      <span class="chip">已回执 <span class="n">{{ notify_counts.sent }}</span></span>
+      <span class="chip">待补发 <span class="n">{{ notify_counts.held }}</span></span>
+      <span class="chip">模板消息 <span class="n">{{ kind_counts.template }}</span></span>
+      <span class="chip">订单截图 <span class="n">{{ kind_counts.screenshot }}</span></span>
+      <span class="chip" title="不看固定格式，按动作意图识别出退单 / 撤单的消息">意图消息 <span class="n">{{ kind_counts.intent }}</span></span>
+      <span class="chip">其他 <span class="n">{{ kind_counts.other }}</span></span>
+    </div>
+    <form method="post" action="/messages/reparse" style="display:inline">
+      <button class="btn sm" data-confirm="将用当前规则重新解析所有已忽略/失败的消息，继续？">重解析忽略与失败的消息</button>
+    </form>
+  </div>
+
+  <form class="filters" method="post" action="/messages/sync">
+    <div class="field grow"><label>群 chat_id</label>
+      <select name="chat_id">
+        <option value="">选择已配置的群…</option>
+        {% for c in chats %}<option value="{{ c.chat_id }}">{{ c.chat_name or c.chat_id }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field" style="min-width:220px"><label>或手动输入 chat_id</label><input type="text" name="chat_id_manual" placeholder="oc_xxxx"></div>
+    <div class="field"><label>回溯天数</label><input type="number" name="days" value="3" min="1" max="60"></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">开始同步</button></div>
+  </form>
+  {% if not feishu_ready %}<div class="note warn" style="margin-top:10px">未配置飞书凭证，同步不可用。</div>{% endif %}
+  <div class="note muted" style="margin-top:10px">
+    <span>
+      归档处理「订单模板消息」与「闲鱼订单截图」；其余消息按<b>动作意图</b>识别：说到「退单 / 退货 / 不要了…」
+      按退单处理，说到「撤单 / 取消订单…」按撤单处理，群里撤回订单消息则自动置为已撤单；
+      确实无关的闲聊才过滤（保留记录但不解析、不回执）。
+      分类不准时直接在行内标「不是订单 / 其实是订单」，系统会记住这类写法（见下方「解析策略」）。
+      回执模式：<b>{{ {'reply':'群内回复','direct':'私信发送人','off':'关闭'}.get(notify_mode, notify_mode) }}</b>。
+    </span>
+  </div>
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/messages">
+    <div class="field"><label>解析状态</label>
+      <select name="status">
+        <option value="">全部</option>
+        {% for v,l in [('pending','待解析'),('parsed','已处理'),('filtered','已过滤'),('ignored','已忽略'),('failed','失败'),('duplicate','重复内容')] %}
+        <option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>消息类别</label>
+      <select name="kind">
+        <option value="">全部</option>
+        {% for v,l in [('template','模板消息'),('screenshot','订单截图'),('intent','意图消息（退单/撤单）'),('other','其他/已过滤')] %}
+        <option value="{{ v }}" {{ 'selected' if filters.kind == v }}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>群</label>
+      <select name="chat_id">
+        <option value="">全部</option>
+        {% for c in chats %}<option value="{{ c.chat_id }}" {{ 'selected' if filters.chat_id == c.chat_id }}>{{ c.chat_name or c.chat_id }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn">筛选</button></div>
+  </form>
+</div>
+
+{# 解析策略（人工学习）：消息行里标「不是订单 / 其实是订单」后，系统从这里学话术，
+   下一条同类通告直接按策略判定，不用再一条条人工标 #}
+<div class="card" id="parse-policy">
+  <div class="row-between">
+    <h2 style="margin:0"><i class="bi bi-mortarboard" aria-hidden="true"></i> 解析策略（人工学习）</h2>
+    <div class="chips">
+      <span class="chip" title="人工确认「不是订单」的消息数">标记非订单 <span class="n">{{ policy_stats.feedback_not_order }}</span></span>
+      <span class="chip" title="人工确认「其实是订单」的消息数">标记是订单 <span class="n">{{ policy_stats.feedback_order }}</span></span>
+      <span class="chip">排除词 <span class="n">{{ policy_stats.phrase_exclude }}</span></span>
+      <span class="chip">订单特征词 <span class="n">{{ policy_stats.phrase_force }}</span></span>
+      <span class="chip">退单话术 <span class="n">{{ policy_stats.phrase_refund }}</span></span>
+    </div>
+  </div>
+
+  <div class="note muted" style="margin-top:10px">
+    在下面消息行的操作列标「不是订单」：误判归档的订单会撤单留档（不参与统计），并记住这条消息的说法；
+    标「其实是订单」：立刻按订单重新解析归档，并记住这类写法；
+    标「其实是退单」（模板消息首行写「此单退」这类）：撤掉误建的订单，再按手机号 / 收货人 / 地址
+    找到原订单标记退单 —— 退单不新建订单，也记住这句话的说法。
+    排除词只在消息不像订单模板时生效（避免误伤真订单的备注）；学到的话术可以在这里手动增删，
+    每条策略都记着来源与操作人。
+  </div>
+
+  <div style="margin-top:14px">
+    <div class="muted"><b>排除词</b>（命中即判「不是订单」）</div>
+    <div class="chips" style="margin-top:6px">
+      {% for p in policy_exclude %}
+      <span class="chip" title="来源：{{ '人工标记学到' if p.source == 'learn' else '手工添加' }}{% if p.operator %} · {{ p.operator }}{% endif %}">
+        {{ p.phrase }}
+        <form method="post" action="/messages/policy/phrase/{{ p.id }}/delete" style="display:inline">
+          <button class="btn sm" data-confirm="删除排除词「{{ p.phrase }}」？删除后同类消息不再自动过滤。">×</button>
+        </form>
+      </span>
+      {% else %}<span class="muted">还没有排除词：在消息行里标一条「不是订单」，系统会自动学到</span>{% endfor %}
+    </div>
+  </div>
+
+  <div style="margin-top:12px">
+    <div class="muted"><b>订单特征词</b>（命中即判「是订单」）</div>
+    <div class="chips" style="margin-top:6px">
+      {% for p in policy_force %}
+      <span class="chip" title="来源：{{ '人工标记学到' if p.source == 'learn' else '手工添加' }}{% if p.operator %} · {{ p.operator }}{% endif %}">
+        {{ p.phrase }}
+        <form method="post" action="/messages/policy/phrase/{{ p.id }}/delete" style="display:inline">
+          <button class="btn sm" data-confirm="删除订单特征词「{{ p.phrase }}」？删除后这类消息不再自动判为订单。">×</button>
+        </form>
+      </span>
+      {% else %}<span class="muted">还没有订单特征词：漏判的模板消息标一条「其实是订单」即可学到</span>{% endfor %}
+    </div>
+  </div>
+
+  <div style="margin-top:12px">
+    <div class="muted"><b>退单话术</b>（命中即按退单处理：不新建订单，去存量订单里找原单退掉）</div>
+    <div class="chips" style="margin-top:6px">
+      {% for p in policy_refund %}
+      <span class="chip" title="来源：{{ '人工标记学到' if p.source == 'learn' else '手工添加' }}{% if p.operator %} · {{ p.operator }}{% endif %}">
+        {{ p.phrase }}
+        <form method="post" action="/messages/policy/phrase/{{ p.id }}/delete" style="display:inline">
+          <button class="btn sm" data-confirm="删除退单话术「{{ p.phrase }}」？删除后这类消息不再自动按退单处理。">×</button>
+        </form>
+      </span>
+      {% else %}<span class="muted">还没有退单话术：把「此单退」这类漏判的模板消息标一条「其实是退单」即可学到</span>{% endfor %}
+    </div>
+  </div>
+
+  <form class="filters" method="post" action="/messages/policy/phrase" style="margin-top:12px">
+    <div class="field grow"><label>手动加一条话术</label><input type="text" name="phrase" placeholder="例如：全新未拆封 / 收货人 / 此单退"></div>
+    <div class="field"><label>类型</label>
+      <select name="kind">
+        <option value="exclude">排除词（命中判「不是订单」）</option>
+        <option value="force">订单特征词（命中判「是订单」）</option>
+        <option value="refund">退单话术（命中按退单处理）</option>
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn">添加</button></div>
+  </form>
+
+  {% if policy_feedbacks %}
+  <details style="margin-top:12px">
+    <summary class="muted" style="cursor:pointer">最近的人工标记记录（{{ policy_feedbacks|length }} 条）</summary>
+    <div class="table-wrap" style="margin-top:8px">
+      <table class="list-nowrap">
+        <thead><tr><th>时间</th><th>消息</th><th>结论</th><th>学到的话术</th><th>操作人</th><th></th></tr></thead>
+        <tbody>
+        {% for f in policy_feedbacks %}
+          <tr>
+            <td class="nowrap muted">{{ human_time(f.created_at) }}</td>
+            <td title="{{ f.text }}">{{ f.text[:60] }}</td>
+            <td>
+              <span class="badge {{ 'state-canceled' if f.label == 'not_order' else ('state-refunded' if f.label == 'refund' else 'state-shipped') }}">{{ policy_labels.get(f.label, f.label) }}</span>
+              {% if f.order_id %}<span class="muted">#{{ f.order_id }}</span>{% endif %}
+            </td>
+            <td>{{ (policy_feedback_phrases(f) | join('、')) or '-' }}</td>
+            <td class="nowrap">{{ f.operator or '-' }}</td>
+            <td>
+              <form method="post" action="/messages/policy/feedback/{{ f.id }}/delete" style="display:inline">
+                <button class="btn sm" data-confirm="撤销这次人工标记？学到的话术会保留（可在上面单独删）。">撤销</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+</div>
+
+<div class="card flush">
+  {% if messages %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th class="num">序号</th><th>发送时间</th><th>发送人</th><th>所在群</th><th>类别</th><th>内容</th><th>解析</th><th>过滤原因</th><th>回执</th><th>订单</th><th></th></tr></thead>
+      <tbody>
+      {% for m in messages %}
+        <tr>
+          {# 序号：跨页连续（第 2 页从 31 开始），一眼看出这是第几条消息 #}
+          <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+          <td class="nowrap muted">{{ human_time(m.msg_time) }}</td>
+          <td title="{{ m.sender_id }}">{% if m.sender_name %}{{ m.sender_name }}{% else %}<span class="muted">{{ m.sender_id[:10] if m.sender_id else '-' }}</span>{% endif %}</td>
+          <td class="nowrap">{{ m.chat_name or m.chat_id or '-' }}</td>
+          <td>
+            {% set kinds = {'template':'模板消息','screenshot':'订单截图','intent':'意图消息','other':'其他'} %}
+            <span class="badge {{ m.kind or 'muted' }}">{{ kinds.get(m.kind, m.msg_type) }}</span>
+            {# 意图识别：不看固定格式，按动作意图判断（退单 / 撤单） #}
+            {% if m.intent == 'refund' %}<span class="badge state-refunded" title="识别到退单意图">退单意图</span>
+            {% elif m.intent == 'cancel' %}<span class="badge state-canceled" title="识别到撤单意图">撤单意图</span>{% endif %}
+            {% if m.is_recalled %}<span class="badge recalled" title="这条消息在群里已被撤回，对应订单只留档">已撤回</span>{% endif %}
+          </td>
+          <td>
+            {% if m.msg_type == 'image' %}
+              <span class="muted">（{{ '订单截图' if m.kind == 'screenshot' else '图片' }}）</span>
+            {% else %}
+              <div style="max-width:560px;white-space:pre-wrap">{{ m.raw_text[:200] or '(无文本)' }}</div>
+            {% endif %}
+          </td>
+          <td>
+            {% set labels = {'pending':'待解析','parsed':'已处理','ignored':'已忽略','filtered':'已过滤','failed':'失败','duplicate':'重复未变'} %}
+            <span class="badge {{ 'muted' if m.parse_status == 'duplicate' else m.parse_status }}">{{ labels.get(m.parse_status, m.parse_status) }}</span>
+            {% if m.parse_status == 'duplicate' %}<div class="muted" title="内容与已归档订单完全一致，未重复归档">已收到过，未重复归档</div>{% endif %}
+            {% if m.parse_error %}<div class="muted">{{ m.parse_error[:80] }}</div>{% endif %}
+          </td>
+          <td>
+            {# 历史消息没有存原因：按解析状态兜一句人话 #}
+            {% set fallback_reason = {
+                 'duplicate': '重复发送相同内容：与已归档订单完全一致，未重复归档',
+                 'filtered': '不是订单模板消息，也没有识别到退单 / 撤单意图：已过滤',
+                 'failed': '解析异常，详见「解析」列的报错',
+                 'ignored': '已忽略（人工标记）'
+              }.get(m.parse_status, '') %}
+            {% set reason = m.intent_note or m.ignore_reason or fallback_reason %}
+            {% if reason %}<span class="muted" title="{{ reason }}">{{ reason[:60] }}</span>{% else %}<span class="muted">-</span>{% endif %}
+          </td>
+          <td>
+            {% set nl = {'sent':'已回执','failed':'回执失败','skipped':'未开启','held':'待补发'} %}
+            {% if m.notify_status %}
+              <span class="badge {{ 'parsed' if m.notify_status == 'sent' else ('failed' if m.notify_status == 'failed' else ('held' if m.notify_status == 'held' else 'muted')) }}">{{ nl.get(m.notify_status, m.notify_status) }}</span>
+              {% if m.notify_error %}<div class="muted">{{ m.notify_error[:60] }}</div>{% endif %}
+            {% else %}<span class="muted">-</span>{% endif %}
+          </td>
+          <td>
+            {% if m.order_id %}<a class="btn sm" href="/orders/{{ m.order_id }}">#{{ m.order_id }}</a>
+            {% else %}<span class="muted">-</span>{% endif %}
+          </td>
+          <td class="nowrap">
+            {# 人工标记：已归档的可以判「不是订单」（撤单留档 + 学排除词）；
+               被过滤掉的可以判「其实是订单」（重新归档 + 学订单特征词） #}
+            {% if m.order_id %}
+              {% if orders_meta.get(m.order_id) %}
+                <span class="muted" title="已人工标记为「不是订单」，订单已撤单留档、不参与统计">已撤单</span>
+              {% else %}
+                <form method="post" action="/messages/{{ m.message_id }}/mark-not-order" style="display:inline">
+                  <button class="btn sm" data-confirm="确认这条消息不是订单？误判归档的订单会撤单留档（不参与统计），并从这条消息学话术。">不是订单</button>
+                </form>
+                {# 模板消息首行写「此单退」这类：按收货人 / 手机号 / 地址找原订单退掉，不新建订单 #}
+                <form method="post" action="/messages/{{ m.message_id }}/mark-refund" style="display:inline">
+                  <button class="btn sm" data-confirm="确认这条消息其实是退单？系统会撤掉误建的订单，再按手机号 / 收货人 / 地址找原订单标记退单，并记住这句话的说法。">其实是退单</button>
+                </form>
+                <form method="post" action="/messages/{{ m.message_id }}/notify" style="display:inline">
+                  <button class="btn sm" data-confirm="向发送人补发「已收到并处理」回执？">补发回执</button>
+                </form>
+              {% endif %}
+            {% else %}
+              <form method="post" action="/messages/{{ m.message_id }}/mark-order" style="display:inline">
+                <button class="btn sm" data-confirm="确认这条消息其实是订单？系统会按订单重新解析归档，并记住这类写法。">其实是订单</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<div class="empty">暂无消息</div>{% endif %}
+</div>
+
+{{ pager(page, pages, '/messages', filters, total) }}
+{% endblock %}

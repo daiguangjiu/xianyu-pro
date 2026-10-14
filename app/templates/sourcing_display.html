@@ -1,0 +1,76 @@
+{# 渔货栈货源展示基数：卡片「X 家上架 / 已售 N」垫的那份基数（2026-10-13） #}
+{% extends "base.html" %}
+{% block title %}展示基数{% endblock %}
+{% block heading %}展示基数{% endblock %}
+{% block sub %}渔货栈货源广场卡片上的「X 家上架」与「已售 N」：显示的是「基数 + 真实数量」，真实数量一个不动{% endblock %}
+{% block actions %}
+  <a class="btn" href="/sourcing">渔货栈发布管理</a>
+  <a class="btn" href="/purchase-nodes">采购节点</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>这两个数是怎么算出来的</b>
+      <div class="scope-note">改完渔货栈最多 60 秒生效</div>
+    </div>
+    <p class="help" style="margin:0;max-width:760px;">
+      ① <b>「X 家上架」</b>＝ <b>这里的基数</b> ＋ <b>真实铺过这款货的店铺数</b>
+      （铺货记录按账号去重，一个账号算一家；平台级记录不算）。<br>
+      ② <b>「已售 N」</b>＝ <b>这里的基数</b> ＋ <b>这款货真实成交的采购件数</b>。<br>
+      ③ 基数<b>只加在卡片展示上</b>：排序、热销榜计数、商品详情页的「在售闲鱼号」
+      用的都是真实值，一点不虚 —— 运营自己看到的数永远是准的。<br>
+      ④ 全站一份配置，不按商品、不按人分开配；留空 / 填 0 就是不加基数。
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="post" action="/sourcing-display">
+    <div class="field-row auto">
+      <div class="field">
+        <label>上架家数基数（家）</label>
+        <input type="number" name="listed_shops_base" min="0" max="{{ base_max }}"
+               value="{{ config.listed_shops_base }}" placeholder="0">
+        <p class="help">卡片「{{ config.listed_shops_base }} 家上架」里的那部分基数；真实店铺数照旧另算</p>
+      </div>
+      <div class="field">
+        <label>已售基数（件）</label>
+        <input type="number" name="sold_base" min="0" max="{{ base_max }}"
+               value="{{ config.sold_base }}" placeholder="0">
+        <p class="help">卡片「已售 {{ config.sold_base }}」里的那部分基数；真实销量照旧另算</p>
+      </div>
+      <div class="field">
+        <label>备注（选填）</label>
+        <input type="text" name="note" maxlength="255" value="{{ config.note }}"
+               placeholder="如：新站冷启动，先垫 10 家">
+        <p class="help">只给内部看，不出现在渔货栈页面上</p>
+      </div>
+    </div>
+
+    <div class="row-between" style="margin-top:12px;">
+      <div class="scope-note">
+        {% if config.updated_by or config.updated_at %}
+          最近由 <b>{{ config.updated_by or '—' }}</b> 修改
+          {% if config.updated_at %}（{{ config.updated_at | dt('%Y-%m-%d %H:%M') }}）{% endif %}
+        {% else %}
+          还没人改过
+        {% endif %}
+      </div>
+      <button class="btn primary" type="submit">保存基数</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <b>现在渔货栈会怎么看</b>
+  <p class="help" style="margin:6px 0 0;">
+    比如一款货真实被 <b>1</b> 家店铺铺过、真实卖出 <b>0</b> 件，这里分别配 <b>{{ config.listed_shops_base }}</b>
+    与 <b>{{ config.sold_base }}</b> —— 卡片上就是
+    <b>{{ config.listed_shops_base + 1 }} 家上架</b> · <b>已售 {{ config.sold_base }}</b>，
+    而商品详情页「在售闲鱼号」仍然是真实的 <b>1</b> 个。
+  </p>
+</div>
+
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}撤单回收站{% endblock %}
+{% block heading %}撤单回收站{% endblock %}
+{% block sub %}群消息撤回 / 撤掉的订单收在这里：只留档、不参与统计，确认误撤的可一键恢复{% endblock %}
+{% block actions %}
+  <a class="btn" href="/orders"><i class="bi bi-arrow-left" aria-hidden="true"></i> 返回订单管理</a>
+{% endblock %}
+{% block content %}
+
+<div class="card flush">
+  {% if orders %}
+  <div class="table-wrap">
+    <table class="list-nowrap">
+      <thead>
+        <tr>
+          <th class="num">序号</th><th>订单号</th><th>产品</th><th>收货人</th>
+          <th class="num">售价</th><th class="num">成本</th><th>撤单来源</th><th>撤单时间</th><th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for o in orders %}
+        <tr class="row-recalled">
+          <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+          <td class="mono"><a href="/orders/{{ o.id }}">{{ o.order_no }}</a></td>
+          <td>{{ o.product_name or '-' }}{% if o.spec %} <span class="muted">{{ o.spec }}</span>{% endif %}</td>
+          <td>{{ o.receiver_name or '-' }} <span class="muted mono">{{ o.receiver_phone or '-' }}</span></td>
+          <td class="num">¥{{ money(o.sale_amount) }}</td>
+          <td class="num">¥{{ money(o.cost_amount) }}</td>
+          <td>
+            {{ o.recall_reason or '手工标记' }}
+            {% if o.recalled_by %}<span class="muted">· {{ o.recalled_by }}</span>{% endif %}
+          </td>
+          <td class="nowrap muted">{{ human_time(o.recalled_at or o.updated_at) }}</td>
+          {# 按钮包一层 div：.row-actions 挂在 td 上会让 td 变成 flex 容器，行高与下边框会和同行错位 #}
+          <td class="nowrap">
+            <div class="row-actions">
+              <form method="post" action="/orders/{{ o.id }}/restore">
+                <button class="btn sm primary" data-confirm="确认恢复为正常订单？恢复后该订单重新参与统计与后续流程">恢复正常</button>
+              </form>
+              <a class="btn sm" href="/orders/{{ o.id }}">详情</a>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">回收站是空的：目前没有被撤单的订单。</div>
+  {% endif %}
+</div>
+
+<div class="note muted">
+  这里的订单<b>不参与</b>首页统计、推单与结算；确认是系统误判（比如群里撤回后已重发）的，点「恢复正常」即可重新回到订单管理与统计里。
+</div>
+
+{{ pager(page, pages, '/orders/recycle', filters, total) }}
+{% endblock %}

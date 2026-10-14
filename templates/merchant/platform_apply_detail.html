@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}入驻申请 #{{ apply.id }} · 审核台{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>入驻申请 #{{ apply.id }}</h1>
+    <span class="page-subtitle">
+      {{ apply.name }} · {{ apply.subject_type_text }} ·
+      提交于 {{ apply.submitted_at | dt('%Y-%m-%d %H:%M') if apply.submitted_at else '—' }}
+    </span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/self/platform/applies" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+  </div>
+</div>
+
+<div class="row g-3">
+  {# ====== 资质资料 ====== #}
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-file-earmark-text icon"></i> 主体资质</div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>商家全称</dt><dd>{{ apply.name }}</dd>
+          <dt>对外简称</dt><dd>{{ apply.short_name or '—' }}</dd>
+          <dt>主体类型</dt><dd>{{ apply.subject_type_text }}</dd>
+          <dt>营业执照号</dt><dd>{{ apply.license_no or '—' }}</dd>
+          <dt>法人 / 经营者</dt><dd>{{ apply.legal_person or '—' }}</dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: var(--s-3);">
+      <div class="card-header"><i class="bi bi-person-lines-fill icon"></i> 联系与经营</div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>联系人</dt><dd>{{ apply.contact_name or '—' }}</dd>
+          <dt>联系电话</dt><dd>{{ apply.contact_phone or '—' }}</dd>
+          <dt>邮箱</dt><dd>{{ apply.contact_email or '—' }}</dd>
+          <dt>所在地区</dt><dd>{{ apply.province or '' }}{{ apply.city or '' }}{{ apply.address or '—' }}</dd>
+          <dt>经营类目</dt>
+          <dd>
+            {% if apply.categories %}
+              {% for c in apply.categories %}<span class="badge" style="margin-right:4px;">{{ c }}</span>{% endfor %}
+            {% else %}—{% endif %}
+          </dd>
+        </dl>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: var(--s-3);">
+      <div class="card-header"><i class="bi bi-bank icon"></i> 结算账户</div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>开户银行</dt><dd>{{ apply.settle_bank_name or '—' }}</dd>
+          <dt>账户名称</dt><dd>{{ apply.settle_account_name or '—' }}</dd>
+          <dt>银行账号</dt><dd>{{ apply.settle_bank_account or '—' }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  {# ====== 审核操作 ====== #}
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-header">
+        <i class="bi bi-shield-check icon"></i> 审核结论
+      </div>
+      <div class="card-body">
+        <dl class="kv" style="margin-bottom: var(--s-3);">
+          <dt>当前状态</dt>
+          <dd>
+            {% if apply.status == 'pending' %}
+              <span class="badge" style="background:#fff7e6;color:#d46b08;">待审核</span>
+            {% elif apply.status == 'approved' %}
+              <span class="badge" style="background:#f6ffed;color:#389e0d;">已通过</span>
+            {% else %}
+              <span class="badge" style="background:#fff1f0;color:#cf1322;">已驳回</span>
+            {% endif %}
+          </dd>
+          <dt>申请人账号</dt><dd>{{ applicant.phone if applicant else '—' }}</dd>
+          <dt>审核人</dt><dd>{{ apply.reviewed_by or '—' }}</dd>
+          <dt>审核时间</dt><dd>{{ apply.reviewed_at | dt('%Y-%m-%d %H:%M') if apply.reviewed_at else '—' }}</dd>
+        </dl>
+
+        {% if apply.review_note %}
+        <div class="alert {% if apply.status == 'rejected' %}alert-danger{% else %}alert-success{% endif %}">
+          <strong>审核意见：</strong>{{ apply.review_note }}
+        </div>
+        {% endif %}
+
+        {% if error %}
+        <div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> {{ error }}</div>
+        {% endif %}
+
+        <form method="post" action="/self/platform/applies/{{ apply.id }}/review">
+          <div class="field" style="margin-bottom: var(--s-3);">
+            <label>审核意见（驳回时必填）</label>
+            <textarea name="review_note" rows="3" placeholder="如：营业执照号与主体名称不一致，请核对后重新提交">{{ apply.review_note or '' }}</textarea>
+          </div>
+          <div class="field" style="margin-bottom: var(--s-3);">
+            <label>审核人</label>
+            <input type="text" name="reviewed_by" value="{{ apply.reviewed_by or '平台运营' }}">
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" name="action" value="approve" class="btn btn-primary">
+              <i class="bi bi-check-circle"></i> 通过并开通
+            </button>
+            <button type="submit" name="action" value="reject" class="btn btn-outline-secondary" style="color:var(--c-danger);border-color:var(--c-danger);">
+              <i class="bi bi-x-circle"></i> 驳回
+            </button>
+          </div>
+        </form>
+
+        <p class="help" style="margin-top: var(--s-3);">
+          通过后自动创建商家主体、开通商家端后台并初始化钱包（平台代收代付模式）
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

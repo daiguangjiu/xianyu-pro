@@ -1,0 +1,158 @@
+{# 发货统计（子页面，2026-10-11）：供应链发货页把「按天 / 按月走势」单独搬到这里，
+   筛选条件与列表页完全同一套（关键词 / 供应商 / 转账 / 回单 / 时间口径 / 起止日期 / 含已关闭）。 #}
+{% extends "base.html" %}
+{% block title %}发货统计{% endblock %}
+{% block heading %}{{ heading }}{% endblock %}
+{% block sub %}{{ sub }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="{{ back_url }}"><i class="bi bi-arrow-left"></i> 返回供应链发货</a>
+  <a class="btn" href="{{ export_url }}"><i class="bi bi-download"></i> 导出 CSV</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <form class="filters" method="get" action="/batches/shipping-stats">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="订单号 / 产品名称 / 收货人 / 手机号 / 物流单号">
+    </div>
+    <div class="field"><label>供应商</label>
+      <select name="supplier">
+        <option value="">全部</option>
+        {% for s in suppliers %}
+        <option value="{{ s }}" {{ 'selected' if filters.supplier == s }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>是否转账</label>
+      <select name="transfer">
+        <option value="">全部</option>
+        <option value="paid" {{ 'selected' if filters.transfer == 'paid' }}>已转账</option>
+        <option value="unpaid" {{ 'selected' if filters.transfer == 'unpaid' }}>未转账</option>
+      </select>
+    </div>
+    <div class="field"><label>物流单号</label>
+      <select name="tracking">
+        <option value="">全部</option>
+        <option value="none" {{ 'selected' if filters.tracking == 'none' }}>未填写</option>
+        <option value="has" {{ 'selected' if filters.tracking == 'has' }}>已填写</option>
+      </select>
+    </div>
+    <div class="field"><label>时间口径</label>
+      <select name="date_field" title="按哪个时间筛：推单时间 = 推给供应商的时间，发货时间 = 供应商发货、单号回填的时间">
+        {% for k, v in time_fields.items() %}
+        <option value="{{ k }}" {{ 'selected' if date_field == k }}>{{ v[0] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>起始日期</label>
+      <input type="date" name="date_from" value="{{ filters.date_from }}" max="{{ today }}">
+    </div>
+    <div class="field"><label>结束日期</label>
+      <input type="date" name="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="field"><label>已关闭完成</label>
+      <label class="check" title="已关闭完成的订单钱货都处理完了，默认不统计；要翻旧账就勾上">
+        <input type="checkbox" name="show_closed" value="1" {{ 'checked' if show_closed }}> 统计进去（{{ closed_count }}）
+      </label>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+    <input type="hidden" name="group" value="{{ group }}">
+  </form>
+  <div class="batch-quick" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px">
+    <span class="muted">快捷时间：</span>
+    {% for key, label in range_presets.items() %}
+    <a class="btn sm {{ 'primary' if range_key == key }}"
+       href="/batches/shipping-stats?date_field={{ date_field }}&group={{ group }}&date_from={{ range_links[key][0] }}&date_to={{ range_links[key][1] }}">{{ label }}</a>
+    {% endfor %}
+    {% if has_date %}<a class="btn sm" href="/batches/shipping-stats?date_field={{ date_field }}&group={{ group }}">全部时间</a>{% endif %}
+    <a class="btn sm" href="/batches/shipping-stats">清除全部条件</a>
+  </div>
+</div>
+
+{# —— 当前筛选下的汇总：与下面的走势表是同一批单（统计走 SQL 汇总，不会被截断）—— #}
+<div class="card">
+  <div class="card-head">
+    <div>
+      <b>当前筛选统计</b>
+      <span class="muted">
+        {% if has_date %}按{{ time_fields[date_field][0] if date_field in time_fields else '推单时间' }} {{ filters.date_from or '最早' }} ~ {{ filters.date_to or '今天' }}
+        {% else %}全部时间{% endif %}
+        {% if show_closed %}（含已关闭完成）{% else %}（不含已关闭完成）{% endif %}
+      </span>
+    </div>
+  </div>
+  <div class="grid grid-4" style="margin-top:8px">
+    <div class="stat">
+      <div class="label">发货单数</div>
+      <div class="value">{{ stats.count }} <span class="hint">单</span></div>
+      <div class="hint">已发货 {{ stats.shipped }} · 待回单 {{ stats.pending }}</div>
+    </div>
+    <div class="stat accent">
+      <div class="label">采购成本合计</div>
+      <div class="value">¥{{ money(stats.cost) }}</div>
+      <div class="hint">单均成本 ¥{{ money(stats.avg_cost) }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">销售额合计</div>
+      <div class="value">¥{{ money(stats.sale) }}</div>
+      <div class="hint">成本占销售额 {{ stats.cost_rate }}%</div>
+    </div>
+    <div class="stat {{ 'ok' if stats.profit >= 0 else 'danger' }}">
+      <div class="label">账面毛利</div>
+      <div class="value">¥{{ money(stats.profit) }}</div>
+      <div class="hint">运费 ¥{{ money(stats.freight) }} · 平台服务费 ¥{{ money(stats.fee) }}</div>
+    </div>
+  </div>
+  <div class="note muted" style="margin-top:8px">
+    <span>口径：销售额 − 采购成本 − 运费 − 平台技术服务费 = 账面毛利，<b>不含退款</b>
+    （退了的钱按单在资金 / 退单页看）。成本取订单的采购成本价，没维护成本的订单按 0 计。</span>
+  </div>
+</div>
+
+<div class="card flush">
+  <div class="card-head">
+    <div>
+      <b>按{{ '月' if group == 'month' else '天' }}统计发货</b>
+      <span class="muted">按{{ time_fields[date_field][0] if date_field in time_fields else '推单时间' }}分组，最多 {{ trend | length }} 行</span>
+    </div>
+    <div>
+      <a class="btn sm {{ 'primary' if group == 'day' }}" href="{{ trend_urls.day }}">按天</a>
+      <a class="btn sm {{ 'primary' if group == 'month' }}" href="{{ trend_urls.month }}">按月</a>
+    </div>
+  </div>
+  {% if trend %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>{{ '月份' if group == 'month' else '日期' }}</th>
+          <th class="num">发货单</th><th class="num">已发货</th><th class="num">待回单</th>
+          <th class="num">采购成本</th><th class="num">单均成本</th><th class="num">销售额</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in trend %}
+        <tr>
+          <td class="nowrap">{{ t.period }}</td>
+          <td class="num">{{ t.count }}</td>
+          <td class="num">{{ t.shipped }}</td>
+          <td class="num">{{ t.pending }}</td>
+          <td class="num">¥{{ money(t.cost) }}</td>
+          <td class="num">¥{{ money(t.avg_cost) }}</td>
+          <td class="num">¥{{ money(t.sale) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">当前筛选下没有可统计的记录{% if has_date %}（换个时间区间试试）{% endif %}。</div>
+  {% endif %}
+</div>
+
+<div class="note muted">
+  <span>这页与「供应链发货」列表用的是<b>同一份筛选条件与统计口径</b>，所以「列表 N 条」和这里「N 单」永远对得上；
+  只统计时间列有值的单 —— 还没推单 / 还没发货的单没有时间，不会被算进某一天 0 单。</span>
+</div>
+
+{% endblock %}

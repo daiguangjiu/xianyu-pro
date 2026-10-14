@@ -1,0 +1,403 @@
+{# 商品列表：结构与样式照 supply-chain-xiaoyu 的 goods 页面（工具栏 + 分段器 + 列表/卡片双视图 + 批量条） #}
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}商品管理{% endblock %}
+{% block heading %}商品管理{% endblock %}
+{% block sub %}共 {{ stats.total }} 款商品 · 供应链商品 {{ stats.third }} · 自营商品 {{ stats.self }} · 待审核 {{ stats.pending }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/products/stats">商品统计</a>
+  <a class="btn primary" href="/products/new">发布商品</a>
+{% endblock %}
+{% block content %}
+
+<form class="goods-toolbar" method="get" action="/products" id="goodsFilter">
+  <input type="hidden" name="view" value="{{ view }}">
+  <input type="hidden" name="source" value="{{ source_filter }}">
+  <input type="hidden" name="audit" value="{{ audit_filter }}">
+  {# 筛选一变就回到第 1 页（不带 page 参数），每页条数保持原样 #}
+  <input type="hidden" name="per_page" value="{{ per_page }}">
+
+  <div class="goods-search">
+    <i class="bi bi-search"></i>
+    <input type="search" name="q" value="{{ keyword }}" placeholder="搜索商品名称 / 商品编号">
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">商品属性</span>
+    <div class="seg">
+      <a href="#" class="{% if source_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('source','all');return false;">全部 <span class="n">{{ stats.total }}</span></a>
+      <a href="#" class="{% if source_filter == 'third_party' %}active{% endif %}"
+         onclick="setFilter('source','third_party');return false;">
+        <i class="bi bi-truck"></i> 供应链商品 <span class="n">{{ stats.third }}</span></a>
+      <a href="#" class="{% if source_filter == 'self_operated' %}active{% endif %}"
+         onclick="setFilter('source','self_operated');return false;">
+        <i class="bi bi-patch-check-fill"></i> 自营商品 <span class="n">{{ stats.self }}</span></a>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">审核</span>
+    <div class="seg">
+      <a href="#" class="{% if audit_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('audit','all');return false;">全部</a>
+      <a href="#" class="{% if audit_filter == 'pending' %}active{% endif %}"
+         onclick="setFilter('audit','pending');return false;">待审核 <span class="n">{{ stats.pending }}</span></a>
+      <a href="#" class="{% if audit_filter == 'approved' %}active{% endif %}"
+         onclick="setFilter('audit','approved');return false;">已通过 <span class="n">{{ stats.approved }}</span></a>
+      <a href="#" class="{% if audit_filter == 'rejected' %}active{% endif %}"
+         onclick="setFilter('audit','rejected');return false;">已驳回 <span class="n">{{ stats.rejected }}</span></a>
+      <a href="#" class="{% if audit_filter == 'draft' %}active{% endif %}"
+         onclick="setFilter('audit','draft');return false;">草稿 <span class="n">{{ stats.draft }}</span></a>
+    </div>
+  </div>
+
+  <div class="seg" style="margin-left: auto;">
+    <a href="#" class="{% if view == 'list' %}active{% endif %}"
+       onclick="setFilter('view','list');return false;" title="列表布局：便于商品审核">
+      <i class="bi bi-list-ul"></i> 列表</a>
+    <a href="#" class="{% if view == 'card' %}active{% endif %}"
+       onclick="setFilter('view','card');return false;" title="卡片布局：便于日常查阅">
+      <i class="bi bi-grid-3x3-gap"></i> 卡片</a>
+  </div>
+</form>
+
+{# ============================================================ 批量操作条 #}
+<div class="bulk-bar" id="bulkBar">
+  <i class="bi bi-check2-square"></i>
+  <span>已选 <span class="bulk-count" id="bulkCount">0</span> 款</span>
+  <span class="bulk-tip" id="bulkTip">勾选左侧复选框后可批量操作</span>
+  <button type="button" class="btn btn-sm btn-ghost" onclick="selectAllPage()" title="勾选当前这一页的全部商品">
+    <i class="bi bi-check-all"></i> 全选本页</button>
+  <span class="spacer"></span>
+  <button type="button" class="btn btn-sm btn-primary bulk-btn" onclick="bulkSubmit('list')">
+    <i class="bi bi-shop"></i> 批量上架</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary bulk-btn" onclick="bulkSubmit('unlist')">
+    <i class="bi bi-dash-lg"></i> 批量下架</button>
+  <button type="button" class="btn btn-sm btn-outline-secondary bulk-btn" onclick="bulkSubmit('approve')">
+    <i class="bi bi-check-lg"></i> 批量通过</button>
+  <button type="button" class="btn btn-sm btn-ghost bulk-btn" onclick="bulkSubmit('reject')">
+    <i class="bi bi-x-lg"></i> 批量驳回</button>
+  <button type="button" class="btn btn-sm btn-ghost bulk-btn" onclick="bulkSubmit('category')"
+          title="按商品名 / 品牌在类目树里认领类目，只补还没填类目的商品">
+    <i class="bi bi-diagram-3"></i> 匹配类目</button>
+  <button type="button" class="btn btn-sm btn-ghost danger bulk-btn" onclick="bulkSubmit('delete')">
+    <i class="bi bi-trash"></i> 批量删除</button>
+  <button type="button" class="btn btn-sm btn-ghost bulk-btn" onclick="clearSelection()">取消</button>
+</div>
+
+<form id="bulkForm" method="post" action="/products/bulk" style="display:none">
+  <input type="hidden" name="action" value="">
+  <input type="hidden" name="note" value="">
+  {# 批量操作完回到原来的筛选 / 页码，不至于被踢回第一页 #}
+  <input type="hidden" name="return_to" value="">
+  <div id="bulkIds"></div>
+</form>
+
+{# ============================================================ 视图 1：列表 #}
+{% if view == 'list' %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th style="width: 36px;"><input type="checkbox" id="checkAll" title="全选"></th>
+          <th>商品</th>
+          <th>供应链</th>
+          <th>类目</th>
+          <th class="text-end">渔货价</th>
+          <th class="text-end">销售价</th>
+          <th class="text-end">库存</th>
+          <th class="text-end">SKU</th>
+          <th>审核</th>
+          <th>上架</th>
+          <th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in products %}
+          <tr>
+            <td><input type="checkbox" class="item-check" value="{{ p.id }}"></td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                {% if p.image_path %}
+                  <img src="{{ p.image_path }}" alt=""
+                       style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--c-border);flex-shrink:0;"
+                       onerror="this.style.display='none'">
+                {% else %}
+                  <div class="d-inline-flex align-items-center justify-content-center"
+                       style="width:40px;height:40px;border-radius:8px;background:var(--c-surface-2);border:1px solid var(--c-border);flex-shrink:0;">
+                    <i class="bi bi-image text-secondary"></i>
+                  </div>
+                {% endif %}
+                <div style="min-width:0;">
+                  <div class="small" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                       title="{{ p.name }}">
+                    <a href="{{ product_url(p) }}" style="color: inherit; text-decoration: none;">{{ p.name }}</a>
+                  </div>
+                  <code class="k" style="font-size:11px;">{{ p.code or p.id }}</code>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="d-flex flex-column" style="gap:2px;">
+                {% if (p.source_type or 'self_operated') == 'self_operated' %}
+                  <span class="src-badge self"><i class="bi bi-patch-check-fill"></i> 自营</span>
+                {% else %}
+                  <span class="src-badge third"><i class="bi bi-truck"></i> 供应链</span>
+                {% endif %}
+                {% if p.supplier_name %}
+                  <span class="mono-sm text-secondary" style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                        title="{{ p.supplier_name }}">{{ p.supplier_name }}</span>
+                {% endif %}
+              </div>
+            </td>
+            <td class="mono-sm text-secondary">{{ p.category or '—' }}</td>
+            <td class="text-end mono">{{ money(p.fish_price) if p.fish_price else '—' }}</td>
+            <td class="text-end mono">{{ money(p.price) if p.price else '—' }}</td>
+            <td class="text-end mono">
+              {% if p.stock_enabled %}{{ p.stock }}{% else %}<span class="text-secondary">按单采购</span>{% endif %}
+            </td>
+            <td class="text-end">
+              {% set mc = sku_counts.get(p.id, 0) %}
+              <span class="badge {% if mc > 1 %}bg-primary{% else %}bg-light{% endif %}">{{ mc }}</span>
+            </td>
+            <td>
+              {% if p.audit_status == 'approved' %}<span class="badge badge-audit-approved">已通过</span>
+              {% elif p.audit_status == 'pending' %}<span class="badge badge-audit-pending">待审核</span>
+              {% elif p.audit_status == 'rejected' %}<span class="badge badge-audit-rejected" title="{{ p.audit_note }}">已驳回</span>
+              {% else %}<span class="badge badge-audit-draft">草稿</span>{% endif %}
+            </td>
+            <td>
+              {% if p.status == 'on_sale' %}<span class="badge badge-status-on">在售</span>
+              {% elif p.status == 'off_sale' %}<span class="badge badge-status-off">已下架</span>
+              {% else %}<span class="badge bg-light">未上架</span>{% endif %}
+            </td>
+            <td class="table-actions">
+              <div class="d-flex gap-1 justify-content-end">
+                <a class="btn btn-sm btn-ghost" href="{{ product_url(p) }}" title="查看商品详情">
+                  <i class="bi bi-eye"></i> 详情</a>
+                <a class="btn btn-sm btn-ghost" href="/products/{{ p.id }}/edit" title="编辑商品资料">
+                  <i class="bi bi-pencil-square"></i> 编辑</a>
+                {% if p.audit_status != 'approved' %}
+                  <button class="btn btn-sm btn-outline-secondary" onclick="auditOne('{{ p.id }}','approve',this)">通过</button>
+                {% endif %}
+                {% if p.audit_status != 'rejected' %}
+                  <button class="btn btn-sm btn-ghost" onclick="auditOne('{{ p.id }}','reject',this)">驳回</button>
+                {% endif %}
+                {% if p.status != 'on_sale' %}
+                  <form method="post" action="/products/{{ p.id }}/listing" style="display:inline">
+                    <input type="hidden" name="listed" value="1">
+                    <button class="btn btn-sm btn-shelf"><i class="bi bi-plus-lg"></i> 上架</button>
+                  </form>
+                {% else %}
+                  <form method="post" action="/products/{{ p.id }}/listing" style="display:inline">
+                    <input type="hidden" name="listed" value="0">
+                    <button class="btn btn-sm btn-ghost" title="标记为已下架（闲鱼侧自己下）">
+                      <i class="bi bi-dash-lg"></i> 下架</button>
+                  </form>
+                {% endif %}
+                <form method="post" action="/products/{{ p.id }}/delete" style="display:inline"
+                      data-confirm="删除商品「{{ p.name }}」？订单本身保留，只会解除关联。">
+                  <button class="btn btn-sm btn-ghost danger" title="删除商品"><i class="bi bi-trash"></i></button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="10" class="text-center text-secondary py-5">
+              没有符合条件的商品。
+              {% if stats.total == 0 %}
+                先 <a href="/products/new" style="color: var(--c-primary);">发布商品</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ============================================================ 视图 2：卡片 #}
+{% else %}
+<div class="goods-grid">
+  {% for p in products %}
+    {% set mc = sku_counts.get(p.id, 0) %}
+    <article class="gcard" data-item="{{ p.id }}">
+      <div class="gcard-thumb">
+        {% if p.image_path %}
+          <img src="{{ p.image_path }}" alt="{{ p.name }}" loading="lazy" onerror="this.style.display='none'">
+        {% else %}
+          <div class="ph"><i class="bi bi-image"></i></div>
+        {% endif %}
+        <label class="gcard-check"><input type="checkbox" class="item-check" value="{{ p.id }}"></label>
+        {% if (p.source_type or 'self_operated') == 'self_operated' %}
+          <span class="fish-tag hot"><i class="bi bi-patch-check-fill"></i> 自营</span>
+        {% else %}
+          <span class="fish-tag"><i class="bi bi-truck"></i> 供应链</span>
+        {% endif %}
+      </div>
+
+      <div class="gcard-body">
+        <h3 class="gcard-title" title="{{ p.name }}">
+          <a href="{{ product_url(p) }}" style="color: inherit; text-decoration: none;">{{ p.name }}</a>
+        </h3>
+
+        <div class="gcard-meta">
+          {% if p.audit_status == 'approved' %}<span class="badge badge-audit-approved">已通过</span>
+          {% elif p.audit_status == 'pending' %}<span class="badge badge-audit-pending">待审核</span>
+          {% elif p.audit_status == 'rejected' %}<span class="badge badge-audit-rejected">已驳回</span>
+          {% else %}<span class="badge badge-audit-draft">草稿</span>{% endif %}
+          {% if p.condition %}<span class="badge bg-light">{{ condition_label(p) }}</span>{% endif %}
+        </div>
+
+        <div class="gcard-kv">
+          <span class="k">渔货价</span>
+          <span class="v">{{ money(p.fish_price) if p.fish_price else '—' }}</span>
+        </div>
+        <div class="gcard-kv">
+          <span class="k">销售价</span>
+          <span class="v">{{ money(p.price) if p.price else '—' }}</span>
+        </div>
+        <div class="gcard-kv">
+          <span class="k">库存 / SKU</span>
+          <span class="v">{% if p.stock_enabled %}{{ p.stock }}{% else %}按单采购{% endif %} / {{ mc }}</span>
+        </div>
+
+        <div class="gcard-foot">
+          <span class="mono-sm text-secondary">{{ p.code or p.id }}</span>
+          <div class="d-flex align-items-center gap-1">
+            <a class="btn btn-sm btn-ghost" href="{{ product_url(p) }}">详情</a>
+            <a class="btn btn-sm btn-ghost" href="/products/{{ p.id }}/edit" title="编辑商品资料">
+              <i class="bi bi-pencil-square"></i></a>
+            {% if p.status == 'on_sale' %}
+              <form method="post" action="/products/{{ p.id }}/listing" style="display:inline">
+                <input type="hidden" name="listed" value="0">
+                <button class="btn btn-sm btn-ghost" title="标记为已下架"><i class="bi bi-dash-lg"></i></button>
+              </form>
+            {% else %}
+              <form method="post" action="/products/{{ p.id }}/listing" style="display:inline">
+                <input type="hidden" name="listed" value="1">
+                <button class="btn btn-shelf"><i class="bi bi-plus-lg"></i> 上架</button>
+              </form>
+            {% endif %}
+            <form method="post" action="/products/{{ p.id }}/delete" style="display:inline"
+                  data-confirm="删除商品「{{ p.name }}」？订单本身保留，只会解除关联。">
+              <button class="btn btn-sm btn-ghost danger" title="删除商品"><i class="bi bi-trash"></i></button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </article>
+  {% else %}
+    <div class="empty-state" style="grid-column: 1 / -1; padding: var(--s-16) var(--s-6); text-align: center; background: var(--c-surface); border: 1px dashed var(--c-border-strong); border-radius: var(--r-card); color: var(--c-text-muted);">
+      <i class="bi bi-inbox" style="font-size: 28px; display:block; margin-bottom: 8px;"></i>
+      没有符合条件的商品
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ============================================================ 分页（全站统一组件：页数 > 10 自动给跳页框） #}
+{{ pager(page, pages, '/products', {
+    'q': keyword, 'category': category_filter, 'status': status_filter,
+    'supplier': supplier_filter, 'source': source_filter, 'audit': audit_filter,
+    'view': view, 'per_page': per_page
+  }, total, size=per_page, sizes=page_sizes) }}
+
+<script>
+  // 分段器（来源 / 审核 / 视图）：改隐藏域后整页提交，服务端渲染
+  function setFilter(key, value) {
+    var form = document.getElementById('goodsFilter');
+    var input = form.querySelector('input[name="' + key + '"]');
+    if (input) { input.value = value; }
+    form.submit();
+  }
+
+  // ---------------- 勾选与批量 ----------------
+  function selectedIds() {
+    return Array.prototype.slice.call(document.querySelectorAll('.item-check:checked'))
+      .map(function (box) { return box.value; });
+  }
+
+  function refreshBulk() {
+    var ids = selectedIds();
+    var count = document.getElementById('bulkCount');
+    if (count) { count.textContent = ids.length; }
+    var bar = document.getElementById('bulkBar');
+    if (bar) { bar.classList.toggle('has-selection', ids.length > 0); }
+    // 批量条常显：没勾选时按钮置灰（类名要和 style.css 的 .bulk-bar / .has-selection 对齐）
+    document.querySelectorAll('.bulk-btn').forEach(function (btn) {
+      btn.disabled = ids.length === 0;
+    });
+    var tip = document.getElementById('bulkTip');
+    if (tip) {
+      tip.textContent = ids.length
+        ? '可对选中的 ' + ids.length + ' 款执行批量操作'
+        : '勾选左侧复选框后可批量操作';
+    }
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.item-check').forEach(function (box) { box.checked = false; });
+    var all = document.getElementById('checkAll');
+    if (all) { all.checked = false; }
+    refreshBulk();
+  }
+
+  function selectAllPage() {
+    var boxes = document.querySelectorAll('.item-check');
+    boxes.forEach(function (box) { box.checked = true; });
+    var all = document.getElementById('checkAll');
+    if (all) { all.checked = true; }
+    refreshBulk();
+  }
+
+  // 填好 ids / action / 驳回理由 / 回跳地址，返回表单（提交前统一走它）
+  function prepareBulk(ids, action) {
+    var box = document.getElementById('bulkIds');
+    box.innerHTML = '';
+    ids.forEach(function (id) {
+      var input = document.createElement('input');
+      input.type = 'hidden'; input.name = 'ids'; input.value = id;
+      box.appendChild(input);
+    });
+    var form = document.getElementById('bulkForm');
+    form.querySelector('input[name="action"]').value = action;
+    // 驳回理由：弹一下让运营写清楚，留空也放行（记在商品上，列表能悬浮看到）
+    var note = '';
+    if (action === 'reject') {
+      note = window.prompt('驳回理由（选中的 ' + ids.length + ' 款商品，可留空）', '') || '';
+    }
+    form.querySelector('input[name="note"]').value = note.trim().slice(0, 255);
+    form.querySelector('input[name="return_to"]').value = window.location.pathname + window.location.search;
+    return form;
+  }
+
+  function bulkSubmit(action) {
+    var ids = selectedIds();
+    if (!ids.length) { if (window.showToast) { showToast('请先勾选商品', 'err'); } return; }
+    if (action === 'reject' && !window.confirm('确认驳回选中的 ' + ids.length + ' 款商品？')) { return; }
+    if (action === 'delete' && !window.confirm('删除选中的 ' + ids.length + ' 款商品？订单本身保留，只会解除关联。')) { return; }
+    prepareBulk(ids, action).submit();
+  }
+
+  // 单个商品的审核：直接用批量接口，语义相同
+  function auditOne(id, action, btn) {
+    if (btn) { btn.disabled = true; }
+    prepareBulk([id], action).submit();
+  }
+
+  document.addEventListener('change', function (event) {
+    if (event.target.classList && (event.target.classList.contains('item-check') || event.target.id === 'checkAll')) {
+      if (event.target.id === 'checkAll') {
+        document.querySelectorAll('.item-check').forEach(function (box) { box.checked = event.target.checked; });
+      }
+      refreshBulk();
+    }
+  });
+  refreshBulk();
+</script>
+
+{% endblock %}

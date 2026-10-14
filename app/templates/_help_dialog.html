@@ -1,0 +1,66 @@
+{# 流程说明弹窗：内容直接取自 app/services/help.py（与 /help 说明页同源，改一处两边都变）。
+
+   用法（在页面里两行）：
+     从本文件 import help_modal、help_btn 两个宏；
+     按钮用 help_btn（点了就地弹开，不跳走），弹窗本体 help_modal 放在页面末尾。
+
+   弹窗的打开 / 关闭由 static/app.js 统一处理（认 data-open-modal / data-close-modal）。
+#}
+
+{% macro help_modal(key) %}
+{% set doc = help_doc(key) %}
+{% if doc %}
+<dialog class="help-modal" id="help-{{ key }}" aria-labelledby="help-{{ key }}-title">
+  <div class="hm-head">
+    <h3 id="help-{{ key }}-title"><i class="bi bi-question-circle" aria-hidden="true"></i> {{ doc.title }}</h3>
+    <button type="button" class="hm-x" data-close-modal aria-label="关闭"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+  </div>
+  <p class="hm-lead">{{ doc.lead }}</p>
+
+  <div class="hm-body">
+    <h4>流程：每一步是什么、点什么</h4>
+    <ol class="help-flow">
+      {% for s in doc.flow %}
+      <li>
+        <div class="hf-name">{{ s.name }}</div>
+        <div class="hf-row"><span class="hf-k">这一步是什么</span><span>{{ s.what }}</span></div>
+        <div class="hf-row"><span class="hf-k">要做什么</span><span>{{ s.action }}</span></div>
+        {% if s.tip %}<div class="hf-row tip"><span class="hf-k">注意</span><span>{{ s.tip }}</span></div>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+
+    <h4>状态：每个取值什么意思、下一步会变成什么</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>状态</th><th>含义</th><th>下一步</th></tr></thead>
+        <tbody>
+        {% for s in doc.states %}
+          <tr><td><b>{{ s.state }}</b></td><td>{{ s.meaning }}</td><td class="muted">{{ s.next }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <h4>容易搞错的地方</h4>
+    <ul class="help-notes">
+      {% for n in doc.notes %}<li>{{ n }}</li>{% endfor %}
+    </ul>
+  </div>
+
+  <div class="hm-foot">
+    <a class="btn sm" href="/help/{{ key }}" target="_blank" rel="noopener">在独立页打开</a>
+    <button type="button" class="btn sm primary" data-close-modal>知道了</button>
+  </div>
+</dialog>
+{% endif %}
+{% endmacro %}
+
+
+{% macro help_btn(key, label="流程说明", title="") %}
+{# 触发按钮：点开就地弹窗，不用离开当前页面 #}
+<button type="button" class="btn sm" data-open-modal="help-{{ key }}"
+        title="{{ title or '看这个模块从头到尾怎么走、每个状态什么意思' }}">
+  <i class="bi bi-question-circle" aria-hidden="true"></i> {{ label }} →
+</button>
+{% endmacro %}

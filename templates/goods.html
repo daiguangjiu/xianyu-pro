@@ -1,0 +1,482 @@
+{% extends "base.html" %}
+{% block title %}商品管理 · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block content %}
+
+{# —— 来源徽标 —— #}
+{% macro src_badge(it) -%}
+  {% if it.source_type == 'self_operated' %}
+    <span class="src-badge self"><i class="bi bi-patch-check-fill"></i> 自营</span>
+  {% else %}
+    <span class="src-badge third"><i class="bi bi-truck"></i> {{ it.supplier_id or '供应商' }}</span>
+  {% endif %}
+{%- endmacro %}
+
+{# —— 审核状态 —— #}
+{% macro audit_badge(status) -%}
+  {% set label = {'draft': '草稿', 'pending': '待审核', 'approved': '已通过', 'rejected': '已驳回'}.get(status, status) %}
+  <span class="badge badge-audit-{{ status }}">{{ label }}</span>
+{%- endmacro %}
+
+{# —— 上架状态 —— #}
+{% macro listed_badge(status) -%}
+  {% if status == 'published' %}
+    {# 2026-10-13：铺到自己店里叫「已铺货」 #}
+    <span class="badge badge-status-published"><i class="bi bi-check2"></i> 已铺货</span>
+  {% elif status == 'failed' %}
+    <span class="badge badge-status-failed">发布失败</span>
+  {% elif status in ('draft', 'needs_review') %}
+    <span class="badge badge-status-draft">待发布</span>
+  {% else %}
+    <span class="badge badge-status-failed">未通过</span>
+  {% endif %}
+{%- endmacro %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>商品管理</h1>
+    <span class="page-subtitle">
+      共 {{ stats.total }} 款 ·
+      自营 {{ stats.self }} · 供应商 {{ stats.third }} ·
+      待审核 {{ stats.pending }}
+    </span>
+  </div>
+  <div class="page-actions">
+    <a href="/self/goods/new" class="btn btn-primary">
+      <i class="bi bi-plus-lg"></i> 发布商品
+    </a>
+  </div>
+</div>
+
+{# ============================================================
+   工具栏：搜索 + 来源 / 审核筛选 + 视图切换
+   ============================================================ #}
+<form class="goods-toolbar" method="get" action="/self/goods" id="goodsFilter">
+  <input type="hidden" name="view" value="{{ view }}">
+  <input type="hidden" name="source" value="{{ source_filter }}">
+  <input type="hidden" name="audit" value="{{ audit_filter }}">
+
+  <div class="goods-search">
+    <i class="bi bi-search"></i>
+    <input type="search" name="q" value="{{ keyword }}"
+           placeholder="搜索商品名称 / 商品编号 / 供货商">
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">供应链</span>
+    <div class="seg">
+      <a href="#" class="{% if source_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('source','all');return false;">
+        全部 <span class="n">{{ stats.total }}</span>
+      </a>
+      <a href="#" class="{% if source_filter == 'self_operated' %}active{% endif %}"
+         onclick="setFilter('source','self_operated');return false;">
+        <i class="bi bi-patch-check-fill"></i> 自营 <span class="n">{{ stats.self }}</span>
+      </a>
+      <a href="#" class="{% if source_filter == 'third_party' %}active{% endif %}"
+         onclick="setFilter('source','third_party');return false;">
+        <i class="bi bi-truck"></i> 供应商 <span class="n">{{ stats.third }}</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">审核</span>
+    <div class="seg">
+      <a href="#" class="{% if audit_filter == 'all' %}active{% endif %}"
+         onclick="setFilter('audit','all');return false;">全部</a>
+      <a href="#" class="{% if audit_filter == 'pending' %}active{% endif %}"
+         onclick="setFilter('audit','pending');return false;">
+        待审核 <span class="n">{{ stats.pending }}</span>
+      </a>
+      <a href="#" class="{% if audit_filter == 'approved' %}active{% endif %}"
+         onclick="setFilter('audit','approved');return false;">
+        已通过 <span class="n">{{ stats.approved }}</span>
+      </a>
+      <a href="#" class="{% if audit_filter == 'rejected' %}active{% endif %}"
+         onclick="setFilter('audit','rejected');return false;">
+        已驳回 <span class="n">{{ stats.rejected }}</span>
+      </a>
+      <a href="#" class="{% if audit_filter == 'draft' %}active{% endif %}"
+         onclick="setFilter('audit','draft');return false;">
+        草稿 <span class="n">{{ stats.draft }}</span>
+      </a>
+    </div>
+  </div>
+
+  <div class="seg" style="margin-left: auto;">
+    <a href="#" class="{% if view == 'list' %}active{% endif %}"
+       onclick="setFilter('view','list');return false;" title="列表布局：便于商品审核">
+      <i class="bi bi-list-ul"></i> 列表
+    </a>
+    <a href="#" class="{% if view == 'card' %}active{% endif %}"
+       onclick="setFilter('view','card');return false;" title="卡片布局：便于日常查阅">
+      <i class="bi bi-grid-3x3-gap"></i> 卡片
+    </a>
+  </div>
+</form>
+
+{# ============================================================
+   批量操作条
+   ============================================================ #}
+<div class="bulk-bar" id="bulkBar">
+  <i class="bi bi-check2-square"></i>
+  <span>已选 <span class="bulk-count" id="bulkCount">0</span> 款</span>
+  <span class="spacer"></span>
+  <button type="button" class="btn btn-sm btn-primary" onclick="bulkShelf()">
+    <i class="bi bi-shop"></i> 批量上架
+  </button>
+  <button type="button" class="btn btn-sm btn-outline-secondary" onclick="bulkAudit('approve')">
+    <i class="bi bi-check-lg"></i> 批量通过
+  </button>
+  <button type="button" class="btn btn-sm btn-ghost" onclick="bulkAudit('reject')">
+    <i class="bi bi-x-lg"></i> 批量驳回
+  </button>
+  <button type="button" class="btn btn-sm btn-ghost" onclick="clearSelection()">取消</button>
+</div>
+
+{# ============================================================
+   视图 1：列表（便于审核）
+   ============================================================ #}
+{% if view == 'list' %}
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th style="width: 36px;">
+            <input type="checkbox" id="checkAll" title="全选">
+          </th>
+          <th>商品</th>
+          <th>供应链</th>
+          <th>类目</th>
+          <th class="text-end" title="渔货栈这边只有一个价：渔货价，它就是学员的进货价（成本）">渔货价</th>
+          <th class="text-end">库存</th>
+          <th class="text-end">SKU</th>
+          <th>审核</th>
+          <th>上架</th>
+          <th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in items %}
+          <tr>
+            <td>
+              <input type="checkbox" class="item-check" value="{{ it.item_id }}">
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                {% if it.main_image %}
+                  <img src="{{ it.main_image }}" alt=""
+                       style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--c-border);flex-shrink:0;"
+                       onerror="this.style.display='none'">
+                {% else %}
+                  <div class="d-inline-flex align-items-center justify-content-center"
+                       style="width:40px;height:40px;border-radius:8px;background:var(--c-surface-2);border:1px solid var(--c-border);flex-shrink:0;">
+                    <i class="bi bi-image text-secondary"></i>
+                  </div>
+                {% endif %}
+                <div style="min-width:0;">
+                  <div class="small" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                       title="{{ it.title }}">
+                    <a href="/self/goods/detail/{{ it.item_id }}" style="color: inherit; text-decoration: none;">{{ it.title }}</a>
+                  </div>
+                  <code class="k" style="font-size:11px;">{{ it.item_id }}</code>
+                </div>
+              </div>
+            </td>
+            <td>{{ src_badge(it) }}</td>
+            <td class="mono-sm text-secondary">{{ it.category_id or '—' }}</td>
+            <td class="text-end mono">{{ money(it.fish_price) if it.fish_price else '—' }}</td>
+            <td class="text-end mono">
+              {% if it.is_oversold %}
+                <span style="color: var(--c-error);">{{ it.stock }}</span>
+              {% else %}{{ it.stock }}{% endif %}
+            </td>
+            <td class="text-end">
+              {% set mc = (it.sku_list or {}).get('skus', []) | length %}
+              <span class="badge {% if mc > 1 %}bg-primary{% else %}bg-light{% endif %}">{{ mc }}</span>
+            </td>
+            <td>{{ audit_badge(it.audit_status) }}</td>
+            <td>
+              {% if listing_status.get(it.item_id) %}
+                {{ listed_badge(listing_status[it.item_id]) }}
+              {% else %}
+                <span class="badge bg-light">未上架</span>
+              {% endif %}
+            </td>
+            <td class="table-actions">
+              <div class="d-flex gap-1 justify-content-end">
+                <a class="btn btn-sm btn-ghost" href="/self/goods/detail/{{ it.item_id }}"
+                   title="查看商品详情 / 带入闲鱼发布页">
+                  <i class="bi bi-eye"></i> 详情
+                </a>
+                {% if it.audit_status != 'approved' %}
+                  <button class="btn btn-sm btn-outline-secondary"
+                          onclick="auditOne('{{ it.item_id }}','approve',this)">通过</button>
+                {% endif %}
+                {% if it.audit_status != 'rejected' %}
+                  <button class="btn btn-sm btn-ghost"
+                          onclick="auditOne('{{ it.item_id }}','reject',this)">驳回</button>
+                {% endif %}
+                {% if not listing_status.get(it.item_id) %}
+                  {# 没店铺 / 店铺没过审 → 置灰，点了提示去找带教老师（2026-10-11 用户拍板） #}
+                  <button class="btn btn-sm btn-shelf{% if not shops_approved %} locked{% endif %}"
+                          {% if not shops_approved %}title="{{ shop_required_msg }}"{% endif %}
+                          onclick="shelfOne('{{ it.item_id }}',this)">
+                    上架
+                  </button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="10" class="text-center text-secondary py-5">
+              没有符合条件的商品。
+              {% if stats.total == 0 %}
+                先 <a href="/self/goods/new" style="color: var(--c-primary);">去店铺挑货</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# ============================================================
+   视图 2：卡片（便于查阅）
+   ============================================================ #}
+{% else %}
+<div class="goods-grid">
+  {% for it in items %}
+    {% set skus = (it.sku_list or {}).get('skus', []) %}
+    <article class="gcard" data-item="{{ it.item_id }}">
+      <div class="gcard-thumb">
+        {% if it.main_image %}
+          <img src="{{ it.main_image }}" alt="{{ it.title }}" loading="lazy"
+               onerror="this.style.display='none'">
+        {% else %}
+          <div class="ph"><i class="bi bi-image"></i></div>
+        {% endif %}
+        <label class="gcard-check">
+          <input type="checkbox" class="item-check" value="{{ it.item_id }}">
+        </label>
+        {% if it.is_oversold %}
+          <span class="fish-tag warn"><i class="bi bi-exclamation-triangle"></i> 超卖</span>
+        {% elif it.source_type == 'self_operated' %}
+          <span class="fish-tag hot"><i class="bi bi-patch-check-fill"></i> 自营</span>
+        {% endif %}
+      </div>
+
+      <div class="gcard-body">
+        <h3 class="gcard-title" title="{{ it.title }}">
+          <a href="/self/goods/detail/{{ it.item_id }}" style="color: inherit; text-decoration: none;">{{ it.title }}</a>
+        </h3>
+
+        <div class="gcard-meta">
+          {{ src_badge(it) }}
+          {{ audit_badge(it.audit_status) }}
+        </div>
+
+        <div class="gcard-kv">
+          <span class="k">渔货价</span>
+          <span class="v">{{ money(it.fish_price) if it.fish_price else (money(it.cost_price) if it.cost_price else '—') }}</span>
+        </div>
+        <div class="gcard-kv">
+          <span class="k">库存 / SKU</span>
+          <span class="v">{{ it.stock }} / {{ skus | length }}</span>
+        </div>
+
+        <div class="gcard-foot">
+          <span class="mono-sm text-secondary">{{ it.item_id }}</span>
+          <div class="d-flex align-items-center gap-1">
+            <a class="btn btn-sm btn-ghost" href="/self/goods/detail/{{ it.item_id }}"
+               title="查看商品详情 / 带入闲鱼发布页">详情</a>
+            {% if listing_status.get(it.item_id) %}
+              {{ listed_badge(listing_status[it.item_id]) }}
+            {% else %}
+              <button class="btn btn-shelf" onclick="shelfOne('{{ it.item_id }}',this)">
+                <i class="bi bi-plus-lg"></i> 上架
+              </button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </article>
+  {% else %}
+    <div class="empty-state" style="grid-column: 1 / -1; padding: var(--s-16) var(--s-6); text-align: center; background: var(--c-surface); border: 1px dashed var(--c-border-strong); border-radius: var(--r-card); color: var(--c-text-muted);">
+      <i class="bi bi-inbox" style="font-size: 28px; display:block; margin-bottom: 8px;"></i>
+      没有符合条件的商品
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var CURRENT = { view: '{{ view }}', source: '{{ source_filter }}', audit: '{{ audit_filter }}' };
+
+  function setFilter(key, value) {
+    var form = document.getElementById('goodsFilter');
+    var input = form.querySelector('[name="' + key + '"]');
+    if (!input) return;
+    input.value = value;
+    // 切换来源 / 审核时视图保持不变；切换视图时其余保持不变
+    form.submit();
+  }
+
+  // —— 选择状态 ——
+  function selectedIds() {
+    return Array.prototype.slice
+      .call(document.querySelectorAll('.item-check:checked'))
+      .map(function (el) { return el.value; });
+  }
+
+  function refreshBulkBar() {
+    var ids = selectedIds();
+    var bar = document.getElementById('bulkBar');
+    var cnt = document.getElementById('bulkCount');
+    if (!bar) return;
+    cnt.textContent = ids.length;
+    bar.classList.toggle('show', ids.length > 0);
+    // 卡片选中态
+    document.querySelectorAll('.gcard').forEach(function (card) {
+      var cb = card.querySelector('.item-check');
+      card.classList.toggle('selected', !!(cb && cb.checked));
+    });
+    var all = document.getElementById('checkAll');
+    if (all) {
+      var boxes = document.querySelectorAll('.item-check');
+      all.checked = boxes.length > 0 && ids.length === boxes.length;
+      all.indeterminate = ids.length > 0 && ids.length < boxes.length;
+    }
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.item-check').forEach(function (cb) { cb.checked = false; });
+    refreshBulkBar();
+  }
+
+  document.addEventListener('change', function (e) {
+    if (e.target.classList.contains('item-check')) refreshBulkBar();
+    if (e.target.id === 'checkAll') {
+      var checked = e.target.checked;
+      document.querySelectorAll('.item-check').forEach(function (cb) { cb.checked = checked; });
+      refreshBulkBar();
+    }
+  });
+
+  // —— 单个操作 ——
+  // 铺货到店铺的前置条件（2026-10-11 用户拍板）：名下得有一家审核通过的店铺
+  var SHOPS_APPROVED = {{ (shops_approved or 0) | tojson }};
+  var SHOP_REQUIRED_MSG = {{ shop_required_msg | tojson }};
+
+  async function shelfOne(itemId, btn) {
+    if (Number(SHOPS_APPROVED) <= 0) { showToast(SHOP_REQUIRED_MSG, 'err'); return; }
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 提交中…';
+    try {
+      var res = await fetch('/api/v1/selection/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: [itemId], shadow_mode: false })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (res.ok && (data.passed || 0) > 0) {
+        showToast('已加入铺货队列 → 去详情页带入闲鱼发布页', 'ok');
+        btn.outerHTML = '<a href="/self/goods/detail/' + encodeURIComponent(itemId)
+          + '?handoff=1" class="badge bg-primary text-decoration-none">待发布 · 带入发布</a>';
+        return;
+      }
+      if (res.ok) {
+        var reasons = Object.keys(data.rejected_reasons || {}).join('、') || '未满足选品规则';
+        showToast('未通过选品规则：' + reasons, 'err');
+      } else {
+        showToast('提交失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+      }
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+    }
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+
+  async function auditOne(itemId, action, btn) {
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '…';
+    try {
+      var res = await fetch('/api/v1/goods/items/' + encodeURIComponent(itemId) + '/audit', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action, by: 'operator' })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (res.ok) {
+        showToast(action === 'approve' ? '已通过审核' : '已驳回', 'ok');
+        setTimeout(function () { location.reload(); }, 600);
+        return;
+      }
+      showToast('审核失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+    }
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+
+  // —— 批量操作 ——
+  async function bulkShelf() {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    try {
+      var res = await fetch('/api/v1/selection/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: ids, shadow_mode: false })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (res.ok) {
+        showToast('批量上架：通过 ' + (data.passed || 0) + ' / 驳回 ' + (data.rejected || 0)
+          + ' → 去「我的店铺商品」继续', 'ok');
+        setTimeout(function () { location.reload(); }, 900);
+        return;
+      }
+      showToast('批量上架失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+    }
+  }
+
+  async function bulkAudit(action) {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    try {
+      var res = await fetch('/api/v1/goods/items/batch-audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: ids, action: action, by: 'operator' })
+      });
+      var data = await res.json().catch(function () { return {}; });
+      if (res.ok) {
+        showToast('批量' + (action === 'approve' ? '通过' : '驳回') + '：成功 '
+          + data.succeeded + ' / 失败 ' + data.failed, data.failed ? 'err' : 'ok');
+        setTimeout(function () { location.reload(); }, 800);
+        return;
+      }
+      showToast('批量审核失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+    }
+  }
+
+  refreshBulkBar();
+</script>
+{% endblock %}

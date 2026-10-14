@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}人员与授权{% endblock %}
+{% block sub %}检测仓自己的授权表：平台账号在这里招募进仓、按角色给权限，与平台的角色勾选互不相干{% endblock %}
+{% block actions %}
+  <a class="btn" href="/wms"><i class="bi bi-house"></i> 总览</a>
+{% endblock %}
+
+{% block content %}
+<div class="card flush">
+  <h2><i class="bi bi-diagram-3"></i> 角色与权限</h2>
+  <div class="table-wrap"><table>
+    <thead>
+      <tr><th>角色</th><th>标识</th><th>权限</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+      {% for row in role_rows %}
+        <tr>
+          <td class="nowrap"><b>{{ row.name }}</b>{% if row.builtin %}<span class="tag info ml">内置</span>{% endif %}</td>
+          <td class="nowrap"><code class="muted">{{ row.code }}</code></td>
+          <td class="perm-cell">
+            {% for p in row.perms %}<span class="tag">{{ wms_perm_label(p) }}</span>{% endfor %}
+            {% if row.perms | length >= all_perms | length %}<span class="tag info">全部权限</span>{% endif %}
+          </td>
+          <td class="wrap2 muted"><span class="clamp2">{{ row.remark }}</span></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <h2><i class="bi bi-sliders2"></i> 调整角色权限</h2>
+  <form id="rolePermForm" method="post" action="/wms/members/role">
+    <input type="hidden" name="role_id" id="roleId" value="0">
+    <div class="field-row auto">
+      <div class="field"><label for="rolePick">改哪个角色</label>
+        <select id="rolePick">
+          <option value="0" data-name="" data-code="" data-remark="">＋ 新建角色</option>
+          {% for row in role_rows %}
+            <option value="{{ row.id }}" data-name="{{ row.name }}" data-code="{{ row.code }}"
+                    data-perms="{{ row.perms | join(',') }}" data-remark="{{ row.remark }}"
+                    data-builtin="{{ 1 if row.builtin else 0 }}">{{ row.name }}（{{ row.code }}）</option>
+          {% endfor %}
+        </select></div>
+      <div class="field"><label for="roleName">角色名</label>
+        <input id="roleName" name="name" type="text" placeholder="新建时填，如 夜班检测员"></div>
+      <div class="field"><label for="roleCode">角色标识</label>
+        <input id="roleCode" name="code" type="text" placeholder="新建时填，如 qc_night"></div>
+      <div class="field"><label for="roleRemark">说明</label>
+        <input id="roleRemark" name="remark" type="text" placeholder="这个角色负责哪一段"></div>
+    </div>
+
+    <div class="field"><label>勾选这个角色能做的事</label>
+      {% for group, perms in perm_groups %}
+      <div class="perm-grid">
+        <div class="group-title">{{ group }}</div>
+        {% for code, label in perms %}
+          <label class="perm-chip"><input type="checkbox" name="perms" value="{{ code }}">{{ label }}</label>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="form-actions">
+      <button class="btn primary" type="submit"><i class="bi bi-check2"></i> 保存角色</button>
+      <span class="hint">内置角色不允许清空权限（把主管清成零权限等于把仓锁死）</span>
+    </div>
+  </form>
+</div>
+
+<div class="card flush">
+  <h2><i class="bi bi-person-badge"></i> 已进仓的人员</h2>
+  {% if members %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>账号</th><th>姓名</th><th>检测仓角色</th><th class="nowrap">操作</th></tr></thead>
+      <tbody>
+        {% for m in members %}
+          <tr>
+            <td class="nowrap"><b>{{ m.username or ('#' ~ m.user_id) }}</b></td>
+            <td>{{ m.display_name or '—' }}</td>
+            <td class="perm-cell">{% for n in m.role_names %}<span class="badge done">{{ n }}</span>{% else %}<span class="badge failed">无</span>{% endfor %}</td>
+            <td>
+              <form class="inline-form" method="post" action="/wms/members/revoke">
+                <input type="hidden" name="user_id" value="{{ m.user_id }}">
+                <button class="btn sm ghost" type="submit">移出检测仓</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  {% else %}
+    <div class="empty">还没有人进仓 —— 从下面挑平台账号，给他一个角色</div>
+  {% endif %}
+</div>
+
+<div class="card flush">
+  <h2><i class="bi bi-person-plus"></i> 给账号分配角色</h2>
+  <div class="filters padded">
+    <form method="get" action="/wms/members">
+      <div class="field grow"><label for="mq">搜平台账号 / 姓名</label>
+        <input id="mq" type="search" name="q" value="{{ q }}" placeholder="至少两个字"></div>
+      <div class="field submit"><label>&nbsp;</label><button class="btn" type="submit">搜一下</button></div>
+    </form>
+  </div>
+  {% if users %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>平台账号</th><th>姓名</th><th>给它这些角色</th><th class="nowrap">操作</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+          <tr>
+            <td class="nowrap"><b>{{ u.username }}</b>{% if u.role == 'admin' %}<span class="tag info ml">平台管理员</span>{% endif %}</td>
+            <td>{{ u.display_name or '—' }}</td>
+            <td>
+              <form id="g{{ u.id }}" method="post" action="/wms/members/grant">
+                <input type="hidden" name="user_id" value="{{ u.id }}">
+                <input type="hidden" name="username" value="{{ u.username }}">
+                <input type="hidden" name="display_name" value="{{ u.display_name }}">
+                <div class="perm-grid">
+                  {% for row in role_rows %}
+                    <label class="perm-chip">
+                      <input type="checkbox" name="role_ids" value="{{ row.id }}"
+                             {% if u.id in granted and row.id in granted[u.id] %}checked{% endif %}>{{ row.name }}
+                    </label>
+                  {% endfor %}
+                </div>
+              </form>
+            </td>
+            <td><button class="btn sm primary" type="submit" form="g{{ u.id }}">保存</button></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+  {% else %}
+    <div class="empty">没搜到平台账号{% if not bridge_ok %}（读不到平台账号表：检查是不是独立部署 / 不同库）{% endif %}</div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // 选角色 → 回填它的名 / 标识 / 权限勾选；选「新建角色」就清空
+  var pick = document.getElementById('rolePick');
+  function fillRole(){
+    var opt = pick.options[pick.selectedIndex];
+    document.getElementById('roleId').value = pick.value;
+    document.getElementById('roleName').value = opt.dataset.name || '';
+    document.getElementById('roleCode').value = opt.dataset.code || '';
+    document.getElementById('roleRemark').value = opt.dataset.remark || '';
+    var has = (opt.dataset.perms || '').split(',').filter(Boolean);
+    document.querySelectorAll('#rolePermForm input[name=perms]').forEach(function(box){
+      box.checked = has.indexOf(box.value) >= 0;
+    });
+  }
+  if (pick) { pick.addEventListener('change', fillRole); fillRole(); }
+</script>
+{% endblock %}

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#6366F1">
+  <title>{% block title %}数据总览{% endblock %} · {{ app_name }}</title>
+  <link rel="icon" href="/static/brand/favicon.png">
+  {# 带版本号：升级后浏览器会重新拉样式，不会一直用着缓存里的旧版 #}
+  <link rel="stylesheet" href="/static/vendor/bootstrap-icons.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/style.css?v={{ asset_v }}">
+{# 自动刷新只做首页（数据总览）：盯大盘用。
+   订单归档页关掉了（长列表 + 常要勾选核对，刷新既卡又容易打断人） #}
+{% set auto_refresh = settings is defined and settings.auto_refresh_sec > 0
+     and request.url.path == '/' %}
+</head>
+<body {% if auto_refresh %}data-auto-refresh="{{ settings.auto_refresh_sec }}"{% endif %}>
+{% set is_admin = current_user is defined and current_user and current_user.role == 'admin' %}
+<div class="layout">
+  {# 抽屉开关：CSS 控制展开，JS 仅补充 Escape 关闭 #}
+  <input type="checkbox" id="navToggle" class="nav-toggle-input" aria-label="展开导航">
+  <label class="nav-backdrop" for="navToggle" aria-hidden="true"></label>
+
+  <aside class="sidebar">
+    {# 品牌行右侧放端切换（另一端的侧边栏也是这个位置）；顶栏面包屑只讲页面层级 #}
+    <div class="brand-row">
+      <a class="brand" href="/" title="{{ app_name }}">
+        <img class="logo-img" src="/static/brand/logo.png" alt="{{ app_name }}">
+        <span class="brand-text"><strong>{{ app_brand }}</strong><small>{{ app_tagline }}</small></span>
+      </a>
+      {# 子系统切换：只列出当前账号有权限的子系统（见 app/portals.py），只有一个时不显示 #}
+      {% if portals and portals|length > 1 %}
+      <details class="portal-menu">
+        <summary class="portal-current" title="切换子系统（当前：{{ current_portal.name }}）">
+          <i class="bi bi-grid-1x2" aria-hidden="true"></i>
+          <span class="portal-current-name">{{ current_portal.short }}</span>
+          <i class="bi bi-chevron-down portal-caret" aria-hidden="true"></i>
+        </summary>
+        <div class="portal-panel">
+          <div class="portal-panel-head">切换子系统<span>一个账号可以进多个子系统</span></div>
+          <div class="portal-grid">
+            {% for p in portals %}
+            <a class="portal-option {{ 'active' if p.active }}" href="/portal/{{ p.key }}">
+              <span class="portal-option-icon"><i class="bi {{ p.icon }}" aria-hidden="true"></i></span>
+              <span class="portal-option-text">
+                <span class="portal-option-name">{{ p.name }}{% if p.active %}<em class="portal-option-now">当前</em>{% endif %}</span>
+                <span class="portal-option-desc">{{ p.desc }}</span>
+              </span>
+              <i class="bi bi-chevron-right portal-option-go" aria-hidden="true"></i>
+            </a>
+            {% endfor %}
+          </div>
+        </div>
+      </details>
+      {% endif %}
+    </div>
+    <nav aria-label="主导航">
+      {# 菜单结构见 web/nav.py：板块 → 一级菜单（可展开）→ 二级菜单，页面只用渲染 #}
+      {% for group in nav_sections %}
+      <div class="nav-section">
+        <div class="nav-section-title">{{ group.section.title }}</div>
+        {% for entry in group.nav_items %}
+          {% if entry.children %}
+          <details class="nav-group" {{ 'open' if entry.open or entry.active }}>
+            <summary class="nav-item {{ 'active' if entry.active }}">
+              <i class="bi {{ entry.item.icon }}" aria-hidden="true"></i>
+              <span class="nav-label">{{ entry.item.label }}</span>
+              {% if entry.count %}<span class="nav-count" title="{{ entry.count_hint }}">{{ entry.count }}</span>{% endif %}
+              {% if entry.item.wip %}<span class="nav-wip">Beta 开发中</span>{% endif %}
+              <i class="bi bi-chevron-right nav-caret" aria-hidden="true"></i>
+            </summary>
+            <div class="nav-sub">
+              {% for child in entry.children %}
+              <a href="{{ child.item.url }}" class="nav-sub-item {{ 'active' if child.active }}"
+                 {% if child.active %}aria-current="page"{% endif %}>
+                <span class="nav-dot" aria-hidden="true"></span><span class="nav-label">{{ child.item.label }}</span>
+                {# 二级菜单右侧数字：这个状态下有几单（为 0 不显示）；提示文案里已经带上数字 #}
+                {% if child.count %}<span class="nav-count" title="{{ child.count_hint }}">{{ child.count }}</span>{% endif %}
+              </a>
+              {% endfor %}
+            </div>
+          </details>
+          {% else %}
+          <a href="{{ entry.item.url }}" class="nav-item {{ 'active' if entry.active }}"
+             {% if entry.active %}aria-current="page"{% endif %}>
+            <i class="bi {{ entry.item.icon }}" aria-hidden="true"></i>
+            <span class="nav-label">{{ entry.item.label }}</span>
+            {% if entry.count %}<span class="nav-count" title="{{ entry.count_hint }}">{{ entry.count }}</span>{% endif %}
+            {% if entry.item.wip %}<span class="nav-wip">Beta 开发中</span>{% endif %}
+          </a>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      <span>{{ app_tagline }}</span>
+      {# 显示当前实际版本（取更新日志的版本号），不用再手动改这里的硬编码 #}
+      <span class="env-pill">{{ asset_v }}</span>
+    </div>
+  </aside>
+  <main class="content">
+    <header class="topbar">
+      <label class="topbar-burger" for="navToggle" title="菜单" aria-label="打开导航菜单"
+             role="button" tabindex="0" aria-controls="navToggle">
+        <i class="bi bi-list" aria-hidden="true"></i>
+      </label>
+      <nav class="topbar-crumb" aria-label="面包屑">
+        <a class="crumb-root" href="/">{{ app_brand }}</a>
+        {% for c in crumbs %}
+        <span class="sep" aria-hidden="true">/</span>
+        {% if c.url and not c.current %}
+        <a class="crumb-link" href="{{ c.url }}">{{ c.label }}</a>
+        {% else %}
+        <span class="current">{{ c.label }}</span>
+        {% endif %}
+        {% endfor %}
+      </nav>
+      <div class="topbar-right">
+        {% if current_user is defined and current_user %}
+          <span class="chip user-chip" title="{{ current_user.display_name or current_user.username }}{{ ' · 管理员' if current_user.role == 'admin' else ' · 子账号' }}">
+            <i class="bi bi-person-circle" aria-hidden="true"></i>
+            <span class="chip-text">{{ current_user.display_name or current_user.username }}</span>
+            <span class="chip-role">{% if current_user.role == 'admin' %}· 管理员{% else %}· 子账号{% endif %}</span>
+          </span>
+          <form method="post" action="/logout" style="display:inline">
+            <button class="btn sm ghost" title="退出登录">退出</button>
+          </form>
+        {% endif %}
+        {% if auto_refresh %}
+          <span class="chip status-chip" id="autoRefreshChip"
+                title="停留在本页会定时拉取最新数据：正在填写 / 勾选时不刷新，切到别的标签页自动暂停，页面变慢会自动放慢节奏">
+            <i class="bi bi-arrow-repeat" aria-hidden="true"></i>
+            <span class="chip-text" id="autoRefreshText">自动刷新</span>
+          </span>
+        {% endif %}
+        {% if settings is defined and settings.feishu_enabled %}
+          <span class="chip status-chip" title="飞书已连接"><i class="bi bi-check2-circle" aria-hidden="true"></i><span class="chip-text">飞书已连接</span></span>
+        {% else %}
+          <span class="chip status-chip" title="飞书未配置"><i class="bi bi-exclamation-circle" aria-hidden="true"></i><span class="chip-text">飞书未配置</span></span>
+        {% endif %}
+      </div>
+    </header>
+    <div class="main-wrap">
+      <div class="page">
+        <div class="page-header">
+          <div class="page-title">
+            <h1>{% block heading %}{% endblock %}</h1>
+            {% if self.sub() %}<div class="page-subtitle">{% block sub %}{% endblock %}</div>{% endif %}
+          </div>
+          <div class="page-actions">{% block actions %}{% endblock %}</div>
+        </div>
+        {% for msg in flashes %}
+          <div class="note {{ msg.kind }}" role="{{ 'alert' if msg.kind in ('danger', 'error') else 'status' }}">{{ msg.text }}</div>
+        {% endfor %}
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </main>
+</div>
+{# 脚本跟着版本号走：不带 ?v= 浏览器会一直用缓存里的旧 JS，
+   改了逻辑（如流程说明弹窗）用户那边却看不到效果 #}
+<script src="/static/app.js?v={{ asset_v }}"></script>
+<script src="/static/voice.js?v={{ asset_v }}"></script>
+{# 统一请求包装（fetchJson）：非 JSON 响应给一句人话并上报「异常日志」，别让
+   `r.json()` 抛 `Unexpected token '<'` 把真正的原因盖掉（2026-10-09） #}
+<script src="/static/http.js?v={{ asset_v }}"></script>
+{% block scripts %}{% endblock %}
+<script>
+  /* 时间口径（2026-10-13 改）：库里存 UTC，**页面一律按服务端统一时区（北京）渲染**，
+     不看浏览器时区 —— 同一个时间任何人看到的都是同一个点。
+     这里仍然把浏览器时区写进 cookie `tz`（备查），但服务端默认不采用它；
+     真要按各自时区看，把 TZ_FOLLOW_BROWSER 设成 1 即可。 */
+  (function () {
+    try {
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (!tz) return;
+      var m = document.cookie.match(/(?:^|;\s*)tz=([^;]*)/);
+      if (m && decodeURIComponent(m[1]) === tz) return;
+      document.cookie = 'tz=' + encodeURIComponent(tz) + ';path=/;max-age=31536000;SameSite=Lax';
+      if (!m) window.location.reload();
+    } catch (e) { /* 隐私模式下拿不到时区也不影响页面 */ }
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+# 公网部署：应用 + PostgreSQL + Caddy(自动 HTTPS)
+# 使用：docker compose up -d --build
+# 数据持久化：pgdata（订单数据）、media（订单截图）两个命名卷；用 docker compose down 不会丢失，
+# 只有 docker compose down -v 才会删除卷，所以务必配合 scripts/backup.sh 定期备份。
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: orderhub
+      POSTGRES_USER: orderhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orderhub -d orderhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://orderhub:${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}@db:5432/orderhub
+      MEDIA_DIR: /app/data/media
+      # 自营端（渔货栈）共用它自己的库：不配就当成没接 HUB，HUB 平台端照常跑
+      HUB_DATABASE_URL: ${HUB_DATABASE_URL:-}
+      # 时区统一东八区：日志、定时任务、容器内时间都按北京时间
+      TZ: Asia/Shanghai
+    volumes:
+      - media:/app/data/media
+      # 订单数据备份（每日 03:00 自动跑，保留 7 天）：独立卷，重建容器不丢
+      - backups:/app/data/backups
+      # 挂载 .env：系统设置页可写入凭证并持久化（改完重启容器依然生效）
+      - ./.env:/app/.env:rw
+    # 无域名/未备案时直接用 http://服务器IP:8000 访问；有域名再加 --profile https 走 Caddy
+    ports:
+      - "8000:8000"
+    # 除了自己的网络，还要挂上 HUB 那套（/opt/scx）的网络：
+    # HUB 的库只在那边可见，主机名 postgres 才能连上
+    networks:
+      - default
+      - scx_net
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["https"]
+    depends_on:
+      - app
+    environment:
+      # 只在 --profile https 时才需要；启用前务必设置为已解析到本机的域名
+      DOMAIN: ${DOMAIN:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  media:
+  backups:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # HUB 那套 compose（/opt/scx 里的渔货栈）建的网络，直接挂上去用，不新建
+  scx_net:
+    name: scx_scx
+    external: true

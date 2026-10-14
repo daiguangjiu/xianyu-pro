@@ -1,0 +1,252 @@
+{% extends "base.html" %}
+{% block title %}店铺 · {{ shop.name }}{% endblock %}
+{% block heading %}{{ shop.name }}{% endblock %}
+{% block sub %}{{ shop.code or '未填编号' }} · {{ shop.operator or '未填运营人' }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/shops">返回店铺列表</a>
+  <a class="btn" href="/orders?account={{ shop.name }}">查看关联订单</a>
+{% endblock %}
+{% block content %}
+
+<div class="grid grid-4">
+  <div class="stat accent"><div class="label">关联订单</div><div class="value">{{ stat.orders }}</div><div class="hint">订单「出货闲鱼号」= 本账号</div></div>
+  <div class="stat"><div class="label">销售额</div><div class="value">¥{{ money(stat.sale) }}</div><div class="hint">成本 ¥{{ money(stat.cost) }}</div></div>
+  <div class="stat ok"><div class="label">毛利</div><div class="value">¥{{ money(stat.profit) }}</div><div class="hint">按订单售价 − 成本算</div></div>
+  <div class="stat warn"><div class="label">最近出单</div>
+    <div class="value">{{ stat.last_order_at | dt('%m-%d') if stat.last_order_at else '—' }}</div>
+    <div class="hint">{{ stat.last_order_at | dt('%Y-%m-%d') if stat.last_order_at else '暂无出单记录' }}</div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>审核</h2>
+  <div class="kv">
+    <div class="k">审核状态</div>
+    <div class="v">
+      {% if shop.audit_status == 'approved' %}<span class="badge badge-audit-approved">已通过</span>
+      {% elif shop.audit_status == 'rejected' %}<span class="badge badge-audit-rejected">已驳回</span>
+      {% else %}<span class="badge badge-audit-pending">待审核</span>{% endif %}
+      {% if shop.is_self_submitted %}<span class="muted">渔货栈账号提交（只有「已通过」才在渔货栈生效）</span>
+      {% else %}<span class="muted">渔枢系统端建档，默认已通过</span>{% endif %}
+    </div>
+    <div class="k">审核备注</div><div class="v">{{ shop.audit_note or '—' }}</div>
+  </div>
+  <form class="filters" method="post" action="/shops/{{ shop.id }}/audit">
+    <div class="field grow"><label for="a-note">驳回原因（驳回时填，提交人能看到）</label>
+      <input id="a-note" type="text" name="audit_note" value="{{ shop.audit_note }}" placeholder="如：店铺名称与订单里的「出货闲鱼号」不一致">
+    </div>
+    <div class="field"><label>&nbsp;</label>
+      <button class="btn primary" name="audit_status" value="approved">审核通过</button>
+    </div>
+    <div class="field"><label>&nbsp;</label>
+      <button class="btn" name="audit_status" value="rejected">驳回</button>
+    </div>
+    <div class="field"><label>&nbsp;</label>
+      <button class="btn" name="audit_status" value="pending" title="退回待审核">退回待审</button>
+    </div>
+  </form>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>账号台账信息</h2>
+  <div class="kv">
+    <div class="k">账号名称</div><div class="v">{{ shop.name or '-' }}</div>
+    <div class="k">账号唯一编号</div><div class="v mono">{{ shop.code or '-' }}</div>
+    <div class="k">账号运营人</div><div class="v">{{ shop.operator or '-' }}<span class="muted">（对应飞书发送人）</span></div>
+    <div class="k">账号所属人</div><div class="v">{{ shop.owner or '-' }}</div>
+    <div class="k">绑定手机设备</div><div class="v">{{ shop.device or '-' }}</div>
+    <div class="k">店铺类型</div><div class="v">{{ shop.shop_type_label }}</div>
+    <div class="k">店铺性质</div>
+    <div class="v">
+      {% if shop.is_student_shop %}<span class="badge">学员店铺</span>
+      {% else %}<span class="badge muted">自营店铺</span>{% endif %}
+      <span class="muted">（学员店铺由群里的学员模板自动标）</span>
+    </div>
+    {% if shop.is_student_shop %}
+    <div class="k">所属带教</div><div class="v">{{ shop.coach or '-' }}</div>
+    {% endif %}
+    <div class="k">平台技术服务费</div><div class="v num">{{ shop.service_fee_rate_value }}%</div>
+    <div class="k">经营细分类目</div><div class="v">{{ shop.category or '-' }}</div>
+    <div class="k">绑定手机号</div><div class="v mono">{{ shop.phone or '-' }}</div>
+    <div class="k">会员名</div><div class="v">{{ shop.member_name or '-' }}<span class="muted">（闲鱼「账号与安全」里的会员名）</span></div>
+    <div class="k">联系电话</div><div class="v mono">{{ shop.contact_phone or '-' }}<span class="muted">（联系运营人本人）</span></div>
+    <div class="k">实名认证是否完成</div><div class="v">{{ shop.real_name_verified_text }}</div>
+    <div class="k">渔货栈店铺已关联</div>
+    <div class="v">
+      {% if shop.self_linked_user_id %}
+        已关联{% if linked_name %}：{{ linked_name }}{% endif %}
+        {% if shop.self_linked_at %}<span class="muted">（{{ shop.self_linked_at | dt('%Y-%m-%d %H:%M') }}）</span>{% endif %}
+      {% else %}<span class="muted">未关联</span>{% endif %}
+    </div>
+    <div class="k">账号状态</div><div class="v">{{ shop.status or '-' }}</div>
+    <div class="k">类目 / 供应链</div><div class="v">{{ shop.supply or '-' }}</div>
+    <div class="k">支付宝绑定账号</div><div class="v mono">{{ shop.alipay or '-' }}</div>
+    <div class="k">回款归属人</div><div class="v">{{ shop.payee_name or '-' }}<span class="muted">（按历史订单补）</span></div>
+    <div class="k">芝麻信用分</div><div class="v">{{ shop.credit_score or '-' }}</div>
+    <div class="k">实名认证</div><div class="v">{{ shop.real_name or '-' }}</div>
+    <div class="k">闲气值 / 鱼力值</div><div class="v">{{ shop.xianqi or '-' }} / {{ shop.yuli or '-' }}</div>
+    <div class="k">有无违规</div><div class="v">{{ shop.violation or '-' }}</div>
+    <div class="k">新老账号</div><div class="v">{{ shop.account_age or '-' }}</div>
+    <div class="k">微信账号</div><div class="v mono">{{ shop.wechat or '-' }}</div>
+    <div class="k">描述</div><div class="v">{{ shop.note or '-' }}</div>
+  </div>
+</div>
+
+<div class="card" id="edit-shop" style="margin-top:16px">
+  <h2>编辑店铺信息</h2>
+  <form class="filters" method="post" action="/shops/{{ shop.id }}/edit">
+    <div class="field grow"><label for="f-name">账号名称</label>
+      <input id="f-name" type="text" name="name" required value="{{ shop.name }}">
+    </div>
+    <div class="field"><label for="f-code">账号唯一编号</label>
+      <input id="f-code" type="text" name="code" value="{{ shop.code }}" placeholder="如：XYSK0001">
+    </div>
+    <div class="field"><label for="f-operator">账号运营人</label>
+      <input id="f-operator" type="text" name="operator" value="{{ shop.operator }}" placeholder="飞书里的发送人">
+    </div>
+    <div class="field"><label for="f-owner">账号所属人</label>
+      <input id="f-owner" type="text" name="owner" value="{{ shop.owner }}">
+    </div>
+    <div class="field"><label for="f-device">绑定手机设备</label>
+      <input id="f-device" type="text" name="device" value="{{ shop.device }}">
+    </div>
+    {# 店铺类型：三个固定值，只能从下拉里选（服务层还会兜底：认不出的值一律回落「个人闲置店铺」） #}
+    <div class="field"><label for="f-shop-type">店铺类型</label>
+      <select id="f-shop-type" name="shop_type">
+        {% for t in shop_types %}<option value="{{ t }}" {{ 'selected' if shop.shop_type_label == t }}>{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    {# 店铺性质：自营 / 学员。学员店铺才有带教，选了「学员店铺」才放出所属带教那一栏（见页尾 JS） #}
+    <div class="field"><label for="f-nature">店铺性质</label>
+      <select id="f-nature" name="shop_nature" data-coach-field="f-coach-field">
+        {% for n in shop_natures %}<option value="{{ n }}" {{ 'selected' if shop.shop_nature_label == n }}>{{ n }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field" id="f-coach-field" {{ 'hidden' if not shop.is_student_shop }}><label for="f-coach">所属带教</label>
+      <input id="f-coach" type="text" name="coach" value="{{ shop.coach }}" placeholder="带这个学员的老师">
+    </div>
+    <div class="field"><label for="f-fee-rate">平台技术服务费（%）</label>
+      <input id="f-fee-rate" type="text" name="service_fee_rate" value="{{ shop.service_fee_rate_value }}"
+             placeholder="0.6" title="平台结算时按成交额扣的比例：订单的「平台技术服务费」金额 = 成交价 × 这个费率">
+    </div>
+    <div class="field"><label for="f-category">经营细分类目</label>
+      <input id="f-category" type="text" name="category" value="{{ shop.category }}">
+    </div>
+    <div class="field"><label for="f-phone">绑定手机号</label>
+      <input id="f-phone" type="text" name="phone" value="{{ shop.phone }}">
+    </div>
+    <div class="field"><label for="f-member">会员名</label>
+      <input id="f-member" type="text" name="member_name" value="{{ shop.member_name }}"
+             placeholder="闲鱼「账号与安全」里的会员名">
+    </div>
+    <div class="field"><label for="f-contact">联系电话</label>
+      <input id="f-contact" type="text" name="contact_phone" value="{{ shop.contact_phone }}"
+             placeholder="联系运营人本人用的号">
+    </div>
+    <div class="field"><label for="f-verified">实名认证是否完成</label>
+      <select id="f-verified" name="real_name_verified">
+        <option value="0" {% if not shop.real_name_verified %}selected{% endif %}>未完成</option>
+        <option value="1" {% if shop.real_name_verified %}selected{% endif %}>已完成</option>
+      </select>
+    </div>
+    <div class="field"><label for="f-status">账号状态</label>
+      <input id="f-status" type="text" name="status" value="{{ shop.status }}" placeholder="正常运营">
+    </div>
+    <div class="field"><label for="f-supply">类目 / 供应链</label>
+      <input id="f-supply" type="text" name="supply" value="{{ shop.supply }}">
+    </div>
+    <div class="field"><label for="f-alipay">支付宝绑定账号</label>
+      <input id="f-alipay" type="text" name="alipay" value="{{ shop.alipay }}">
+    </div>
+    <div class="field"><label for="f-payee">回款归属人</label>
+      <input id="f-payee" type="text" name="payee_name" value="{{ shop.payee_name }}">
+    </div>
+    <div class="field"><label for="f-credit">芝麻信用分</label>
+      <input id="f-credit" type="text" name="credit_score" value="{{ shop.credit_score }}">
+    </div>
+    <div class="field"><label for="f-real">实名认证</label>
+      <input id="f-real" type="text" name="real_name" value="{{ shop.real_name }}">
+    </div>
+    <div class="field"><label for="f-xianqi">闲气值</label>
+      <input id="f-xianqi" type="text" name="xianqi" value="{{ shop.xianqi }}">
+    </div>
+    <div class="field"><label for="f-yuli">鱼力值</label>
+      <input id="f-yuli" type="text" name="yuli" value="{{ shop.yuli }}">
+    </div>
+    <div class="field"><label for="f-violation">有无违规</label>
+      <input id="f-violation" type="text" name="violation" value="{{ shop.violation }}">
+    </div>
+    <div class="field"><label for="f-wechat">微信账号</label>
+      <input id="f-wechat" type="text" name="wechat" value="{{ shop.wechat }}">
+    </div>
+    <div class="field"><label for="f-age">新老账号</label>
+      <input id="f-age" type="text" name="account_age" value="{{ shop.account_age }}">
+    </div>
+    <div class="field grow"><label for="f-note">描述</label>
+      <input id="f-note" type="text" name="note" value="{{ shop.note }}">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存</button></div>
+  </form>
+  <details style="margin-top:10px">
+    <summary class="muted">查看 / 修改微信密码等敏感信息（默认折叠）</summary>
+    <form class="filters" method="post" action="/shops/{{ shop.id }}/edit" style="margin-top:10px">
+      <input type="hidden" name="name" value="{{ shop.name }}">
+      <div class="field"><label>微信密码</label>
+        <input type="text" name="wechat_password" value="{{ shop.wechat_password }}">
+      </div>
+      <div class="field"><label>微信支付密码</label>
+        <input type="text" name="wechat_pay_password" value="{{ shop.wechat_pay_password }}">
+      </div>
+      <div class="field"><label>&nbsp;</label><button class="btn">保存敏感信息</button></div>
+    </form>
+  </details>
+  <div class="btn-row">
+    <form method="post" action="/shops/{{ shop.id }}/delete"
+          data-confirm="删除店铺「{{ shop.name }}」？仅删除档案，订单数据不受影响。">
+      <button class="btn danger">删除该店铺</button>
+    </form>
+    <span class="muted">创建于 {{ human_time(shop.created_at) }} · 更新于 {{ human_time(shop.updated_at) }}</span>
+  </div>
+</div>
+
+<script>
+  /* 「所属带教」只给学员店铺：性质切成「学员店铺」才把这一栏放出来 */
+  (function () {
+    var STUDENT = {{ (shop_natures[-1] if shop_natures else '学员店铺') | tojson }};
+    document.querySelectorAll('select[data-coach-field]').forEach(function (sel) {
+      var box = document.getElementById(sel.getAttribute('data-coach-field'));
+      if (!box) { return; }
+      var sync = function () { box.hidden = sel.value !== STUDENT; };
+      sel.addEventListener('change', sync);
+      sync();
+    });
+  })();
+</script>
+
+<div class="card" style="margin-top:16px">
+  <div class="row-between"><h2>最近关联订单</h2><span class="muted">订单「出货闲鱼号」= 本账号的都会出现，最多 10 条</span></div>
+  {% if orders %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th class="num">序号</th><th>订单号</th><th>产品名称</th><th class="num">售价</th><th>推单状态</th><th>时间</th><th></th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr>
+          <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+          <td class="mono"><a href="/orders/{{ o.id }}">{{ o.order_no }}</a></td>
+          <td>{{ o.product_name or '-' }}</td>
+          <td class="num">¥{{ money(o.sale_amount) }}</td>
+          <td>
+            <span class="badge {{ 'recalled' if (o.is_recalled or o.order_state == 'canceled') else o.supplier_status }}">{{ push_status_label(o) }}</span>
+          </td>
+          <td class="nowrap muted">{{ human_time(o.ordered_at) }}</td>
+          <td class="nowrap"><a class="btn sm" href="/orders/{{ o.id }}">详情</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有匹配到订单。订单里的「出货闲鱼号」填「{{ shop.name }}」后会自动出现在这里。</div>
+  {% endif %}
+</div>
+{% endblock %}

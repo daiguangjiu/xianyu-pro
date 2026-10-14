@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}采购单 · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 采购买家侧主色：与 1688 一致的品牌橙（和商品详情页 --pdp-brand 同值） */
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .btn-primary { background: var(--pdp-brand); border-color: var(--pdp-brand); }
+  .btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark);
+  }
+  .btn-outline-primary { color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .btn-outline-primary:hover { background: var(--pdp-brand); border-color: var(--pdp-brand); color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set badge_map = {'pending_pay': 'bg-warning text-dark', 'paid': 'bg-info text-dark',
+                    'shipped': 'bg-primary', 'completed': 'bg-success', 'cancelled': 'bg-secondary'} %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>我的采购单</h1>
+    <span class="page-subtitle">
+      向渔货栈平台下的采购 / 备货单（共 {{ by_status.values() | sum }} 笔）·
+      从 <a href="{{ self_url('/harbor') }}" style="color: var(--c-primary);">货源广场</a>
+      选货后「立即下单」或「加采购车」结算
+    </span>
+  </div>
+  {# 筛选 chips 与「全部订单」页同一套：小按钮 + mono 计数，不再混着 12px 徽章 #}
+  <div class="page-actions">
+    <a href="{{ self_url('/purchases') }}"
+       class="btn btn-sm {% if not status %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+      全部 <span class="ms-1" style="font-family: var(--font-mono);">{{ by_status.values() | sum }}</span>
+    </a>
+    {% for key, label in [('pending_pay', '待支付'), ('paid', '待发货'), ('shipped', '已发货'), ('completed', '已完成'), ('cancelled', '已取消')] %}
+      <a href="{{ self_url('/purchases?status=' ~ key) }}"
+         class="btn btn-sm {% if status == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+        {{ label }} <span class="ms-1" style="font-family: var(--font-mono);">{{ by_status.get(key, 0) }}</span>
+      </a>
+    {% endfor %}
+    <a href="{{ self_url('/cart') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-cart3"></i> 采购车
+    </a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>采购单号</th>
+          <th>下单时间</th>
+          <th>供应商</th>
+          <th>商品</th>
+          <th class="text-end">件数</th>
+          <th class="text-end">应付金额</th>
+          <th>状态</th>
+          <th class="table-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for o in orders %}
+          <tr>
+            <td>
+              <a href="{{ self_url('/purchases/' ~ o.order_no) }}" class="mono-sm text-decoration-none"
+                 style="color: var(--c-primary);">{{ o.order_no }}</a>
+              <div class="mono-sm text-secondary">
+                {{ '直接采购' if o.source == 'buy_now' else '采购车结算' }}
+                {% if o.sub_count > 1 %}<span class="badge bg-light text-dark ms-1">合并单 · {{ o.sub_count }} 张子单</span>{% endif %}
+              </div>
+            </td>
+            <td class="mono-sm text-secondary">{{ o.created_at | dt('%Y-%m-%d %H:%M') if o.created_at else '—' }}</td>
+            <td class="small">{{ o.supplier_name or '—' }}</td>
+            <td class="small">
+              {{ o.item_kinds }} 款
+              {% if o.paid_at %}<div class="mono-sm text-secondary">付款 {{ o.paid_at | dt('%m-%d %H:%M') }}</div>{% endif %}
+            </td>
+            <td class="text-end mono">{{ o.total_qty }}</td>
+            <td class="text-end mono">{{ money(o.pay_amount) }}</td>
+            <td>
+              <span class="badge {{ badge_map.get(o.status, 'bg-light') }}">{{ stock_status_text(o.status) }}</span>
+              {# 合并单：还有几张子单在路上（2026-10-12 拆单履约） #}
+              {% set subs = subs_map.get(o.order_no, []) %}
+              {% if subs %}
+                {% set done = subs | selectattr('status', 'in', ['shipped', 'completed']) | list | length %}
+                <div class="mono-sm text-secondary mt-1">已发 {{ done }}/{{ subs | length }} 张子单</div>
+              {% endif %}
+            </td>
+            <td class="table-actions">
+              {% if o.status == 'pending_pay' %}
+                <a href="{{ self_url('/pay/' ~ o.order_no) }}" class="btn btn-sm btn-primary">去支付</a>
+              {% else %}
+                <a href="{{ self_url('/purchases/' ~ o.order_no) }}" class="btn btn-sm btn-ghost">详情</a>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="text-center text-secondary py-5">
+              还没有采购单。去
+              <a href="{{ self_url('/harbor') }}" style="color: var(--c-primary);">货源广场</a>
+              选一款货，点「立即下单」走一遍支付结算就有了。
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

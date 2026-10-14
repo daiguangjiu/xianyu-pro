@@ -1,0 +1,1637 @@
+{% extends "base.html" %}
+{# 2026-10-11 用户拍板：标题里不再写「（1688 版式）」—— 详情页只有这一版，
+   挂个版式后缀反而让人以为还有别的版本可以切。 #}
+{% block title %}{% if not_found %}商品不存在{% else %}{{ item.title }} · 商品详情{% endif %}{% endblock %}
+
+{# =====================================================================
+   商品详情 · 1688 版式（新增的一套，老页面 templates/goods_detail.html 不动）
+
+   版式严格照 1688 商品详情页的「左滚动 / 右固定」两栏：
+     · 左列（内容长、整页滚动）
+         [供应商条：厂名 + 标签 + 入驻/主营 + 关注/客服/商品]
+         [图区：左侧竖排缩略图（含「参数」格）+ 右侧大图]
+         [分类 Tab：商品详情 / 规格参数 / 铺货与预填包 / 同类货源]  ← 滚动到此处吸顶
+         [Tab 面板：详情图 + 详情正文 + 参数表 + SKU 表 + 预填包]
+         [上架与库存情况卡]
+     · 右列（内容短、sticky 固定在右侧，不随左列滚）
+         [货源/商品标题 + 标签] [价格块] [发货与售后行] [规格维度 + SKU 表格行（带步进器）]
+         [贴标签] [按钮组] [闲鱼铺货预填] [状态条]
+     · 手机（≤900px）：退回单列 —— 图 → 价格/规格 → 详情 Tab，底部吸底操作条。
+   数据口径与经典版一致：渔货价 resolve_cost、建议售价取商品「建议售价」（没填才用
+   定价引擎）、SKU 来自 sku_list、上架动作走同一套 handoff 接口。
+   ===================================================================== #}
+{% block head_extra %}
+<style>
+  .pdp {
+    --pdp-brand: #FF6A00;
+    --pdp-brand-dark: #E85A00;
+    --pdp-soft: #FFF6F0;
+    --pdp-border: #FFE0C7;
+    --pdp-line: #E5E7EB;
+    --pdp-sticky-top: var(--topbar-h);
+  }
+  .pdp .pdp-card {
+    background: var(--c-surface);
+    border: 1px solid var(--c-border);
+    border-radius: 4px;
+    box-shadow: var(--shadow-card);
+  }
+
+  /* —— 面包屑行 —— */
+  .pdp-crumb {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 12px; color: var(--c-text-muted); margin-bottom: var(--s-3);
+  }
+  .pdp-crumb a { color: var(--c-text-muted); text-decoration: none; }
+  .pdp-crumb a:hover { color: var(--pdp-brand); }
+  .pdp-crumb .sep { color: var(--c-text-subtle); }
+  .pdp-crumb .cur { color: var(--c-text); }
+  .pdp-crumb .right { margin-left: auto; }
+
+  /* ============================================================
+     两栏骨架：左列（图区 + 详情）滚动，右列（价格/规格/按钮）固定
+     ============================================================ */
+  .pdp-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 424px;
+    grid-template-areas:
+      "gallery buy"
+      "detail  buy";
+    gap: var(--s-4);
+    align-items: start;
+  }
+  .pdp-gallery { grid-area: gallery; }
+  .pdp-detail { grid-area: detail; }
+  .pdp-buy {
+    grid-area: buy;
+    align-self: start;                     /* 高度按内容，sticky 才生效 */
+    position: sticky; top: var(--pdp-sticky-top);
+    max-height: calc(100vh - var(--pdp-sticky-top) - var(--s-4));
+    overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding: var(--s-4);
+  }
+  .pdp-buy::-webkit-scrollbar { width: 6px; }
+  .pdp-buy::-webkit-scrollbar-thumb { background: var(--c-border-strong); border-radius: 3px; }
+
+  /* ======== 左列：供应商条 ======== */
+  .pdp-supbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px var(--s-4); border-bottom: 1px solid var(--c-border);
+  }
+  .pdp-supbar .logo {
+    width: 34px; height: 34px; flex: 0 0 34px; border-radius: 4px;
+    background: var(--pdp-brand); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700;
+  }
+  .pdp-supbar .nm { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pdp-supbar .nm i { color: var(--pdp-brand); font-size: 13px; }
+  .pdp-supbar .mt { font-size: 11px; color: var(--c-text-muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .pdp-supbar .acts { margin-left: auto; display: flex; gap: 6px; flex: 0 0 auto; }
+  .pdp-pill {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 22px; padding: 0 8px; border-radius: 3px; font-size: 11px; font-weight: 600;
+    background: var(--c-surface-2); border: 1px solid var(--c-border); color: var(--c-text-muted);
+    text-decoration: none; cursor: pointer;
+  }
+  .pdp-pill:hover { border-color: var(--pdp-brand); color: var(--pdp-brand-dark); }
+  .pdp-pill.ok { background: var(--c-success-soft); border-color: var(--c-success-border); color: var(--c-success-fg); }
+  .pdp-pill.err { background: var(--c-error-soft); border-color: var(--c-error-border); color: var(--c-error-fg); }
+
+  /* ======== 左列：图区（左竖排缩略图 + 右大图）======== */
+  .pdp-gallery-main { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 10px; padding: var(--s-3) var(--s-4); }
+  /* 竖排缩略图：外层只做定位框（自身不撑高 grid 行），内层绝对铺满 → 高度严格等于大图，超出在列内滚动 */
+  .pdp-thumbs-col { position: relative; }
+  .pdp-thumbs-v {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; gap: 8px;
+    overflow-y: auto; scrollbar-width: none;
+  }
+  .pdp-thumbs-v::-webkit-scrollbar { display: none; }
+  .pdp-thumbs-v img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+    border: 2px solid transparent; border-radius: 3px; cursor: pointer;
+    background: var(--c-surface-2);
+  }
+  .pdp-thumbs-v img.active { border-color: var(--pdp-brand); }
+  .pdp-thumb-tool {
+    width: 100%; aspect-ratio: 1 / 1; border: 1px solid var(--c-border-strong);
+    border-radius: 3px; background: var(--c-surface); cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+    font-size: 11px; color: var(--c-text-muted);
+  }
+  .pdp-thumb-tool:hover { border-color: var(--pdp-brand); color: var(--pdp-brand-dark); }
+  .pdp-thumb-tool i { font-size: 15px; }
+
+  .pdp-stage {
+    position: relative; overflow: hidden; border-radius: 4px; background: #fff;
+    border: 1px solid var(--c-border);
+  }
+  .pdp-stage-track { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; }
+  .pdp-stage-track::-webkit-scrollbar { display: none; }
+  .pdp-stage-track .pdp-slide {
+    flex: 0 0 100%; scroll-snap-align: start;
+    /* 4:3 而不是 1:1：大图矮一点，首屏能带出下面的价格 / 规格，屏效更高 */
+    aspect-ratio: 4 / 3; max-height: 420px;
+    display: flex; align-items: center; justify-content: center; background: #fff;
+  }
+  .pdp-stage-track img {
+    max-width: 100%; max-height: 100%; width: 100%; height: 100%;
+    object-fit: contain; display: block;
+  }
+  .pdp-stage .pdp-empty {
+    aspect-ratio: 4 / 3; max-height: 420px; display: flex; align-items: center; justify-content: center;
+    color: var(--c-text-subtle); font-size: 40px;
+  }
+  .pdp-arrow {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 44px; border: 0; cursor: pointer;
+    background: rgba(15, 23, 42, 0.35); color: #fff; font-size: 14px;
+    display: none; align-items: center; justify-content: center;
+  }
+  .pdp-stage:hover .pdp-arrow { display: inline-flex; }
+  .pdp-arrow.prev { left: 0; border-radius: 0 4px 4px 0; }
+  .pdp-arrow.next { right: 0; border-radius: 4px 0 0 4px; }
+  .pdp-count {
+    position: absolute; right: 8px; bottom: 8px;
+    padding: 2px 8px; border-radius: 999px; font-size: 11px;
+    background: rgba(15, 23, 42, 0.45); color: #fff; font-family: var(--font-mono);
+  }
+  .pdp-gallery-foot {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 0 var(--s-4) var(--s-3);
+    font-size: 11px; color: var(--c-text-subtle);
+  }
+
+  /* ======== 左列：吸顶分类 Tab ======== */
+  .pdp-tabbar {
+    position: sticky; top: var(--pdp-sticky-top); z-index: 30;
+    display: flex; overflow-x: auto; scrollbar-width: none;
+    background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 4px;
+    margin-bottom: var(--s-3);
+  }
+  .pdp-tabbar::-webkit-scrollbar { display: none; }
+  .pdp-tab {
+    border: 0; background: none; padding: 13px 20px; cursor: pointer; white-space: nowrap;
+    font-size: 14px; color: var(--c-text-muted);
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .pdp-tab i { margin-right: 6px; font-size: 14px; opacity: .85; }
+  .pdp-tab:hover { color: var(--c-text); }
+  .pdp-tab.active { color: var(--pdp-brand-dark); border-bottom-color: var(--pdp-brand); font-weight: 600; }
+  .pdp-tab.active i { opacity: 1; }
+  /* 供应商提示：⚠️ 图标常亮成警示色，提醒运营先看这条 */
+  .pdp-tab.warn i { color: var(--c-warning-fg, #b45309); opacity: 1; }
+  .pdp-panel { padding: var(--s-4); }
+  .pdp-panel[hidden] { display: none; }
+  .pdp-panel h4 { font-size: 14px; font-weight: 600; margin: var(--s-4) 0 var(--s-2); }
+  .pdp-panel h4:first-child { margin-top: 0; }
+  .pdp-imgwall { display: flex; flex-direction: column; gap: 8px; }
+  .pdp-imgwall img { max-width: 100%; display: block; margin: 0 auto; border-radius: 4px; }
+  .pdp-detail-html { max-width: 100%; overflow-x: auto; font-size: 13px; line-height: 1.75; word-break: break-word; }
+  .pdp-detail-html img { max-width: 100%; height: auto; }
+  /* 详情正文是纯文本（按源文本换行）时保留换行与缩进 */
+  .pdp-detail-html.plain { white-space: pre-wrap; }
+
+  /* 详情分组：一组文案（可复制 / AI 重写）+ 一组详情图（居中看图，左右切换） */
+  .pdp-detail-group {
+    border: 1px solid var(--c-border, #e5e7eb); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 12px; background: #fff;
+  }
+  .pdp-detail-group:last-child { margin-bottom: 0; }
+  .pdp-detail-group-hd {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 13px; font-weight: 600; margin-bottom: 8px;
+  }
+  .pdp-detail-group-hd .sub { font-weight: 400; font-size: 12px; color: var(--c-text-muted, #64748b); }
+  .pdp-detail-group-acts { display: flex; gap: 6px; margin-left: auto; }
+  .pdp-mini-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; font-size: 12px; font-weight: 400;
+    border: 1px solid var(--c-border, #e5e7eb); border-radius: 4px;
+    background: #fff; color: var(--c-text-muted, #475569); cursor: pointer;
+  }
+  .pdp-mini-btn:hover { color: var(--c-text, #0f172a); border-color: var(--c-border-strong, #cbd5e1); }
+  .pdp-mini-btn.ai:hover { color: #7c3aed; border-color: #7c3aed; }
+  .pdp-rewrite-box {
+    margin-top: 8px; padding: 8px 10px; border-radius: 4px;
+    background: #f8fafc; border: 1px dashed var(--c-border-strong, #cbd5e1);
+    font-size: 13px; line-height: 1.75; white-space: pre-wrap; word-break: break-word;
+  }
+  /* 「商品详情图」页签：一组 = 居中大图（右下角 x/x 角标）+ 下面一排缩略图，与渔枢系统查看页同一套看法 */
+  .pdp-img-group {
+    border: 1px solid var(--c-border, #e5e7eb); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 12px; background: #fff;
+  }
+  .pdp-img-group:last-child { margin-bottom: 0; }
+  .pdp-img-group-hd {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 13px; font-weight: 600; margin-bottom: 10px;
+  }
+  .pdp-img-group-hd .sub { font-weight: 400; font-size: 12px; color: var(--c-text-muted, #64748b); }
+  .pdp-imgpick { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .pdp-imgpick-stage {
+    position: relative; width: 100%; max-width: 380px; aspect-ratio: 1 / 1;
+    border: 1px solid var(--c-border, #e5e7eb); border-radius: 6px; background: #fff;
+    display: flex; align-items: center; justify-content: center; overflow: hidden;
+  }
+  .pdp-imgpick-stage img {
+    max-width: 100%; max-height: 100%; width: auto; height: auto;
+    object-fit: contain; display: block;
+  }
+  .pdp-imgpick-stage.is-broken img { display: none; }
+  .pdp-imgpick-stage.is-broken::after {
+    content: "这张图打不开：检查详情图地址"; font-size: 12px; color: var(--c-text-muted, #64748b);
+  }
+  .pdp-img-index {
+    position: absolute; right: 10px; bottom: 10px; z-index: 2;
+    padding: 2px 8px; border-radius: 999px;
+    background: rgba(15, 23, 42, .55); color: #fff;
+    font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.7;
+  }
+  .pdp-imgpick-thumbs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .pdp-imgpick-thumbs img {
+    width: 56px; height: 56px; object-fit: cover; border-radius: 6px;
+    border: 1px solid var(--c-border, #e5e7eb); background: #f1f5f9; cursor: pointer;
+  }
+  .pdp-imgpick-thumbs img.active {
+    border-color: var(--pdp-brand, #FF6A00); box-shadow: 0 0 0 2px rgba(255, 106, 0, .18);
+  }
+  .pdp-tip {
+    white-space: pre-wrap; line-height: 1.75; background: #FFFBEB;
+    border-left: 3px solid #F59E0B; padding: 10px 12px; border-radius: 4px; font-size: 13px;
+  }
+  /* 「供应商提示」页签：整块警示色卡片，和 Tab 上的 ⚠️ 呼应 */
+  .pdp-tipbox {
+    background: var(--c-warning-soft); border: 1px solid var(--c-warning-border);
+    border-radius: 6px; padding: 12px 14px;
+  }
+  .pdp-tipbox .hd {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
+    font-size: 13px; font-weight: 600; color: var(--c-warning-fg);
+  }
+  .pdp-tipbox .hd i { font-size: 15px; }
+  .pdp-tipbox .pdp-tip { background: #fff; border-left-width: 3px; }
+  .pdp-params { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .pdp-params th, .pdp-params td { border: 1px solid var(--c-border); padding: 8px 10px; }
+  .pdp-params th { width: 140px; background: var(--c-surface-2); color: var(--c-text-muted); font-weight: 500; text-align: left; }
+
+  /* ======== 左列底部：上架与库存情况 ======== */
+  .pdp-statcard { margin-top: var(--s-3); padding: var(--s-4); }
+  .pdp-card-hd { font-size: 14px; font-weight: 600; margin-bottom: var(--s-3); display: flex; align-items: center; gap: 6px; }
+  .pdp-statgrid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-3); }
+  .pdp-statgrid .s { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: 4px; padding: 10px 12px; }
+  .pdp-statgrid .n { display: block; font-family: var(--font-mono); font-size: 17px; font-weight: 600; }
+  .pdp-statgrid .n.brand { color: var(--pdp-brand); }
+  .pdp-statgrid .l { display: block; font-size: 11px; color: var(--c-text-muted); margin-top: 2px; }
+  .pdp-statfoot { margin-top: var(--s-3); font-size: 11px; color: var(--c-text-subtle); display: flex; gap: var(--s-4); flex-wrap: wrap; }
+
+  /* ======== 右列：标题 / 价格 / 规格 / 按钮 ======== */
+  .pdp-shopline {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 12px; color: var(--c-text-muted);
+  }
+  .pdp-title { font-size: 17px; font-weight: 600; line-height: 1.5; margin: 8px 0 0; }
+  /* 商品卖点页签：一条一个浅橙行（卖点来自渔枢系统商品档案，随商品同步过来） */
+  .pdp-points { display: grid; gap: 8px; }
+  .pdp-point {
+    display: flex; align-items: flex-start; gap: 8px; padding: 9px 12px;
+    background: var(--pdp-soft); border: 1px solid var(--pdp-border); border-radius: 8px;
+    font-size: 13px; line-height: 1.6;
+  }
+  .pdp-point .bi { color: var(--pdp-brand); flex: 0 0 auto; margin-top: 2px; }
+  .pdp-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
+  /* 价格块（2026-10-11 用户拍板重排）：左「渔货价」大字 + 右「建议零售价」强调卡片，
+     下面一行才是 毛利 · 市场价 · 渔货价区间 —— 以前几个数全挤在同一行看不清。
+     建议零售价要求「视觉突出」：白底卡片 + 大号等宽数字 + 淡阴影。 */
+  .pdp-pricebox {
+    margin-top: var(--s-3); padding: 12px 14px;
+    background: var(--pdp-soft); border: 1px solid var(--pdp-border); border-radius: 6px;
+  }
+  /* 两个价并排、**同一个骨架**（标签 + 大字价一行，说明一行）：
+     以前渔货价是一行内联、建议零售价是右下角的卡片，一高一低看着不齐
+     （2026-10-12 用户拍板：建议零售价和渔货价保持对齐显示）。 */
+  .pdp-price-main {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px; align-items: stretch;
+  }
+  .pdp-price-cell {
+    display: flex; flex-direction: column; justify-content: center; gap: 3px;
+    padding: 9px 12px; border-radius: 8px;
+    background: #fff; border: 1px solid var(--pdp-border);
+  }
+  /* 渔货价 = 下单按它结算（主价）：橙描边 + 淡橙底，还是最扎眼的那一块 */
+  .pdp-price-fish { border-color: var(--pdp-brand); background: var(--pdp-soft); }
+  .pdp-price-cell .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .pdp-price-cell .tag {
+    font-size: 11px; font-weight: 600; color: #fff; background: var(--pdp-brand);
+    border-radius: 3px; padding: 2px 6px; align-self: center;
+  }
+  .pdp-price-cell .val {
+    font-family: var(--font-mono); font-size: 26px; font-weight: 700;
+    color: var(--pdp-brand); letter-spacing: -0.02em; line-height: 1.05;
+  }
+  .pdp-price-sug .val { color: var(--pdp-brand-dark, var(--pdp-brand)); }
+  .pdp-price-cell .hint { font-size: 12px; color: var(--c-text-muted); }
+  .pdp-price-cell .hint .bi { color: var(--pdp-brand); }
+  .pdp-price-sub {
+    margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--pdp-border);
+    display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap;
+    font-size: 12px; color: var(--c-text-muted);
+  }
+  .pdp-price-sub .v { font-family: var(--font-mono); font-weight: 600; color: var(--c-text); }
+  .pdp-price-sub .rate { color: var(--c-success-fg); font-weight: 600; }
+  .pdp-price-warn {
+    margin-top: 8px; font-size: 12px; color: var(--c-error-fg);
+    background: var(--c-error-soft); border: 1px solid var(--c-error-border);
+    border-radius: 4px; padding: 6px 8px;
+  }
+
+  /* 发货 / 服务（1688 的绿字物流行）*/
+  .pdp-ship {
+    margin-top: var(--s-3); display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap;
+    font-size: 12px; color: var(--c-text-muted);
+  }
+  .pdp-ship .ic { color: var(--c-success-fg); }
+  .pdp-ship b { color: var(--c-text); font-weight: 600; }
+
+  /* 规格：维度按钮行 + SKU 表格行（1688「产品规格」那种一行一规格）*/
+  .pdp-sec { margin-top: var(--s-3); }
+  .pdp-sec-lab { font-size: 12px; color: var(--c-text-muted); margin-bottom: 8px; }
+  .pdp-sku-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pdp-sku-btn {
+    height: 30px; padding: 0 12px; border: 1px solid var(--c-border-strong);
+    background: var(--c-surface); border-radius: 3px;
+    font-size: 13px; color: var(--c-text); cursor: pointer;
+  }
+  .pdp-sku-btn:hover { border-color: var(--pdp-brand); color: var(--pdp-brand-dark); }
+  .pdp-sku-btn.active { border-color: var(--pdp-brand); color: var(--pdp-brand-dark); background: var(--pdp-soft); font-weight: 600; }
+
+  .pdp-skutable { border-top: 1px solid var(--c-border); margin-top: 2px; max-height: 210px; overflow-y: auto; scrollbar-width: thin; }
+  .pdp-skurow {
+    display: flex; align-items: center; gap: 10px; padding: 8px 2px;
+    border-bottom: 1px solid var(--c-border); cursor: pointer; font-size: 12px;
+  }
+  .pdp-skurow:hover { background: var(--c-surface-2); }
+  .pdp-skurow.active { background: var(--pdp-soft); }
+  .pdp-skurow .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pdp-skurow.active .nm { font-weight: 600; color: var(--pdp-brand-dark); }
+  .pdp-skurow .pr { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--pdp-brand); flex: 0 0 auto; }
+  /* 规格行右侧的小字建议零售价（2026-10-11 起规格行主价改成渔货价） */
+  .pdp-skurow .pr-sug { font-family: var(--font-mono); font-size: 12px; color: var(--c-text-muted); flex: 0 0 auto; }
+  .pdp-skurow .st { font-size: 11px; color: var(--c-text-muted); flex: 0 0 auto; }
+  .pdp-rowqty { display: inline-flex; align-items: center; border: 1px solid var(--c-border-strong); border-radius: 3px; overflow: hidden; flex: 0 0 auto; }
+  .pdp-rowqty button {
+    width: 24px; height: 26px; border: 0; background: var(--c-surface-2);
+    color: var(--c-text); font-size: 13px; cursor: pointer; line-height: 1;
+  }
+  .pdp-rowqty button:hover { background: var(--c-surface-3, #e9eaee); }
+  .pdp-rowqty input {
+    width: 34px; height: 26px; border: 0; text-align: center;
+    font-family: var(--font-mono); font-size: 12px;
+    border-left: 1px solid var(--c-border); border-right: 1px solid var(--c-border);
+  }
+  .pdp-selected { margin-top: 10px; font-size: 12px; color: var(--c-text-muted); line-height: 1.8; }
+  .pdp-selected b { color: var(--c-text); font-weight: 600; }
+
+  /* 贴标签（1688 的「贴标签」块）*/
+  .pdp-tagpick {
+    margin-top: var(--s-3); padding: 10px 12px;
+    border: 1px solid var(--c-border); border-radius: 4px; background: var(--c-surface-2);
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  }
+  .pdp-tagpick .lab { font-size: 12px; color: var(--c-text-muted); }
+  .ftag {
+    display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 3px;
+    font-size: 11px; border: 1px solid var(--c-border); background: var(--c-surface); color: var(--c-text-muted);
+  }
+
+  /* 结算条（1688：已选 N 款 N 台 | 商品金额 ¥x | 包邮 ... 发货时效 + 按钮 + 侧边统计）*/
+  .pdp-buybar { margin-top: var(--s-3); padding-top: 10px; border-top: 1px dashed var(--pdp-border); }
+  .pdp-buybar-top { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; font-size: 12px; color: var(--c-text-muted); }
+  .pdp-buybar-top b { font-family: var(--font-mono); font-size: 13px; color: var(--c-text); }
+  .pdp-buybar-top .bar { color: var(--c-border-strong); }
+  .pdp-buybar-top .amt { font-family: var(--font-mono); font-size: 16px; font-weight: 700; color: var(--pdp-brand); }
+  .pdp-buybar-top .ship { margin-left: auto; }
+  .pdp-buybar-main { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  /* 结算条按钮等宽平分（照 1688 结算条）：文字一律不换行、不截断。
+     2026-10-12 用户拍板：补回「加采购车」—— 可以先把货攒在车里，
+     一次给好几个人各带一件（每人一个收货地址），结算时合并支付、拆单发货 */
+  .pdp-buybar-btns {
+    display: grid; gap: 10px; flex: 1 1 auto; min-width: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .pdp-buybar-btns .pdp-btn { padding: 0 6px; font-size: 14px; }
+  .pdp-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 46px; padding: 0 18px; border-radius: 6px;
+    font-size: 15px; font-weight: 600; cursor: pointer; border: 1px solid transparent;
+    text-decoration: none; white-space: nowrap;
+  }
+  /* 主按钮：实心（对应 1688 的「立即下单」） */
+  .pdp-btn.primary { background: var(--pdp-brand); color: #fff; border-color: var(--pdp-brand); }
+  .pdp-btn.primary:hover { background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark); color: #fff; }
+  .pdp-btn.primary:disabled { background: var(--c-border-strong); border-color: var(--c-border-strong); cursor: not-allowed; }
+  /* 次按钮：白底 + 品牌色描边（对应 1688 的「加采购车 / 跨境铺货」） */
+  .pdp-btn.sec { background: #fff; color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .pdp-btn.sec:hover { background: var(--pdp-soft); }
+  /* 置灰但**仍可点**（2026-10-11）：没店铺 / 没库存时按钮看着是灰的，
+     点一下弹提示（真 disabled 会吞掉 click，提示就出不来了） */
+  .pdp-btn.is-locked {
+    background: var(--c-surface-2); color: var(--c-text-muted);
+    border-color: var(--c-border-strong); box-shadow: none;
+  }
+  .pdp-btn.is-locked:hover { background: var(--c-surface-2); color: var(--c-text-muted); }
+  .pdp-btn.sec:disabled {
+    background: var(--c-surface-2); color: var(--c-text-subtle);
+    border-color: var(--c-border-strong); cursor: not-allowed;
+  }
+  .pdp-btn.ghost { background: var(--pdp-soft); color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .pdp-btn.ghost:hover { background: #FFEDDF; }
+  .pdp-btn.plain {
+    background: var(--c-surface); color: var(--c-text-muted); border-color: var(--c-border-strong);
+    font-size: 13px; font-weight: 500; height: 32px; padding: 0 12px;
+  }
+  .pdp-btn.plain:hover { color: var(--c-text); border-color: var(--c-text-subtle); }
+  .pdp-btn.wide { flex: 1 1 0; }
+  .pdp-status {
+    margin-top: var(--s-3); display: flex; align-items: flex-start; gap: 6px;
+    font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 4px;
+    background: var(--c-surface-2); border: 1px solid var(--c-border); color: var(--c-text-muted);
+    word-break: break-all;
+  }
+  .pdp-status.ok { background: var(--c-success-soft); border-color: var(--c-success-border); color: var(--c-success-fg); }
+  .pdp-status.err { background: var(--c-error-soft); border-color: var(--c-error-border); color: var(--c-error-fg); }
+
+  /* 闲鱼铺货预填（对应 1688 的「密文代发」块）*/
+  .pdp-prefill { margin-top: var(--s-3); border-top: 1px dashed var(--c-border); padding-top: var(--s-3); }
+  .pdp-prefill-hd { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .pdp-prefill-hd .ftag { font-weight: 400; }
+  .pdp-prefill-grid { margin-top: 8px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+  .pdp-prefill-grid .s { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: 3px; padding: 6px 4px; text-align: center; }
+  .pdp-prefill-grid .n { display: block; font-family: var(--font-mono); font-size: 14px; font-weight: 600; }
+  .pdp-prefill-grid .l { display: block; font-size: 11px; color: var(--c-text-muted); }
+
+
+  /* 下架提示 */
+  .pdp-unlisted {
+    margin-top: var(--s-3); padding: 10px 12px; border-radius: 4px;
+    background: var(--c-warning-soft); border: 1px solid var(--c-warning-border);
+    color: var(--c-warning-fg); font-size: 12px; line-height: 1.7;
+  }
+  .pdp-unlisted b { font-weight: 700; }
+
+  /* 同类货源（左列 Tab 内）*/
+  .pdp-sim-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--s-3); }
+  .pdp-sim-card { text-decoration: none; color: inherit; display: block; }
+  .pdp-sim-card img {
+    width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 4px;
+    border: 1px solid var(--c-border); background: var(--c-surface-2);
+  }
+  .pdp-sim-card .p { margin-top: 6px; font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--pdp-brand); }
+  .pdp-sim-card .t {
+    font-size: 12px; line-height: 1.4; color: var(--c-text-muted);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .pdp-sim-card:hover .t { color: var(--pdp-brand-dark); }
+
+  /* 手机吸底操作条（PC 隐藏）*/
+  .pdp-dockbar { display: none; }
+
+  /* ============================================================
+     响应式
+     ============================================================ */
+  /* 超宽屏（内容区已经不封顶了）：大图跟着放宽一档 —— 4:3 不变、照样限高，
+     占屏比和 1440 宽时的 420px 差不多，图区不会空出一大片。 */
+  @media (min-width: 1600px) {
+    .pdp-stage-track .pdp-slide, .pdp-stage .pdp-empty { max-height: 520px; }
+  }
+  @media (max-width: 1240px) {
+    .pdp-wrap { grid-template-columns: minmax(0, 1fr) 380px; }
+    .pdp-statgrid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .pdp-sim-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  /* 手机 / 窄屏：退回单列（图 → 价格规格 → 详情），右列不再吸顶，底部出吸底条 */
+  @media (max-width: 900px) {
+    .pdp { padding-bottom: 76px; }
+    .pdp-wrap {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas:
+        "gallery"
+        "buy"
+        "detail";
+    }
+    .pdp-buy { position: static; max-height: none; overflow: visible; padding: var(--s-3); }
+    .pdp-gallery-main { display: flex; flex-direction: column; gap: 8px; padding: var(--s-3); }
+    /* 手机：缩略图转横排，取消绝对定位（回到文档流里横向滑） */
+    .pdp-thumbs-col { position: static; }
+    .pdp-thumbs-v { position: static; flex-direction: row; overflow-x: auto; overflow-y: hidden; }
+    .pdp-thumbs-v img, .pdp-thumb-tool { width: 56px; flex: 0 0 56px; }
+    .pdp-title { font-size: 16px; }
+    /* 手机：两个价各自独占一行（并排会挤成两行小字），都是靠左对齐 */
+    .pdp-price-main { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .pdp-price-cell .val { font-size: 24px; }
+    .pdp-statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pdp-sim-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .pdp-panel { padding: var(--s-3); }
+    .pdp-params th { width: 96px; }
+    /* 手机：结算条按钮竖排铺满（已有吸底操作条）*/
+    .pdp-buybar-btns { grid-template-columns: minmax(0, 1fr); flex: 1 1 100%; }
+
+    .pdp-dockbar {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+      display: flex; align-items: center; gap: 10px;
+      height: 56px; padding: 0 12px calc(env(safe-area-inset-bottom, 0px));
+      background: var(--c-surface); border-top: 1px solid var(--c-border);
+      box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.06);
+    }
+    .pdp-dock-price { flex: 1 1 auto; min-width: 0; line-height: 1.25; }
+    .pdp-dock-price .v { font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--pdp-brand); }
+    .pdp-dock-price .l { font-size: 11px; color: var(--c-text-muted); }
+    .pdp-dockbar .pdp-btn { height: 40px; padding: 0 18px; font-size: 14px; flex: 0 0 auto; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="pdp">
+
+{% if not_found %}
+  <section class="pdp-card" style="padding: var(--s-12); text-align: center;">
+    <i class="bi bi-inbox" style="font-size: 32px; color: var(--c-text-subtle);"></i>
+    <h2 style="font-size: 18px; margin-top: var(--s-3);">商品不存在</h2>
+    <p style="color: var(--c-text-muted); font-size: 13px;">
+      商品 ID <code class="k">{{ item_id }}</code> 未找到，可能已下架或未同步。
+    </p>
+    <a href="{{ self_url('/goods') }}" class="btn btn-primary btn-sm" style="margin-top: var(--s-3);">
+      <i class="bi bi-arrow-left"></i> 返回商品列表
+    </a>
+  </section>
+{% else %}
+
+  <div class="pdp-crumb">
+    <a href="{{ self_url('/harbor') }}">货源广场</a>
+    <span class="sep">›</span>
+    <a href="{{ self_url('/harbor?cat=' + (item.category_id or '')) }}">{{ category_text }}</a>
+    <span class="sep">›</span>
+    <span class="cur">商品详情</span>
+    <span class="right">
+      {# 详情页只有这一版（2026-10-03 起经典版废弃），这里给的是回货源广场的路 #}
+      <a class="btn btn-sm btn-outline-secondary" href="{{ self_url('/harbor') }}">
+        <i class="bi bi-arrow-left"></i> 回货源广场
+      </a>
+    </span>
+  </div>
+
+  <div class="pdp-wrap">
+
+    {# ================= 左列上：供应商条 + 图区（1688 左栏上半屏） ================= #}
+    <div class="pdp-card pdp-gallery">
+
+      <div class="pdp-supbar">
+        <div class="logo">渔</div>
+        <div style="min-width:0;">
+          {# 名称 + 认证图标包在同一个 span 里：窄屏换行时不会出现「图标单独占一行」 #}
+          <div class="nm">
+            <span>渔货栈 · 平台货源<i class="bi bi-patch-check-fill" title="平台已认证货源"></i></span>
+          </div>
+          {# 供应商条只留类目：品牌/编码在「规格参数」页签里看，头部保持干净 #}
+          <div class="mt">
+            <span>类目：{{ category_text }}</span>
+          </div>
+        </div>
+        <div class="acts">
+          <a class="pdp-pill" href="{{ self_url('/harbor?cat=' + (item.category_id or '')) }}"><i class="bi bi-grid"></i> 同类货源</a>
+          <a class="pdp-pill" href="{{ self_url('/goods') }}"><i class="bi bi-list-ul"></i> 商品列表</a>
+        </div>
+      </div>
+
+      <div class="pdp-gallery-main">
+        {# 左：竖排缩略图（含「参数」格，跟 1688 一样）—— 与大图等高，图多了在列内滚 #}
+        <div class="pdp-thumbs-col">
+          <div class="pdp-thumbs-v" id="pdpThumbs">
+            {% for img in images %}
+              <img src="{{ img }}" alt="图 {{ loop.index }}" loading="lazy"
+                   data-idx="{{ loop.index0 }}" class="{% if loop.first %}active{% endif %}"
+                   onclick="pdpSwitch(this)" onmouseenter="pdpSwitch(this)">
+            {% endfor %}
+            <button type="button" class="pdp-thumb-tool" onclick="pdpGoTab('pdpTabSpec')" title="看规格参数">
+              <i class="bi bi-list-columns-reverse"></i>参数
+            </button>
+          </div>
+        </div>
+
+        {# 右：大图（可左右滑） #}
+        <div class="pdp-stage">
+          {% if images %}
+            <div class="pdp-stage-track" id="pdpStage">
+              {% for img in images %}
+                <div class="pdp-slide"><img src="{{ img }}" alt="{{ item.title }} 图 {{ loop.index }}" loading="lazy"></div>
+              {% endfor %}
+            </div>
+            {% if images|length > 1 %}
+              <button type="button" class="pdp-arrow prev" onclick="pdpSlide(-1)" aria-label="上一张"><i class="bi bi-chevron-left"></i></button>
+              <button type="button" class="pdp-arrow next" onclick="pdpSlide(1)" aria-label="下一张"><i class="bi bi-chevron-right"></i></button>
+              <span class="pdp-count" id="pdpCount">1 / {{ images|length }}</span>
+            {% endif %}
+          {% else %}
+            <div class="pdp-empty"><i class="bi bi-image"></i></div>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="pdp-gallery-foot">
+        <span>主图 {{ images|length }} 张 · 详情图 {{ detail_images|length }} 张</span>
+        <span>·</span>
+        <span>SKU {{ sku_rows|length }} 个 · 规格 {{ spec_defs|length }} 维</span>
+        {# 2026-10-11：素材直接在详情页拿 —— 文案一键复制（按钮变「已复制」）、图片批量下载 #}
+        <div class="pdp-media-acts" style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="pdp-btn plain" onclick="pdpCopyAll()">
+            <i class="bi bi-clipboard"></i> <span id="pdpCopyAllText">复制商品文案</span>
+          </button>
+          <button type="button" class="pdp-btn plain" onclick="pdpDownloadZip()"
+                  title="电脑用：主图与详情图打包成一个 ZIP，一次下载完">
+            <i class="bi bi-file-earmark-zip"></i> 下载图片包（ZIP）
+          </button>
+          <button type="button" class="pdp-btn plain" onclick="pdpOpenImageWall()"
+                  title="手机用：所有图一次铺开，长按每张 → 存储到照片">
+            <i class="bi bi-phone"></i> 存到手机相册
+          </button>
+          <button class="pdp-btn plain" onclick="pdpCopyTitle()">
+            <i class="bi bi-clipboard"></i> 复制标题
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {# ================= 右列：价格 / 规格 / 按钮（sticky 固定） ================= #}
+    <div class="pdp-card pdp-buy">
+      <div class="pdp-shopline">
+        <span class="pdp-pill {% if item.audit_status == 'approved' %}ok{% elif item.audit_status == 'rejected' %}err{% endif %}">
+          {% if item.audit_status == 'approved' %}审核通过{% elif item.audit_status == 'rejected' %}已驳回{% else %}待审核{% endif %}
+        </span>
+        {% if item.is_oversold %}
+          <span class="pdp-pill err"><i class="bi bi-exclamation-triangle"></i> 超卖标记</span>
+        {% elif available_stock > 0 %}
+          <span class="pdp-pill ok"><i class="bi bi-check2-circle"></i> 可售</span>
+        {% else %}
+          <span class="pdp-pill err">无可售库存</span>
+        {% endif %}
+        {% if listing %}
+          <span class="pdp-pill">闲鱼 · {{ status_text(listing.status) }}</span>
+        {% elif pooled %}
+          <span class="pdp-pill ok" title="已加进店铺商品池，可下载素材去手机端发布">已入店铺池</span>
+        {% else %}
+          {# 「未入店铺池」指的是**当前账号**还没把这款货加进自己的商品池 #}
+          <span class="pdp-pill" title="当前账号下还没把这款货加进店铺商品池">未入店铺池</span>
+        {% endif %}
+      </div>
+
+      <h1 class="pdp-title">{{ item.title }}</h1>
+
+      {% if unlisted %}
+        <div class="pdp-unlisted">
+          <i class="bi bi-box-arrow-up"></i>
+          该商品已由渔枢系统下架{% if unlisted_at %} · {{ unlisted_at | dt('%Y-%m-%d %H:%M') }}{% endif %}
+          {% if unlisted_reason %} · {{ unlisted_reason }}{% endif %}{% if unlisted_by %} · 操作人 {{ unlisted_by }}{% endif %}
+          <div>已从渔货栈下架：<b>不能再采购</b>；已经铺到自己店铺里的请自行处理。
+            下架前的资料（渔货价 ¥{{ '%.2f' % (unlisted_snapshot.fish_price or 0) }} ·
+            建议售价 ¥{{ '%.2f' % (unlisted_snapshot.sale_price or 0) }} ·
+            库存 {{ unlisted_snapshot.stock or 0 }} 件）见「规格参数」页签。</div>
+        </div>
+      {% endif %}
+
+      {# 价格块（2026-10-11 用户拍板重排；2026-10-12 再调：两个价**并排对齐**）：
+         ① 几个数以前全挤在一行，看不清 —— 改成「渔货价 / 建议零售价」两块并排，
+            两块同一个骨架（标签 + 大字价 + 下面一行说明），左右齐平、上沿对齐；
+         ② 「规格价区间」与上面的建议售价两个数打架（区间以前按加价规则现算，¥40.38，
+            而建议售价是 ¥30.00）—— 现在规格行的建议售价与商品级同源，区间改按**渔货价**算
+            （下单结算就是按渔货价，这个区间才是有用的那个）；
+         ③ 单规格只显示一个价，多规格才是 min ~ max；
+         ④ 原价 → 市场价；建议零售价下面写清「建议闲鱼售价不低于此价」。 #}
+      {% set sku_costs = sku_rows | map(attribute='cost_price') | select | list %}
+      <div class="pdp-pricebox">
+        <div class="pdp-price-main">
+          <div class="pdp-price-cell pdp-price-fish">
+            <div class="row1">
+              <span class="tag">渔货价</span>
+              {# 渔枢系统侧留空时按「待定」显示，不要编一个 ¥0.00 出来 #}
+              <span class="val">{% if cost and cost > 0 %}¥{{ '%.2f' % cost }}{% else %}待定{% endif %}</span>
+            </div>
+            <div class="hint">下单按这个价结算</div>
+          </div>
+          <div class="pdp-price-cell pdp-price-sug">
+            <div class="row1">
+              <span class="tag">建议零售价</span>
+              <span class="val">{% if suggested_price %}¥{{ '%.2f' % suggested_price }}{% else %}待定{% endif %}</span>
+            </div>
+            <div class="hint"><i class="bi bi-info-circle"></i> 建议闲鱼售价不低于此价</div>
+          </div>
+        </div>
+        <div class="pdp-price-sub">
+          <span>单件毛利 ¥<span class="v">{{ '%.2f' % profit_amount }}</span>
+            <span class="rate">{{ '%.1f' % (profit_rate * 100) }}%</span></span>
+          {% if item.market_price %}
+            <span>市场价 <s>¥{{ '%.2f' % item.market_price }}</s></span>
+          {% endif %}
+          {# 渔货价区间：只算「定过价」的规格（没定渔货价的不参与，也不显示 0）；
+             单规格就一个价，不写成「x ~ x」 #}
+          {% if sku_costs %}
+            {% set lo = sku_costs | min %}{% set hi = sku_costs | max %}
+            <span>渔货价区间 ¥<span class="v">{% if lo == hi %}{{ '%.2f' % lo }}{% else %}{{ '%.2f' % lo }} ~ {{ '%.2f' % hi }}{% endif %}</span></span>
+          {% endif %}
+        </div>
+        {% if cost <= 0 %}
+          <div class="pdp-price-warn">
+            <i class="bi bi-exclamation-triangle"></i> 这款货的渔货价还是 0，渔货栈这边会显示「待定」—— 先在渔枢系统定好渔货价再铺货。
+          </div>
+        {% endif %}
+      </div>
+
+      {# 发货 / 服务（1688 的绿字物流行） #}
+      <div class="pdp-ship">
+        <span><i class="bi bi-truck ic"></i> 承诺 <b>{{ item.delivery_days or 2 }} 天内发货</b></span>
+        <span><i class="bi bi-box-seam ic"></i> {{ shipping_mode_label }}</span>
+        <span><i class="bi bi-cash-coin ic"></i> {% if item.shipping_fee %}运费 ¥{{ '%.2f' % item.shipping_fee }}{% else %}包邮{% endif %}</span>
+        <span><i class="bi bi-shield-check ic"></i> {{ item.after_sale or '未设置售后' }}</span>
+        {% if item.freight_template %}<span><i class="bi bi-receipt ic"></i> {{ item.freight_template }}</span>{% endif %}
+      </div>
+
+      {# 规格维度（颜色 / 尺寸…） #}
+      {% if spec_defs %}
+        <div class="pdp-sec">
+          {% for s in spec_defs %}
+            {# 注意：s 是 dict，s.values 会取到 dict 的 values 方法（Jinja 属性优先），
+               必须走 s['values'] 才拿得到选项列表 #}
+            <div class="pdp-sec-lab">{{ s['name'] }}</div>
+            <div class="pdp-sku-btns" style="margin-bottom:10px;">
+              {% for v in (s['values'] or []) %}
+                <button type="button" class="pdp-sku-btn{% if loop.first %} active{% endif %}"
+                        data-spec="{{ s['name'] }}" onclick="pdpPick(this)">{{ v }}</button>
+              {% endfor %}
+            </div>
+          {% endfor %}
+          <div class="pdp-selected">已选规格：<b id="pdpSelected">—</b></div>
+        </div>
+      {% endif %}
+
+      {# SKU 行（1688「产品规格」那种一行一规格，行内带数量步进器） #}
+      {% if sku_rows %}
+        <div class="pdp-sec">
+          {# 规格明细不再另起小标题，行本身就是规格 #}
+          <div class="pdp-skutable" id="pdpSkuTable">
+            {% for s in sku_rows %}
+              <div class="pdp-skurow{% if loop.first %} active{% endif %}" data-idx="{{ loop.index0 }}"
+                   data-sku-id="{{ s.sku_id }}" onclick="pdpPickSkuRow(this)">
+                <span class="nm" title="{{ s.spec_text }}">{{ s.spec_text }}</span>
+                {# 2026-10-11：这一格显示**渔货价**（下单结算就按它），建议零售价退成小字
+                   —— 以前显示的是按加价规则现算的销售价，跟顶上的建议售价两个数打架 #}
+                <span class="pr" title="渔货价（下单按这个价结算）">{% if s.cost_price %}¥{{ '%.2f' % s.cost_price }}{% else %}待定{% endif %}</span>
+                <span class="pr-sug" title="建议零售价（建议闲鱼售价不低于此价）">建议 ¥{% if s.sale_price %}{{ '%.2f' % s.sale_price }}{% else %}待定{% endif %}</span>
+                <span class="st">可售 {{ s.available }} 件</span>
+                <span class="pdp-rowqty">
+                  <button type="button" onclick="event.stopPropagation();pdpRowStep(this,-1)" aria-label="减少">−</button>
+                  {# 只默认选中第一条规格 1 件，其余 0，跟 1688 一样 #}
+                  <input type="text" value="{% if loop.first %}1{% else %}0{% endif %}"
+                         inputmode="numeric" onclick="event.stopPropagation()">
+                  <button type="button" onclick="event.stopPropagation();pdpRowStep(this,1)" aria-label="增加">+</button>
+                </span>
+              </div>
+            {% endfor %}
+          </div>
+          <div class="pdp-selected">
+            已选：<b id="pdpSelName">{{ sku_rows[0].spec_text }}</b>
+            · 渔货价 ¥<b id="pdpSelCost" class="mono-sm">{% if sku_rows[0].cost_price %}{{ '%.2f' % sku_rows[0].cost_price }}{% else %}—{% endif %}</b>
+            · 建议零售价 ¥<b id="pdpSelSale" class="mono-sm">{% if sku_rows[0].sale_price %}{{ '%.2f' % sku_rows[0].sale_price }}{% else %}—{% endif %}</b>
+            · 可售 <b id="pdpSelStock">{{ sku_rows[0].available }}</b> 件
+            <br>各规格预填数量合计 <b id="pdpQtyTotal">1</b> 件
+          </div>
+        </div>
+      {% endif %}
+
+      {# 贴标签（1688 的「贴标签」块） #}
+      {% if package.tags %}
+        <div class="pdp-tagpick">
+          <span class="lab">贴标签</span>
+          {% for t in package.tags %}<span class="ftag info">{{ t }}</span>{% endfor %}
+          <span class="lab">按件铺货</span>
+        </div>
+      {% endif %}
+
+      {# 结算条（照 1688：已选 N 款 N 台 | 商品金额（按渔货价算）| 包邮 | 发货时效，下面按钮 + 侧边统计） #}
+      <div class="pdp-buybar">
+        <div class="pdp-buybar-top">
+          <span>已选 <b id="pdpPickCount">0</b> 款 <b id="pdpPickQty">0</b> 台</span>
+          <span class="bar">|</span>
+          <span>商品金额：<span class="amt">¥<span id="pdpPickAmount">0.00</span></span></span>
+          <span class="ftag">{% if item.shipping_fee %}运费 ¥{{ '%.2f' % item.shipping_fee }}{% else %}包邮{% endif %}</span>
+          <span class="ship">{{ item.delivery_days or 2 }} 天内发货</span>
+        </div>
+        <div class="pdp-buybar-main">
+          <div class="pdp-buybar-btns">
+            {% if unlisted %}
+              {# 下架的货源：采购与铺货都不受理（后端 POST /goods/{id}/listing 与 /pool 再兜一道 409） #}
+              <button class="pdp-btn primary" style="grid-column: 1 / -1;" disabled title="该商品已由渔枢系统从渔货栈下架，不能再采购 / 上架到店铺">
+                已下架，不可上架
+              </button>
+            {% elif available_stock <= 0 %}
+              {# 没库存了（2026-10-11 用户拍板）：下单与铺货都不给点，点了给这句提示；
+                 后端还有兜底 —— 库存为 0 的货会被系统自动下架并通知飞书群 #}
+              <button class="pdp-btn primary is-locked" style="grid-column: 1 / -1;"
+                      id="btnNoStock" onclick="pdpNoStock()">该商品已经无库存，即将下架</button>
+            {% else %}
+              <button class="pdp-btn primary" id="btnBuyNow" onclick="pdpBuyNow()">
+                立即下单
+              </button>
+              {# 加采购车（2026-10-12 用户拍板）：攒到车里，一次给好几个人各带一件 #}
+              <button class="pdp-btn sec" id="btnCart" onclick="pdpCartAdd()">
+                加采购车
+              </button>
+              {# 店铺铺货：名下没有审核通过的店铺就置灰，点了提示去找带教老师（2026-10-11 用户拍板） #}
+              <button class="pdp-btn sec{% if not shops_approved %} is-locked{% endif %}"
+                      id="btnPool" onclick="pdpPoolAdd()"
+                      {% if not shops_approved %}title="{{ shop_required_msg }}"{% endif %}>
+                店铺铺货
+              </button>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      {# 动作结果提示：平时不占位，上架 / 草稿出结果才显示 #}
+      <div class="pdp-status" id="handoffStatus" hidden></div>
+
+      {# 闲鱼铺货预填（对应 1688 的「密文代发」块）：只留 4 个数字，价格直接给建议销售价 #}
+      <div class="pdp-prefill">
+        <div class="pdp-prefill-hd">
+          <i class="bi bi-lightning-charge"></i> 闲鱼铺货预填
+          <span class="ftag">{{ package.condition }}</span>
+        </div>
+        <div class="pdp-prefill-grid">
+          <div class="s"><span class="n">¥{{ '%.2f' % suggested_price }}</span><span class="l">销售价</span></div>
+          <div class="s"><span class="n">{{ package.stock }}</span><span class="l">库存</span></div>
+          <div class="s"><span class="n">{{ package.images | length }}</span><span class="l">图片</span></div>
+          <div class="s"><span class="n">{{ package.skus | length }}</span><span class="l">规格</span></div>
+        </div>
+      </div>
+    </div>
+
+    {# ================= 左列下：吸顶 Tab + 面板 + 统计 ================= #}
+    <div class="pdp-detail">
+      <div class="pdp-tabbar" id="pdpTabbar">
+        {% if selling_point_list %}
+        <button type="button" class="pdp-tab" data-tab="pdpTabPoints" onclick="pdpTab(this)"><i class="bi bi-stars"></i>商品卖点</button>
+        {% endif %}
+        <button type="button" class="pdp-tab active" data-tab="pdpTabDetail" onclick="pdpTab(this)"><i class="bi bi-card-text"></i>商品详情</button>
+        {% if detail_image_groups %}
+        <button type="button" class="pdp-tab" data-tab="pdpTabImages" onclick="pdpTab(this)"><i class="bi bi-images"></i>商品详情图</button>
+        {% endif %}
+        <button type="button" class="pdp-tab" data-tab="pdpTabSpec" onclick="pdpTab(this)"><i class="bi bi-list-ul"></i>规格参数</button>
+        <button type="button" class="pdp-tab" data-tab="pdpTabHandoff" onclick="pdpTab(this)"><i class="bi bi-shop"></i>铺货</button>
+        <button type="button" class="pdp-tab warn" data-tab="pdpTabTip" onclick="pdpTab(this)"><i class="bi bi-exclamation-triangle-fill"></i>供应商提示</button>
+        <button type="button" class="pdp-tab" data-tab="pdpTabSimilar" onclick="pdpTab(this)"><i class="bi bi-grid-3x3-gap"></i>同类货源</button>
+      </div>
+
+      {% if selling_point_list %}
+      <div class="pdp-panel" id="pdpTabPoints" hidden>
+        <h4>
+          <i class="bi bi-stars"></i> 商品卖点
+          <span class="sub" style="font-weight:400;font-size:12px;color:var(--c-text-muted);">
+            由渔枢系统在商品档案里维护，随商品同步到渔货栈 · 共 {{ selling_point_list|length }} 条
+          </span>
+        </h4>
+        <div class="pdp-points">
+          {% for point in selling_point_list %}
+          <div class="pdp-point"><i class="bi bi-check2-circle"></i><span>{{ point }}</span></div>
+          {% endfor %}
+        </div>
+        <div style="margin-top: 12px;">
+          <button type="button" class="pdp-btn plain" onclick="pdpCopyPoints()">
+            <i class="bi bi-clipboard"></i> <span id="pdpCopyPointsText">复制全部卖点</span>
+          </button>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="pdp-card">
+        <div class="pdp-panel" id="pdpTabDetail">
+          {% if detail_groups or detail_images %}
+            {# 文案一组一段展示（与渔枢系统发布页一致）；每组下面可复制 / AI 重写 #}
+            {% for group in detail_groups %}
+            <div class="pdp-detail-group" id="detailGroup{{ loop.index }}">
+              <div class="pdp-detail-group-hd">
+                <i class="bi bi-file-text"></i> {{ group.title }}
+                <span class="pdp-detail-group-acts">
+                  <button type="button" class="pdp-mini-btn" onclick="pdpCopyGroup({{ loop.index }})">
+                    <i class="bi bi-clipboard"></i> 复制
+                  </button>
+                  <button type="button" class="pdp-mini-btn ai" onclick="pdpRewriteGroup({{ loop.index }})">
+                    <i class="bi bi-magic"></i> AI 重写
+                  </button>
+                </span>
+              </div>
+              {# 带标签的富文本直接渲染；纯文本（按源文本换行）保留换行与缩进 #}
+              <div class="pdp-detail-html{% if '<' not in group.content %} plain{% endif %}"
+                   data-group="{{ loop.index }}">{{ group.content | safe }}</div>
+              <div class="pdp-rewrite-box" id="rewriteBox{{ loop.index }}" hidden></div>
+            </div>
+            {% endfor %}
+            {% if detail_image_groups %}
+            {# 详情图不在这个页签里堆着：单独一个「商品详情图」页签，按每 9 张一组看 #}
+            <div class="pdp-detail-group">
+              <div class="pdp-detail-group-hd">
+                <i class="bi bi-images"></i> 商品详情图
+                <span class="sub">共 {{ detail_images | length }} 张 · 每 {{ detail_image_group_size }} 张一组，共 {{ detail_image_groups | length }} 组</span>
+                <span class="pdp-detail-group-acts">
+                  <button type="button" class="pdp-mini-btn" onclick="pdpGoTab('pdpTabImages')">
+                    <i class="bi bi-images"></i> 去「商品详情图」看看
+                  </button>
+                </span>
+              </div>
+            </div>
+            {% endif %}
+          {% else %}
+            <div class="note muted">这款货还没有图文详情。</div>
+          {% endif %}
+        </div>
+
+        {% if detail_image_groups %}
+        <div class="pdp-panel" id="pdpTabImages" hidden>
+          <h4>
+            <i class="bi bi-images"></i> 商品详情图
+            <span class="sub" style="font-weight:400;font-size:12px;color:var(--c-text-muted);">
+              共 {{ detail_images | length }} 张 · 每 {{ detail_image_group_size }} 张一组，共 {{ detail_image_groups | length }} 组
+            </span>
+          </h4>
+          {% for group in detail_image_groups %}
+          <div class="pdp-img-group">
+            <div class="pdp-img-group-hd">
+              <i class="bi bi-images"></i> 第 {{ loop.index }} 组
+              <span class="sub">共 {{ group | length }} 张 · 点下面的缩略图切换</span>
+            </div>
+            <div class="pdp-imgpick">
+              <div class="pdp-imgpick-stage">
+                <img src="{{ group[0] }}" alt="详情图 第 {{ loop.index }} 组" loading="lazy"
+                     onerror="this.parentNode.classList.add('is-broken')">
+                <span class="pdp-img-index">1/{{ group | length }}</span>
+              </div>
+              {% if group | length > 1 %}
+              <div class="pdp-imgpick-thumbs">
+                {% for img in group %}
+                  <img src="{{ img }}" alt="" loading="lazy" data-src="{{ img }}"
+                       class="{{ 'active' if loop.first }}" title="第 {{ loop.index }} 张"
+                       onclick="pdpPick(this)" onerror="this.style.display='none'">
+                {% endfor %}
+              </div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="pdp-panel" id="pdpTabSpec" hidden>
+          <h4>商品参数</h4>
+          <table class="pdp-params">
+            <tr><th>商品 ID</th><td class="mono-sm">{{ item.item_id }}</td></tr>
+            <tr><th>商家编码</th><td class="mono-sm">{{ item.item_code or '—' }}</td></tr>
+            <tr><th>品牌</th><td>{{ item.brand or '—' }}</td></tr>
+            <tr><th>类目</th><td>{{ category_text }}</td></tr>
+            <tr><th>供应商</th><td class="mono-sm">{{ item.supplier_id or '—' }}</td></tr>
+            {# 渔货价就是学员看到的进货价（渔货栈这边没有「成本价」这个概念），
+               括号里的来源说明（渔枢系统渔货价 · 按商家编码…匹配）2026-10-07 去掉 #}
+            <tr><th>渔货价</th><td class="mono-sm">¥{{ '%.2f' % cost }}</td></tr>
+            <tr><th>建议售价</th><td class="mono-sm">¥{{ '%.2f' % suggested_price }}</td></tr>
+            {# 2026-10-11 用户拍板：页面上的「原价」一律改叫「市场价」 #}
+            <tr><th>市场价</th><td class="mono-sm">{% if item.market_price %}¥{{ '%.2f' % item.market_price }}{% else %}—{% endif %}</td></tr>
+            <tr><th>发货方式</th><td>{{ shipping_mode_label }}</td></tr>
+            {# 只有金额才用等宽小字：「包邮 / 未填」是中文，套 mono-sm 会换成等宽字体族，
+               中文回落到别的字体后看着比旁边几行大一号（2026-10-07 修） #}
+            <tr><th>默认运费</th><td>{% if item.shipping_fee %}<span class="mono-sm">¥{{ '%.2f' % item.shipping_fee }}</span>{% else %}包邮 / 未填{% endif %}</td></tr>
+            <tr><th>运费模板</th><td>{{ item.freight_template or '未设置' }}</td></tr>
+            <tr><th>发货时效</th><td>{{ item.delivery_days or 2 }} 天内发货</td></tr>
+            <tr><th>售后政策</th><td>{{ item.after_sale or '未设置' }}</td></tr>
+            <tr><th>近 30 天退货率</th><td class="mono-sm">{{ '%.1f' % ((item.return_rate or 0) * 100) }}%</td></tr>
+            <tr><th>最近上架</th><td class="mono-sm">{{ item.listed_at | dt('%Y-%m-%d %H:%M') if item.listed_at else '—' }}</td></tr>
+            <tr><th>最近同步</th><td class="mono-sm">{{ item.last_synced_at | dt('%Y-%m-%d %H:%M') if item.last_synced_at else '—' }}</td></tr>
+            {# 商品标签：人工认定的固定标签（渔枢系统发布商品时勾选，上架时同步过来） #}
+            {% if item_tags %}
+            <tr><th>商品标签</th><td>
+              {% for t in item_tags %}<span class="ftag {{ t.kind }}" style="margin:0 4px 4px 0;">{{ t.text }}</span>{% endfor %}
+            </td></tr>
+            {% endif %}
+          </table>
+
+          <h4>SKU 明细（{{ sku_rows|length }} 个）</h4>
+          <div class="table-responsive">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>SKU ID</th><th>规格</th>
+                  <th style="text-align:right;">渔货价</th><th style="text-align:right;">建议售价</th>
+                  <th style="text-align:right;">库存</th><th style="text-align:right;">预占</th><th style="text-align:right;">可售</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for s in sku_rows %}
+                  <tr>
+                    <td class="mono-sm">{{ s.sku_id or '—' }}</td>
+                    <td>{{ s.spec_text }}</td>
+                    {# 渔枢系统侧留空的价（渔货价 / 建议售价）这里显示「—」，不显示 ¥0.00 #}
+                    <td class="mono-sm" style="text-align:right;">{% if s.cost_price %}¥{{ '%.2f' % s.cost_price }}{% else %}—{% endif %}</td>
+                    <td class="mono-sm" style="text-align:right; color: var(--pdp-brand);">{% if s.sale_price %}¥{{ '%.2f' % s.sale_price }}{% else %}—{% endif %}</td>
+                    <td class="mono-sm" style="text-align:right;">{{ s.stock }}</td>
+                    <td class="mono-sm" style="text-align:right;">{{ s.reserved }}</td>
+                    <td class="mono-sm" style="text-align:right;">{{ s.available }}</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="7" style="color: var(--c-text-muted);">
+                    该货源没有 SKU 明细，按整件库存售卖。
+                  </td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          {% if unlisted %}
+            <h4>下架前的资料（渔枢系统下架那一刻的快照）</h4>
+            <table class="pdp-params">
+              <tr><th>标题</th><td>{{ unlisted_snapshot.title or item.title or '—' }}</td></tr>
+              <tr><th>类目</th><td>{{ unlisted_snapshot.category or category_text or '—' }}</td></tr>
+              <tr><th>渔货价</th><td class="mono-sm">¥{{ '%.2f' % (unlisted_snapshot.fish_price or 0) }}</td></tr>
+              <tr><th>建议售价</th><td class="mono-sm">¥{{ '%.2f' % (unlisted_snapshot.sale_price or 0) }}</td></tr>
+              <tr><th>商家编码 / 品牌</th><td class="mono-sm">{{ unlisted_snapshot.item_code or '—' }} ／ {{ unlisted_snapshot.brand or '—' }}</td></tr>
+              <tr><th>库存</th><td class="mono-sm">{{ unlisted_snapshot.stock or 0 }} 件</td></tr>
+            </table>
+          {% endif %}
+        </div>
+
+        <div class="pdp-panel" id="pdpTabHandoff" hidden>
+          <h4><i class="bi bi-shop"></i> 闲鱼发布铺货信息</h4>
+          <div class="prefill-list">
+            <div class="prefill-row"><span class="k">标题</span>
+              <span class="v">{{ package.title }}</span></div>
+            <div class="prefill-row"><span class="k">销售价</span>
+              <span class="v mono">¥{{ '%.2f' % suggested_price }}{% if package.original_price %} ／ 市场价 ¥{{ package.original_price }}{% endif %}</span></div>
+            <div class="prefill-row"><span class="k">库存</span><span class="v mono">{{ package.stock }} 件</span></div>
+            <div class="prefill-row"><span class="k">图片</span><span class="v mono">{{ package.images | length }} 张</span></div>
+            <div class="prefill-row"><span class="k">建议类目</span><span class="v">{{ package.category_text }}</span></div>
+            <div class="prefill-row"><span class="k">成色</span><span class="v">{{ package.condition }}</span></div>
+            <div class="prefill-row"><span class="k">发货 / 售后</span>
+              <span class="v">{{ package.delivery }} · {{ package.after_sale }} · {{ package.freight }}</span></div>
+            <div class="prefill-row"><span class="k">描述</span>
+              <span class="v" style="font-size: 12px; color: var(--c-text-muted);">{{ package.description }}</span></div>
+          </div>
+
+          {% if package.skus %}
+            <div class="table-responsive" style="margin-top: var(--s-3);">
+              <table class="table">
+                <thead><tr><th>规格</th><th style="text-align:right;">价格</th><th style="text-align:right;">库存</th></tr></thead>
+                <tbody>
+                  {% for s in package.skus %}
+                    <tr>
+                      <td>{{ s.spec_name }}</td>
+                      <td class="mono-sm" style="text-align:right;">¥{{ s.price }}</td>
+                      <td class="mono-sm" style="text-align:right;">{{ s.stock }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          {% endif %}
+
+        </div>
+
+        <div class="pdp-panel" id="pdpTabTip" hidden>
+          <div class="pdp-tipbox">
+            <div class="hd"><i class="bi bi-exclamation-triangle-fill"></i> 供应商提示</div>
+            {% if item.supplier_tip %}
+              <div class="pdp-tip">{{ item.supplier_tip }}</div>
+            {% else %}
+              <div class="note muted">还没填供应商提示：在「商品上架 → 商品详情（图文）」里补上，比如档口发货时间、同款比价、量小不划算这类经验。</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="pdp-panel" id="pdpTabSimilar" hidden>
+          {% if similar %}
+            <div class="pdp-sim-grid">
+              {% for s in similar %}
+                <a class="pdp-sim-card" href="{{ self_url('/goods/detail/' + s.item_id) }}">
+                  <img src="{{ s.main_image }}" alt="{{ s.title }}" loading="lazy">
+                  <div class="p">¥{{ '%.2f' % s.price }}</div>
+                  <div class="t">{{ s.title }}</div>
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="note muted">暂时没有同类货源。</div>
+          {% endif %}
+        </div>
+      </div>
+
+      {# 左列底部：上架与库存情况（用真实字段，不编数据） #}
+      <div class="pdp-card pdp-statcard">
+        <div class="pdp-card-hd"><i class="bi bi-graph-up-arrow"></i> 上架与库存情况</div>
+        <div class="pdp-statgrid">
+          <div class="s"><span class="n">{{ item.stock or 0 }}</span><span class="l">总库存（件）</span></div>
+          <div class="s"><span class="n">{{ reserved_total }}</span><span class="l">已预占（件）</span></div>
+          <div class="s"><span class="n brand">{{ available_stock }}</span><span class="l">可售（件）</span></div>
+          <div class="s"><span class="n">{{ live_shop_count }}</span><span class="l">在售闲鱼号（个）</span></div>
+          <div class="s"><span class="n">{{ '%.1f' % ((item.return_rate or 0) * 100) }}%</span><span class="l">近 30 天退货率</span></div>
+          <div class="s"><span class="n">{{ item.delivery_days or 2 }}</span><span class="l">发货时效（天）</span></div>
+        </div>
+        <div class="pdp-statfoot">
+          <span>SKU {{ sku_rows|length }} 个</span>
+          <span>规格 {{ spec_defs|length }} 维</span>
+          <span>最近上架 {{ item.listed_at | dt('%Y-%m-%d %H:%M') if item.listed_at else '—' }}</span>
+          <span>最近同步 {{ item.last_synced_at | dt('%Y-%m-%d %H:%M') if item.last_synced_at else '—' }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ======== 手机吸底操作条（PC 隐藏） ======== #}
+  <div class="pdp-dockbar">
+    <div class="pdp-dock-price">
+      <div class="v">¥{{ '%.2f' % cost }}<span class="l" style="margin-left:6px;">渔货价</span></div>
+      <div class="l">建议零售价 ¥{{ '%.2f' % suggested_price }} · 毛利 ¥{{ '%.2f' % profit_amount }}</div>
+    </div>
+    {% if unlisted %}
+      <button class="pdp-btn primary" disabled>已下架</button>
+    {% elif available_stock <= 0 %}
+      <button class="pdp-btn primary is-locked" onclick="pdpNoStock()">无库存</button>
+    {% else %}
+      <button class="pdp-btn primary" onclick="pdpDockBuyNow()">立即下单</button>
+      <button class="pdp-btn sec" onclick="pdpCartAdd()">加采购车</button>
+    {% endif %}
+  </div>
+
+{% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if not not_found %}
+<script>
+  var ITEM_ID = {{ item.item_id | tojson }};
+  var HAS_XIANMOU = {{ (xianmou_url != '') | tojson }};
+  var CURRENT_PACKAGE = {{ package | tojson }};
+  var SKU_ROWS = {{ sku_rows | tojson }};
+  var SUGGESTED_PRICE = {{ suggested_price | tojson }};
+  // 三个按钮的落点：立即下单 → 结算页；加采购车 → 采购车；店铺铺货 → 商品池
+  var CHECKOUT_URL = {{ self_url('/checkout') | tojson }};
+  var CART_ADD_URL = {{ self_url('/cart/add') | tojson }};
+  var CART_PAGE_URL = {{ self_url('/cart') | tojson }};
+  var POOL_ADD_URL = {{ self_url('/goods/' + item.item_id + '/pool') | tojson }};
+  var POOL_PAGE_URL = {{ self_url('/shop-goods') | tojson }};
+  // 结算条按钮的两个前置条件（2026-10-11 用户拍板）
+  var AVAILABLE_STOCK = {{ available_stock | tojson }};
+  var SHOPS_APPROVED = {{ (shops_approved or 0) | tojson }};
+  var SHOP_REQUIRED_MSG = {{ shop_required_msg | tojson }};
+  var SHOP_PAGE_URL = {{ self_url('/shops') | tojson }};
+  var NO_STOCK_MSG = '该商品已经无库存，即将下架';
+  // AI 重写某组文案时带上的商品信息（品牌 / 类目 / 卖点决定重写出来的词）
+  var REWRITE_CTX = {{ rewrite_ctx | tojson }};
+  var REWRITE_URL = '/products/ai-rewrite-block';
+
+  // —— 图：大图左右滑动 + 左竖排缩略图切换 ——
+  var stage = document.getElementById('pdpStage');
+  var thumbs = document.querySelectorAll('#pdpThumbs img');
+  var countEl = document.getElementById('pdpCount');
+
+  function pdpIndexOf() {
+    if (!stage || !stage.clientWidth) return 0;
+    return Math.max(0, Math.min(thumbs.length - 1, Math.round(stage.scrollLeft / stage.clientWidth)));
+  }
+
+  function pdpSync(i) {
+    thumbs.forEach(function (t) { t.classList.toggle('active', Number(t.dataset.idx) === i); });
+    if (countEl && thumbs.length) countEl.textContent = (i + 1) + ' / ' + thumbs.length;
+  }
+
+  function pdpSlide(delta) {
+    if (!stage) return;
+    stage.scrollBy({ left: delta * stage.clientWidth, behavior: 'smooth' });
+  }
+
+  function pdpSwitch(el) {
+    var i = Number(el.dataset.idx || 0);
+    if (stage) stage.scrollTo({ left: i * stage.clientWidth, behavior: 'smooth' });
+    pdpSync(i);
+  }
+
+  if (stage && thumbs.length) {
+    var ticking = false;
+    stage.addEventListener('scroll', function () {
+      if (ticking) return;
+      ticking = true;
+      window.setTimeout(function () { pdpSync(pdpIndexOf()); ticking = false; }, 80);
+    });
+    pdpSync(0);
+  }
+
+  // —— 规格维度（颜色 / 尺寸…）：只做高亮 + 汇总已选 ——
+  function pdpPick(btn) {
+    var group = btn.parentNode.querySelectorAll('.pdp-sku-btn');
+    group.forEach(function (b) { b.classList.toggle('active', b === btn); });
+    pdpRefreshSelected();
+  }
+
+  function pdpRefreshSelected() {
+    var picked = Array.prototype.slice.call(document.querySelectorAll('.pdp-sku-btns .pdp-sku-btn.active'))
+      .map(function (b) { return b.textContent.trim(); });
+    var el = document.getElementById('pdpSelected');
+    if (el) el.textContent = picked.length ? picked.join(' / ') : '—';
+  }
+  pdpRefreshSelected();
+
+  // —— SKU 行：点行选中，联动成本 / 售价 / 可售 ——
+  function pdpPickSkuRow(row) {
+    var rows = document.querySelectorAll('#pdpSkuTable .pdp-skurow');
+    rows.forEach(function (r) { r.classList.toggle('active', r === row); });
+    var idx = Number(row.dataset.idx || 0);
+    var data = (SKU_ROWS || [])[idx];
+    if (!data) return;
+    var set = function (id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+    // 没定价（渔枢系统侧留空）的规格显示「—」，不要显示 0.00
+    var priceText = function (v) { return (v === null || v === undefined || v === '') ? '—' : Number(v).toFixed(2); };
+    set('pdpSelName', data.spec_text || '—');
+    set('pdpSelCost', priceText(data.cost_price));
+    set('pdpSelSale', priceText(data.sale_price));
+    set('pdpSelStock', data.available);
+  }
+
+  // —— SKU 行内数量步进器（只用于发布预填的件数） ——
+  function pdpRowStep(btn, delta) {
+    var input = btn.parentNode.querySelector('input');
+    var v = parseInt(input.value, 10) || 0;
+    input.value = String(Math.max(0, v + delta));
+    pdpQtyTotal();
+
+  }
+
+  // 结算条 + 合计：已选款数 / 总件数 / 商品金额（金额按每行数量的渔货价合计）
+  function pdpQtyTotal() {
+    var total = 0, picked = 0, amount = 0;
+    document.querySelectorAll('#pdpSkuTable .pdp-skurow').forEach(function (row) {
+      var input = row.querySelector('.pdp-rowqty input');
+      var qty = parseInt(input && input.value, 10) || 0;
+      if (qty > 0) { picked += 1; total += qty; }
+      var data = (SKU_ROWS || [])[Number(row.dataset.idx || 0)];
+      if (data) amount += qty * (Number(data.cost_price) || 0);
+    });
+    var set = function (id, v) { var e = document.getElementById(id); if (e) e.textContent = v; };
+    set('pdpQtyTotal', String(total));
+    set('pdpPickCount', String(picked));
+    set('pdpPickQty', String(total));
+    set('pdpPickAmount', amount.toFixed(2));
+  }
+  pdpQtyTotal();
+
+  // —— 结算条两个按钮（照 1688：立即下单 / 店铺铺货）——
+  function pdpActiveSku() {
+    var row = document.querySelector('#pdpSkuTable .pdp-skurow.active')
+      || document.querySelector('#pdpSkuTable .pdp-skurow');
+    var data = row ? ((SKU_ROWS || [])[Number(row.dataset.idx || 0)] || {}) : {};
+    var input = row ? row.querySelector('.pdp-rowqty input') : null;
+    var qty = parseInt(input && input.value, 10) || 1;
+    return {
+      sku_id: (row && row.dataset.skuId) || data.sku_id || '',
+      qty: Math.max(1, qty),
+      spec_text: data.spec_text || '默认规格'
+    };
+  }
+
+  // —— 两个「点不动」的提示（2026-10-11 用户拍板）——
+  // ① 库存为 0：按钮置灰，点了给「该商品已经无库存，即将下架」
+  // ② 没店铺 / 店铺没过审：铺货按钮置灰，点了让去找带教老师
+  function pdpNoStock() {
+    showToast(NO_STOCK_MSG, 'err');
+    pdpStatus(NO_STOCK_MSG, 'err');
+  }
+
+  function pdpShopMissing() {
+    showToast(SHOP_REQUIRED_MSG, 'err');
+    pdpStatus(SHOP_REQUIRED_MSG + '　<a href="' + SHOP_PAGE_URL
+      + '" style="color: inherit; text-decoration: underline;">去店铺管理看看</a>', 'err');
+  }
+
+  function pdpBuyNow() {
+    if (Number(AVAILABLE_STOCK) <= 0) { pdpNoStock(); return; }
+    var sku = pdpActiveSku();
+    location.href = CHECKOUT_URL + '?item_id=' + encodeURIComponent(ITEM_ID)
+      + '&sku_id=' + encodeURIComponent(sku.sku_id) + '&qty=' + sku.qty;
+  }
+
+  // 加采购车（2026-10-12）：攒到车里，结算时能给每一款货各填一个收货地址
+  async function pdpCartAdd() {
+    if (Number(AVAILABLE_STOCK) <= 0) { pdpNoStock(); return; }
+    var btn = document.getElementById('btnCart');
+    var original = btn.innerHTML;
+    var sku = pdpActiveSku();
+    btn.disabled = true; btn.innerHTML = '加入中…';
+    try {
+      var res = await fetch(CART_ADD_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_id: ITEM_ID, sku_id: sku.sku_id, qty: sku.qty })
+      });
+      var data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (!res.ok) {
+        showToast('加入采购车失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+        pdpStatus('加入采购车失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+      } else {
+        showToast(data.message || '已加入采购车', 'ok');
+        pdpStatus('已加入采购车（共 ' + (data.count || 0) + ' 款）　'
+          + '<a href="' + (data.cart_url || CART_PAGE_URL) + '" style="color: inherit; text-decoration: underline;">去采购车结算</a>'
+          + '　<a href="' + CHECKOUT_URL + '?item_id=' + encodeURIComponent(ITEM_ID)
+          + '&sku_id=' + encodeURIComponent(sku.sku_id) + '&qty=' + sku.qty
+          + '" style="color: inherit; text-decoration: underline;">立即下单</a>', 'ok');
+      }
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+      pdpStatus('网络错误：' + e.message, 'err');
+    }
+    btn.disabled = false; btn.innerHTML = original;
+  }
+
+  async function pdpPoolAdd() {
+    // 没店铺 / 店铺没过审：前后端都拦（2026-10-11 用户拍板）
+    if (Number(SHOPS_APPROVED) <= 0) { pdpShopMissing(); return; }
+    if (Number(AVAILABLE_STOCK) <= 0) { pdpNoStock(); return; }
+    var btn = document.getElementById('btnPool');
+    var original = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '加入中…';
+    try {
+      var res = await fetch(POOL_ADD_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      var data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (!res.ok) {
+        showToast('店铺铺货失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+        pdpStatus('店铺铺货失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+      } else {
+        var pool = data.pool || {};
+        var link = '　<a href="' + POOL_PAGE_URL + '" style="color: inherit; text-decoration: underline;">去店铺商品池</a>'
+          + '　<a href="' + (data.materials_url || '#') + '" style="color: inherit; text-decoration: underline;">下载素材 zip</a>';
+        showToast('已加入店铺商品池', 'ok');
+        pdpStatus('已加入店铺商品池 #' + pool.id
+          + (pool.shop_name ? '（' + pool.shop_name + '）' : '')
+          + ' · 个人闲置店铺没有 PC 后台，下载素材后去手机端发布' + link, 'ok');
+      }
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+      pdpStatus('网络错误：' + e.message, 'err');
+    }
+    btn.disabled = false; btn.innerHTML = original;
+  }
+
+
+  // —— Tab（含「参数」格跳转）——
+  function pdpTab(btn) {
+    document.querySelectorAll('.pdp-tab').forEach(function (b) { b.classList.toggle('active', b === btn); });
+    document.querySelectorAll('.pdp-panel').forEach(function (p) { p.hidden = p.id !== btn.dataset.tab; });
+  }
+
+  function pdpGoTab(tabId) {
+    var btn = document.querySelector('.pdp-tab[data-tab="' + tabId + '"]');
+    if (!btn) return;
+    pdpTab(btn);
+    var bar = document.getElementById('pdpTabbar');
+    if (bar) {
+      var top = bar.getBoundingClientRect().top + window.pageYOffset - 60;
+      window.scrollTo({ top: top, behavior: 'smooth' });
+    }
+  }
+
+  var PDP_COPY_TEXT = {{ copy_text | tojson }};
+  var PDP_DOWNLOAD_IMAGES = {{ download_images | tojson }};
+  {# 图片包 / 保存页地址（2026-10-13）：走 self_url 拼好带前缀，别在 JS 里手写裸路径 #}
+  var ITEM_IMAGES_ZIP_URL = {{ self_url('/goods/' ~ item.item_id ~ '/images.zip') | tojson }};
+  var ITEM_IMAGES_WALL_URL = {{ self_url('/goods/' ~ item.item_id ~ '/images') | tojson }};
+
+  /* 复制整段商品文案：点了按钮文案变「已复制」，两秒后还原（用户看得见有没有复制上） */
+  function pdpCopyAll() {
+    var text = PDP_COPY_TEXT || '';
+    if (!text) { showToast('这款货还没有文案', 'err'); return; }
+    var label = document.getElementById('pdpCopyAllText');
+    var done = function () {
+      if (label) { label.textContent = '已复制'; }
+      showToast('商品文案已复制（' + text.length + ' 字）', 'ok');
+      setTimeout(function () { if (label) { label.textContent = '复制商品文案'; } }, 2200);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        if (pdpCopyLegacy(text)) { done(); }
+        else { showToast('复制失败，请手动选择文本', 'err'); }
+      });
+    } else if (pdpCopyLegacy(text)) {
+      done();
+    }
+  }
+
+  /* 图片：电脑上走后端打包的 ZIP（2026-10-13 —— 以前逐张下载要点二十次，现场根本不用），
+     手机上开图片墙长按存相册（浏览器不许网页直接写相册，这是唯一合规的做法）。 */
+  function pdpDownloadZip() {
+    if (!(PDP_DOWNLOAD_IMAGES || []).length) { showToast('这款货没有图片可下载', 'err'); return; }
+    showToast('正在打包 ' + PDP_DOWNLOAD_IMAGES.length + ' 张图片…', 'ok');
+    window.location.href = ITEM_IMAGES_ZIP_URL;
+  }
+  function pdpOpenImageWall() {
+    window.location.href = ITEM_IMAGES_WALL_URL;
+  }
+
+  function pdpCopyTitle() {
+    window.copyText({{ item.title | tojson }}, '标题已复制');
+  }
+
+  // —— 商品卖点：一键复制全部（卖点页签里的按钮，点完变「已复制」两秒还原）——
+  function pdpCopyPoints() {
+    var text = {{ (item.selling_points or '') | tojson }};
+    if (!text) { showToast('这款货还没有卖点', 'err'); return; }
+    var label = document.getElementById('pdpCopyPointsText');
+    window.copyText(text, '卖点已复制（' + text.length + ' 字）');
+    if (label) {
+      label.textContent = '已复制';
+      setTimeout(function () { label.textContent = '复制全部卖点'; }, 2000);
+    }
+  }
+
+  // —— 上架 / 草稿 / 复制 / 下载（与经典版同一套接口）——
+  function pdpStatus(text, kind) {
+    var box = document.getElementById('handoffStatus');
+    box.hidden = false;
+    box.className = 'pdp-status' + (kind ? ' ' + kind : '');
+    var icon = kind === 'ok' ? 'bi-check2-circle' : (kind === 'err' ? 'bi-exclamation-triangle' : 'bi-info-circle');
+    box.innerHTML = '<i class="bi ' + icon + '"></i><span>' + text + '</span>';
+  }
+
+  // 手机吸底条：与主按钮同一套动作（下架时主按钮不存在，给提示）
+  function pdpDockBuyNow() {
+    var btn = document.getElementById('btnBuyNow');
+    if (!btn) {
+      showToast('该商品已由渔枢系统从渔货栈下架，不能再采购', 'err');
+      return;
+    }
+    pdpBuyNow();
+  }
+
+  function pdpPackageText(p) {
+    // 价格 / 规格都用页面上显示的同一份数字（销售价取建议售价、规格取 SKU 表），
+    // 不然「页面上 ¥99、复制出来 ¥54.60」会被当成 bug
+    var lines = [
+      '【标题】' + p.title,
+      '【销售价】¥' + Number(SUGGESTED_PRICE).toFixed(2),
+      '【库存】' + p.stock + ' 件',
+      '【成色】' + p.condition,
+      '【建议类目】' + p.category_text,
+      '【发货】' + p.delivery,
+      '【售后】' + p.after_sale + ' / ' + p.freight,
+      '【图片】' + (p.images || []).join('\n'),
+      '【描述】\n' + p.description
+    ];
+    var skus = (SKU_ROWS && SKU_ROWS.length)
+      ? SKU_ROWS.map(function (s) {
+          var price = (s.sale_price === null || s.sale_price === undefined) ? '待定' : '¥' + Number(s.sale_price).toFixed(2);
+          return s.spec_text + ' ' + price + ' x' + s.available;
+        })
+      : (p.skus || []).map(function (s) {
+          return s.spec_name + ' ¥' + s.price + ' x' + s.stock;
+        });
+    if (skus.length) lines.push('【规格】' + skus.join(' | '));
+    return lines.join('\n');
+  }
+
+  function pdpCopy() {
+    var text = pdpPackageText(CURRENT_PACKAGE);
+    var done = function () {
+      showToast('已复制预填字段（' + text.length + ' 字）', 'ok');
+      pdpStatus(
+        '已复制预填字段（' + text.length + ' 字：标题 / 销售价 / 库存 / 成色 / 图片 / 描述 / 规格）'
+        + ' · 去闲鱼发布页粘贴即可（未接入闲参谋时走这条路）',
+        'ok'
+      );
+    };
+    var fail = function () {
+      showToast('复制失败，请手动选择文本', 'err');
+      pdpStatus('复制失败：浏览器拒绝了剪贴板写入，请手动选中「闲鱼发布铺货信息」里的内容', 'err');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        // 手机端 / 非 https 下 clipboard API 常被拒 → 退回 textarea + execCommand
+        if (pdpCopyLegacy(text)) done(); else fail();
+      });
+    } else if (pdpCopyLegacy(text)) {
+      done();
+    } else {
+      fail();
+    }
+  }
+
+  function pdpCopyLegacy(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', 'readonly');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  // —— 商品详情：一组文案可复制 / AI 重写（重写结果直接进剪贴板）——
+  function pdpGroupText(i) {
+    var el = document.querySelector('.pdp-detail-html[data-group="' + i + '"]');
+    if (!el) return '';
+    return (el.innerText || el.textContent || '').trim();
+  }
+
+  function pdpCopyText(text, okMsg) {
+    var done = function () { showToast(okMsg || ('已复制（' + text.length + ' 字）'), 'ok'); };
+    var fail = function () { showToast('复制失败，请手动选择文本', 'err'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        if (pdpCopyLegacy(text)) done(); else fail();
+      });
+    } else if (pdpCopyLegacy(text)) {
+      done();
+    } else {
+      fail();
+    }
+  }
+
+  function pdpCopyGroup(i) {
+    var text = pdpGroupText(i);
+    if (!text) { showToast('这组文案还没有内容', 'err'); return; }
+    pdpCopyText(text, '已复制这组文案（' + text.length + ' 字）');
+  }
+
+  function pdpRewriteGroup(i) {
+    var text = pdpGroupText(i);
+    var box = document.getElementById('rewriteBox' + i);
+    if (!text || !box) { showToast('这组文案还没有内容', 'err'); return; }
+    box.hidden = false;
+    box.textContent = 'AI 重写中…';
+    var payload = Object.assign({}, REWRITE_CTX || {}, { text: text });
+    fetch(REWRITE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.text) {
+          box.textContent = (data && data.note) || '重写失败，请重试';
+          showToast('AI 重写失败，请重试', 'err');
+          return;
+        }
+        box.textContent = data.text;
+        // 重写完直接进剪贴板：粘回发布页就能用
+        pdpCopyText(data.text, 'AI 重写完成，已复制到剪贴板');
+      })
+      .catch(function () {
+        box.textContent = '重写失败：网络或服务异常，请重试';
+        showToast('AI 重写失败，请重试', 'err');
+      });
+  }
+
+  // —— 商品详情图：点缩略图换大图，并把右下角的 x/x 角标改掉（照渔枢系统查看页的做法）——
+  function pdpPick(thumb) {
+    var box = thumb.closest('.pdp-imgpick');
+    var src = thumb.getAttribute('data-src') || thumb.getAttribute('src');
+    if (!box || !src) return;
+    var stage = box.querySelector('.pdp-imgpick-stage');
+    var main = stage ? stage.querySelector('img') : null;
+    if (!main) return;
+    main.src = src;
+    main.style.display = '';
+    stage.classList.remove('is-broken');
+    var thumbs = box.querySelectorAll('.pdp-imgpick-thumbs img');
+    Array.prototype.forEach.call(thumbs, function (t) { t.classList.toggle('active', t === thumb); });
+    var index = Array.prototype.indexOf.call(thumbs, thumb);
+    var badge = stage.querySelector('.pdp-img-index');
+    if (badge && index >= 0) badge.textContent = (index + 1) + '/' + thumbs.length;
+  }
+
+  function pdpDownload() {
+    var blob = new Blob([JSON.stringify(CURRENT_PACKAGE, null, 2)], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'xianyu-publish-' + ITEM_ID + '.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+</script>
+{% endif %}
+{% endblock %}

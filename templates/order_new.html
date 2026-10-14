@@ -1,0 +1,558 @@
+{% extends "base.html" %}
+{# 我要下单（2026-10-11）：闲鱼出单后在这儿补一笔在线订单 —— 选品商品订单 / 其他订单
+   2026-10-12 重排：一张表塞不下那么多东西，改成「一块一件事」——
+   ① 哪种单 ② 卖了什么 ③ 买家收货信息 ④ 备注与凭证；右边单独一栏盯着钱
+   （成交价 / 渔货价 / 毛利），成交价低于渔货价当场红字提醒。 #}
+{% block title %}我要下单 · 渔货栈{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 页头走全站 .page-header（base.html），这里只管页面自己的两栏骨架 */
+  .on-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--s-4); align-items: start; }
+  @media (max-width: 1024px) { .on-wrap { grid-template-columns: minmax(0, 1fr); } }
+
+  /* ---- 区块骨架：头 / 体内边距与圆角走 base 的统一口径，这里只加序号徽标 ---- */
+  .on-block { margin-bottom: var(--s-3); }
+  .on-block > .hd { background: var(--c-surface-2); }
+  .on-block > .hd .no {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--c-primary); color: #fff;
+    font-size: 12px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 20px;
+  }
+  .on-block.warn { border-color: var(--c-error-border, #FECACA); }
+
+  /* ---- ① 哪种单：两张大卡片二选一 ---- */
+  .on-kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  @media (max-width: 640px) { .on-kinds { grid-template-columns: minmax(0, 1fr); } }
+  .on-tab {
+    display: block; text-align: left; padding: 12px 14px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--c-border); background: #fff; transition: .15s;
+  }
+  .on-tab:hover { border-color: var(--c-primary-border, #C7D2FE); }
+  .on-tab .t { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .on-tab .d { font-size: 12px; color: var(--c-text-muted); margin-top: 4px; line-height: 1.5; }
+  .on-tab.active { border-color: var(--c-primary); background: var(--c-primary-soft); }
+  .on-tab.active .t { color: var(--c-primary); }
+
+  /* ---- 商品预览 ---- */
+  .on-goods { display: flex; gap: 10px; align-items: center; }
+  .on-goods img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border: 1px solid var(--c-border); }
+  .on-paste { width: 100%; min-height: 84px; }
+  .on-tpl {
+    white-space: pre-wrap; background: var(--c-surface-2); border: 1px dashed var(--c-border);
+    border-radius: var(--r-input); padding: 10px 12px; font-size: var(--fs-help, 12px); color: var(--c-text-muted);
+  }
+  .on-shots { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .on-shots img { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; border: 1px solid var(--c-border); }
+  /* ---- 报单模板 / 订单详情图：整块红色强调（2026-10-12 用户要求强调、可分块） ---- */
+  .on-report { border-width: 2px; }
+  .on-report > .hd { background: rgba(220, 38, 38, .08); color: var(--c-error, #DC2626); font-weight: 700; }
+  .on-report > .bd { border-top: 1px solid var(--c-error-border, #FECACA); }
+  .on-sub-hd { font-size: 13px; font-weight: 700; color: var(--c-error, #DC2626); margin-bottom: 6px; }
+  .on-must-tip { font-size: 13px; color: var(--c-error, #DC2626); background: rgba(220, 38, 38, .07);
+    border: 1px solid var(--c-error-border, #FECACA); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+  .on-report-result { margin-top: 10px; font-size: 13px; line-height: 1.9; }
+  .on-report-result .rk { color: var(--c-text-muted); display: inline-block; min-width: 68px; }
+  .on-report-result .ok { color: var(--c-success); font-weight: 700; }
+  .on-report-result .bad { color: var(--c-error, #DC2626); font-weight: 700; }
+  /* 红色标题右侧的「点击查看样例」：同色但不必这么抢眼 */
+  .on-report .hd .hd-link { float: right; font-weight: 400; font-size: 13px;
+    color: var(--c-error, #DC2626); text-decoration: underline; }
+
+  /* ---- ④ 右栏：钱是重点，字最大 ---- */
+  .on-side { position: sticky; top: calc(var(--sy-head-h) + 12px); }
+  @media (max-width: 1024px) { .on-side { position: static; } }
+  .on-money { border: 2px solid var(--c-primary-border, #C7D2FE); }
+  /* 金额框做大：这一栏就是让人核钱的地方 */
+  .on-money .on-big-input {
+    height: 46px; font-size: 20px; font-weight: 700; letter-spacing: -.01em;
+    color: var(--c-text); padding: 6px 12px;
+  }
+  .on-money #fSale { border-color: var(--c-primary); }
+  .on-money .on-big-input:focus { border-color: var(--c-primary); }
+  .on-profit {
+    margin-top: 10px; padding: 10px 12px; border-radius: 8px; background: var(--c-success-soft, #ECFDF5);
+    border: 1px solid var(--c-success-border, #BBF7D0);
+  }
+  .on-profit.bad { background: var(--c-error-soft, #FEF2F2); border-color: var(--c-error-border, #FECACA); }
+  .on-profit .k { font-size: 12px; color: var(--c-text-muted); }
+  .on-profit .v { font-size: 20px; font-weight: 700; }
+  .on-profit.bad .v { color: var(--c-error, #DC2626); }
+  .on-profit .note { font-size: 12px; margin-top: 2px; }
+  .on-profit.bad .note { color: var(--c-error, #DC2626); font-weight: 600; }
+  .on-submit { width: 100%; height: 42px; font-size: 15px; }
+  .on-must { color: var(--c-error, #DC2626); font-size: 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# 页头走全站统一的 .page-header：标题 + 一行说明 + 右侧动作（别再自己造一个卡） #}
+<div class="page-header">
+  <div class="page-title">
+    <h1>我要下单</h1>
+    <span class="page-subtitle">
+      闲鱼出单后在这儿补一笔：先选哪种单 → 填卖了什么 → 买家收货信息 → 核钱提交。
+      提交后进「全部订单」，状态是<b>待确认</b>，确认后才推给渔枢系统采购。
+    </span>
+  </div>
+  <div class="page-actions">
+    <a href="{{ self_url('/orders') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> 全部订单
+    </a>
+  </div>
+</div>
+
+{# 注意：表单要包住左右两栏（成交价 / 渔货价在右栏），别只包住左边那列 #}
+<form method="post" action="{{ self_url('/orders/new') }}" id="orderNewForm">
+<div class="on-wrap">
+  <div class="on-main">
+      {# 来源：选品商品订单走「我的店铺商品」那件货，其他订单手填 #}
+      <input type="hidden" name="item_id" id="fItemId" value="{{ item_id }}">
+      <input type="hidden" name="title" id="fTitle" value="{{ snap.title }}">
+      <input type="hidden" name="images" id="fImages" value="">
+
+      {# ---------- ① 这是哪种单 ---------- #}
+      <div class="on-block">
+        <div class="hd"><span class="no">1</span> 这是哪种单<span class="sub">选错了也能随时切</span></div>
+        <div class="bd">
+          <div class="on-kinds">
+            <button type="button" class="on-tab {% if item_id %}active{% endif %}" data-kind="goods">
+              <span class="t"><i class="bi bi-bag-check"></i> 选品商品订单</span>
+              <span class="d">卖的是「我的店铺商品」里的货 —— 价格、图自动带出来</span>
+            </button>
+            <button type="button" class="on-tab {% if not item_id %}active{% endif %}" data-kind="other">
+              <span class="t"><i class="bi bi-pencil-square"></i> 其他订单</span>
+              <span class="d">池子里没有的货（群里报的单 / 店里别的品）—— 照飞书模板手填</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {# ---------- ② 卖了什么 ---------- #}
+      <div class="on-block">
+        <div class="hd"><span class="no">2</span> 卖了什么<span class="sub">商品名与数量</span></div>
+        <div class="bd">
+          <div id="boxGoods" {% if not item_id %}style="display:none"{% endif %}>
+            <div class="field">
+              <label for="goodsPick">从「我的店铺商品」里挑</label>
+              <select id="goodsPick">
+                <option value="">— 手选一款 —</option>
+                {% for g in goods %}
+                  <option value="{{ g.item_id }}" data-title="{{ g.title }}" data-image="{{ g.image }}"
+                          data-price="{{ g.price }}" data-suggested="{{ g.suggested_price }}"
+                          data-shop="{{ g.shop_id }}" data-shopname="{{ g.shop_name }}"
+                          {% if g.item_id == item_id %}selected{% endif %}>{{ g.title or g.item_id }}</option>
+                {% endfor %}
+              </select>
+              <span class="help">池子里没有的货就切回上面「其他订单」手填。</span>
+            </div>
+            <div class="on-goods" id="goodsCard" style="margin-top: 8px;">
+              {% if snap.image %}<img src="{{ snap.image }}" alt="" id="goodsImg">{% else %}<img src="" alt="" id="goodsImg" style="display:none">{% endif %}
+              <div>
+                <div style="font-weight:600" id="goodsTitle">{{ snap.title or '（还没选货）' }}</div>
+                <div class="text-secondary small" id="goodsMeta">
+                  {% if snap.fish_price %}渔货价 ¥{{ '%.2f' % (snap.fish_price | float) }}{% else %}—{% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="boxOther" {% if item_id %}style="display:none"{% endif %}>
+            <div class="field">
+              <label for="otherTitle">商品名 <span class="on-must">必填</span></label>
+              <input id="otherTitle" placeholder="照飞书群的报单格式写：商品名 / 规格">
+            </div>
+          </div>
+
+          <div class="field-row auto" style="margin-top: var(--s-2);">
+            <div class="field">
+              <label for="fShopId">出货店铺</label>
+              <select name="shop_id" id="fShopId">
+                <option value="0">— 不指定 —</option>
+                {% for s in shops %}
+                  <option value="{{ s.id }}" {% if shop_id and shop_id|string == s.id|string %}selected{% endif %}>{{ s.name or ('店铺 ' ~ s.id) }}</option>
+                {% endfor %}
+              </select>
+              <input type="hidden" name="shop_name" id="fShopName" value="">
+            </div>
+            <div class="field">
+              <label for="fQty">数量</label>
+              <input type="number" name="qty" id="fQty" value="1" min="1" step="1">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# ---------- ③ 买家收货信息 ---------- #}
+      <div class="on-block">
+        <div class="hd"><span class="no">3</span> 买家收货信息<span class="sub">从闲鱼复制过来，一键识别</span></div>
+        <div class="bd">
+          <div class="field">
+            <label for="pasteBox">闲鱼里复制的收货信息（粘贴后点「识别并填入」）</label>
+            <textarea id="pasteBox" class="on-paste" placeholder="张三 13800000001 广东省深圳市南山区xx路xx号"></textarea>
+            <div class="mt-1">
+              <button type="button" class="btn btn-sm btn-ghost" id="btnParse">
+                <i class="bi bi-magic"></i> 识别并填入
+              </button>
+              <span class="help" id="parseTip"></span>
+            </div>
+          </div>
+          <div class="field-row auto">
+            <div class="field">
+              <label for="fBuyer">收货人</label>
+              <input name="buyer_name" id="fBuyer" placeholder="闲鱼买家">
+            </div>
+            <div class="field">
+              <label for="fPhone">电话</label>
+              <input name="buyer_phone" id="fPhone" placeholder="11 位手机号">
+            </div>
+          </div>
+          <div class="field">
+            <label for="fAddr">收货地址</label>
+            <textarea name="address" id="fAddr" rows="2" placeholder="省市区 + 详细地址"></textarea>
+          </div>
+        </div>
+      </div>
+
+      {# ---------- ④ 备注与凭证 ---------- #}
+      <div class="on-block">
+        <div class="hd"><span class="no">4</span> 备注与凭证<span class="sub">选填，但别漏了买家要求</span></div>
+        <div class="bd">
+          <div class="field">
+            <label for="fNote">备注</label>
+            <textarea name="note" id="fNote" rows="2" placeholder="买家要求 / 发货注意"></textarea>
+          </div>
+
+          {# 其他订单才用得上：飞书群模板 + 闲鱼订单详情图 #}
+          <div id="boxOther2" {% if item_id %}hidden{% endif %}>
+            <div class="on-block warn on-report">
+              <div class="hd"><i class="bi bi-exclamation-triangle-fill"></i> 报单模板（照着填就不要漏字段）</div>
+              <div class="bd">
+                <div class="on-sub-hd">&#9312; 复制这段去群里，照着它填</div>
+                <div class="on-tpl" id="tplText">{{ template_text }}</div>
+                <div class="mt-1">
+                  <button type="button" class="btn btn-sm btn-ghost" id="btnCopyTpl">
+                    <i class="bi bi-clipboard"></i> 复制模板
+                  </button>
+                </div>
+                <div class="on-sub-hd" style="margin-top:12px">&#9313; 填好后整段粘回来，点「解析并填入」</div>
+                <textarea id="reportBox" class="on-paste" rows="7" placeholder="把填好的整段粘进来（格式见上面模板）"></textarea>
+                <div class="mt-1">
+                  <button type="button" class="btn btn-sm btn-primary" id="btnParseReport">
+                    <i class="bi bi-magic"></i> 解析并填入
+                  </button>
+                </div>
+                <div class="on-report-result" id="reportResult"></div>
+              </div>
+            </div>
+            <div class="on-block warn on-report">
+              <div class="hd"><i class="bi bi-exclamation-triangle-fill"></i> 订单详情图 <span class="on-must">必传</span>
+                <a href="#" id="btnShotSample" class="hd-link">点击查看样例</a></div>
+              <div class="bd">
+                <div class="on-must-tip">这一单必须留下闲鱼订单详情截图 —— 没图不予下单。</div>
+                <div class="image-grid" id="shotBox">
+                  <div class="image-slot" id="shotEmpty">
+                    <div class="slot-hint"><i class="bi bi-image"></i>订单详情图</div>
+                  </div>
+                </div>
+                <div class="image-add">
+                  <input type="file" id="shotInput" accept="image/*" multiple hidden>
+                  <button type="button" class="btn btn-sm btn-primary"
+                          onclick="document.getElementById('shotInput').click()">
+                    <i class="bi bi-upload"></i> 上传订单详情图
+                  </button>
+                  <span class="help" style="margin:0">可多张，单张 ≤ 5MB，支持 png / jpg / webp</span>
+                </div>
+                <span class="help" id="shotTip">认不出来的字段手填一下，图也会留在订单上供核对。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+  </div>{# /.on-main #}
+
+  {# ---------- 右栏：钱（重点） ---------- #}
+  {# 右栏和左栏在同一个 form 里，成交价 / 渔货价才提交得上去 #}
+  <div class="on-side">
+    <div class="on-block on-money">
+      <div class="hd"><span class="no">¥</span> 这一单的钱<span class="sub">重点核对</span></div>
+      <div class="bd">
+        <div class="field">
+          <label for="fSale">成交价（买家实付）<span class="on-must">必填</span></label>
+          <input type="number" class="on-big-input" name="sale_price" id="fSale"
+                 step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="field" style="margin-top: 10px;">
+          <label for="fFish">渔货价（成本）</label>
+          <input type="number" class="on-big-input" name="fish_price" id="fFish"
+                 step="0.01" min="0" placeholder="0.00"
+                 value="{{ '%.2f' % (snap.fish_price | float) if snap.fish_price else '' }}">
+        </div>
+
+        <div class="on-profit" id="profitBox">
+          <div class="k">这一单赚（成交价 − 渔货价）</div>
+          <div class="v" id="profitVal">¥0.00</div>
+          <div class="note" id="profitNote">填上面的成交价与渔货价，这里实时算</div>
+        </div>
+
+        <div class="mt-3">
+          <button type="submit" class="btn btn-primary on-submit"><i class="bi bi-check2"></i> 提交订单</button>
+          <a href="{{ self_url('/orders') }}" class="btn btn-ghost w-100 mt-2">取消，不下了</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</form>
+
+<script>
+(function () {
+  var PARSE_URL = {{ self_url('/orders/parse-buyer') | tojson }};
+  var UPLOAD_URL = {{ self_url('/orders/upload-image') | tojson }};
+  var fishDefault = {{ (snap.fish_price | float) | tojson }};
+  var suggested = {{ (snap.suggested_price | float) | tojson }};
+
+  var $ = function (id) { return document.getElementById(id); };
+  {# 括号不能省：Jinja 里过滤器的优先级比三元表达式高 #}
+  var kind = {{ ('goods' if item_id else 'other') | tojson }};
+
+  // —— 钱：成交价 / 渔货价 / 毛利实时算（成交价低于成本当场红字提醒）——
+  function money(v) { return (Math.round((v || 0) * 100) / 100).toFixed(2); }
+  function refreshMoney() {
+    var sale = parseFloat($('fSale').value || '0') || 0;
+    var fish = parseFloat($('fFish').value || '0') || 0;
+    var profit = sale - fish;
+    var box = $('profitBox'), val = $('profitVal'), note = $('profitNote');
+    val.textContent = (profit < 0 ? '-¥' : '¥') + money(Math.abs(profit));
+    if (sale > 0 && profit < 0) {
+      box.classList.add('bad');
+      note.textContent = '亏了 ' + money(-profit) + ' 元！成交价低于渔货价，确认没填错吗？';
+    } else if (sale > 0) {
+      box.classList.remove('bad');
+      note.textContent = '利润率 ' + (sale ? Math.round(profit / sale * 1000) / 10 : 0) + '%';
+    } else {
+      box.classList.remove('bad');
+      note.textContent = '填上面的成交价与渔货价，这里实时算';
+    }
+  }
+  ['fSale', 'fFish'].forEach(function (id) {
+    $(id).addEventListener('input', refreshMoney);
+    $(id).addEventListener('change', refreshMoney);
+  });
+
+  function switchKind(next) {
+    kind = next;
+    var tabs = document.querySelectorAll('.on-tab');
+    Array.prototype.forEach.call(tabs, function (t) {
+      t.classList.toggle('active', t.dataset.kind === next);
+    });
+    $('boxGoods').style.display = next === 'goods' ? '' : 'none';
+    $('boxOther').style.display = next === 'goods' ? 'none' : '';
+    $('boxOther2').hidden = next !== 'other';
+    if (next === 'other') { $('fItemId').value = ''; }
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.on-tab'), function (t) {
+    t.addEventListener('click', function () { switchKind(t.dataset.kind); });
+  });
+
+  // —— 选品商品：挑一款就把标题 / 图 / 渔货价带出来 ——
+  var pick = $('goodsPick');
+  if (pick) {
+    pick.addEventListener('change', function () {
+      var opt = pick.options[pick.selectedIndex];
+      if (!opt || !opt.value) { return; }
+      $('fItemId').value = opt.value;
+      $('fTitle').value = opt.dataset.title || '';
+      $('goodsTitle').textContent = opt.dataset.title || opt.value;
+      var img = $('goodsImg');
+      if (opt.dataset.image) { img.src = opt.dataset.image; img.style.display = ''; }
+      else { img.style.display = 'none'; }
+      $('fFish').value = opt.dataset.price || '';
+      if (opt.dataset.suggested) { $('fSale').value = opt.dataset.suggested; }
+      if (opt.dataset.shop) { $('fShopId').value = opt.dataset.shop; }
+      $('goodsMeta').textContent = '渔货价 ¥' + (opt.dataset.price || '0');
+      refreshMoney();
+    });
+  }
+  if (suggested) { $('fSale').value = suggested.toFixed(2); }
+
+  // 店铺名一起带走（订单上要留得下是哪个店出的单）
+  var shopSel = $('fShopId');
+  function syncShopName() {
+    var opt = shopSel.options[shopSel.selectedIndex];
+    $('fShopName').value = (opt && opt.value !== '0') ? opt.textContent.trim() : '';
+  }
+  if (shopSel) { shopSel.addEventListener('change', syncShopName); syncShopName(); }
+
+  function fill(data) {
+    if (data.buyer_name) { $('fBuyer').value = data.buyer_name; }
+    if (data.phone) { $('fPhone').value = data.phone; }
+    if (data.address) { $('fAddr').value = data.address; }
+    if (data.amount && !$('fSale').value) { $('fSale').value = data.amount; }
+    refreshMoney();
+  }
+
+  // —— 粘贴识别 ——
+  var btnParse = $('btnParse');
+  if (btnParse) {
+    btnParse.addEventListener('click', function () {
+      var text = $('pasteBox').value || '';
+      if (!text.trim()) { $('parseTip').textContent = '先粘贴一段收货信息'; return; }
+      $('parseTip').textContent = '识别中…';
+      fetch(PARSE_URL, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({text: text})
+      }).then(function (r) { return r.json(); }).then(function (data) {
+        fill(data || {});
+        $('parseTip').textContent = (data && data.ok)
+          ? '已填入：' + [data.buyer_name, data.phone].filter(Boolean).join(' / ')
+          : '这段没认全，剩下的手填一下';
+      }).catch(function () { $('parseTip').textContent = '识别失败，手动填吧'; });
+    });
+  }
+
+  // —— 上传闲鱼订单详情图 ——
+  var shots = [];
+  var shotInput = $('shotInput');
+  if (shotInput) {
+    shotInput.addEventListener('change', function () {
+      Array.prototype.forEach.call(shotInput.files || [], function (f) {
+        var fd = new FormData();
+        fd.append('file', f);
+        $('shotTip').textContent = '上传并识别中…';
+        fetch(UPLOAD_URL, {method: 'POST', body: fd})
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (!data || !data.url) { $('shotTip').textContent = (data && data.message) || '没存下来'; return; }
+            shots.push(data.url);
+            $('fImages').value = shots.join(',');
+            // 渲染成和商品页一样的图片格子（空槽 → 缩略图 + 右上角删除）
+            var slot = document.createElement('div');
+            slot.className = 'image-slot filled';
+            var im = document.createElement('img');
+            im.src = data.url;
+            slot.appendChild(im);
+            var del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'slot-del';
+            del.innerHTML = '<i class="bi bi-x"></i>';
+            del.addEventListener('click', function () {
+              var i = shots.indexOf(data.url);
+              if (i >= 0) { shots.splice(i, 1); }
+              $('fImages').value = shots.join(',');
+              slot.remove();
+              if (!shots.length && $('shotEmpty')) { $('shotEmpty').style.display = ''; }
+            });
+            slot.appendChild(del);
+            $('shotBox').insertBefore(slot, $('shotEmpty'));
+            if ($('shotEmpty')) { $('shotEmpty').style.display = 'none'; }
+            fill(data || {});
+            $('shotTip').textContent = (data.ok ? '已识别：' : '') + (data.message || '');
+            if (data.text) { $('pasteBox').value = ($('pasteBox').value + '\n' + data.text).trim(); }
+          })
+          .catch(function () { $('shotTip').textContent = '上传失败'; });
+      });
+    });
+  }
+
+  // —— 报单模板：粘回来解析（2026-10-12）—— 逐项认「键：值」，认出来就填进对应格子；
+  // 哪一项不对，当场指明是哪一项、错在哪，改完再点一次，不用人肉比对。
+  var RF = [
+    ['产品', 'fTitle', 1, null],
+    ['收货人', 'fBuyer', 1, null],
+    ['手机号码', 'fPhone', 1, function (v) { return /^1[0-9]{10}$/.test(v.replace(/[^0-9]/g, '')) ? '' : '不是 11 位手机号'; }],
+    ['地址信息', 'fAddr', 1, function (v) { return v.length >= 8 ? '' : '地址太短，省市区 + 详细地址都要'; }],
+    ['渔货价', 'fFish', 1, function (v) { var n = parseFloat(v); return (isNaN(n) || n <= 0) ? '要填数字金额' : ''; }],
+    ['买家备注', 'fNote', 0, null]
+  ];
+  var RA = {'商品': '产品', '电话': '手机号码', '手机': '手机号码', '收货地址': '地址信息',
+    '地址': '地址信息', '成本': '渔货价', '备注': '买家备注', '留言': '买家备注'};
+
+  function parseReport() {
+    var out = $('reportResult'), text = $('reportBox').value || '';
+    if (!text.trim()) { out.innerHTML = '<span class="bad">先把填好的报单内容粘进来</span>'; return; }
+    var got = {};
+    text.split(String.fromCharCode(10)).forEach(function (line) {
+      var m = line.match(/^ *([^：:]{2,10}) *[：:] *(.*)$/);
+      if (!m) return;
+      var k = String(m[1] || '').trim(), v = String(m[2] || '').trim();
+      k = RA[k] || k;
+      if (v && !(k in got)) { got[k] = v; }
+    });
+    var rows = '', bad = [], good = [];
+    RF.forEach(function (f) {
+      var key = f[0], el = $(f[1]), v = String(got[key] || '').trim();
+      if (!v) { if (f[2]) { rows += '<div><span class="rk">' + key + '</span><span class="bad">&#10007; 没填</span></div>'; bad.push(key + '没填'); } return; }
+      var err = f[3] ? f[3](v) : '';
+      if (err) { rows += '<div><span class="rk">' + key + '</span><span class="bad">&#10007; ' + err + '</span></div>'; bad.push(key + '：' + err); return; }
+      if (el) { el.value = (f[1] === 'fPhone') ? v.replace(/[^0-9]/g, '') : (f[1] === 'fFish' ? String(parseFloat(v)) : v); }
+      good.push(key);
+      rows += '<div><span class="rk">' + key + '</span><span class="ok">&#10003;</span> ' + v.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</div>';
+    });
+    refreshMoney();
+    out.innerHTML = (bad.length
+      ? '<div class="bad">还有 ' + bad.length + ' 处不对：' + bad.join('；') + ' —— 改完再点一次「解析并填入」</div>'
+      : '<div class="ok">全部认出来了，已填入：' + good.join(' / ') + ' —— 再核对一遍</div>') + rows;
+  }
+  var btnRep = $('btnParseReport');
+  if (btnRep) { btnRep.addEventListener('click', parseReport); }
+
+  // —— 复制飞书群模板 ——
+  var btnTpl = $('btnCopyTpl');
+  if (btnTpl) {
+    btnTpl.addEventListener('click', function () {
+      var text = ($('tplText').textContent || '').trim();
+      // 走全站统一的 copyText（http 下 clipboard API 不可用，它会自动退回 textarea 方案）
+      window.copyText(text, false, '复制失败，请长按选中模板手动复制');
+      btnTpl.innerHTML = '<i class="bi bi-check2"></i> 已复制';
+      setTimeout(function () { btnTpl.innerHTML = '<i class="bi bi-clipboard"></i> 复制模板'; }, 2000);
+    });
+  }
+
+  document.getElementById('orderNewForm').addEventListener('submit', function (e) {
+    if (kind === 'other') {
+      var t = $('otherTitle').value.trim();
+      if (!t) { e.preventDefault(); alert('写上商品名（照飞书模板填）'); return; }
+      $('fTitle').value = t;
+    }
+    if (kind === 'other' && shots.length === 0) {
+      e.preventDefault();
+      alert('订单详情图必须上传 —— 先传一张闲鱼订单详情截图再提交。');
+      return;
+    }
+    if (!$('fTitle').value && $('fItemId').value) {
+      $('fTitle').value = $('goodsTitle').textContent || '';
+    }
+  });
+
+  // —— 订单详情图样例（2026-10-12）：点标题右边「点击查看样例」弹出来 ——
+  // 教新人到底该截哪张图：闲鱼「订单详情」整页。样例图放在 media/orders/sample-order.jpg，
+  // 没放的时候给一句说明，不至于点开是空白。
+  var btnSample = $('btnShotSample');
+  if (btnSample) {
+    btnSample.addEventListener('click', function (e) {
+      e.preventDefault();
+      var mask = document.createElement('div');
+      mask.style.cssText = 'position:fixed;inset:0;z-index:999;background:rgba(15,23,42,.78);display:flex;align-items:center;justify-content:center;padding:24px';
+      mask.innerHTML = '<div style="max-width:min(92vw,720px);max-height:90vh;overflow:auto;background:#fff;border-radius:12px;padding:14px">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+        + '<b style="font-size:14px">闲鱼订单详情图 · 样例</b>'
+        + '<button type="button" class="btn btn-sm">关闭</button></div>'
+        + '<img src="/media/orders/sample-order.jpg" alt="订单详情图样例" style="max-width:100%;display:block;border-radius:8px">'
+        + '<div class="help" id="sampleHint" style="margin-top:8px">要截的是闲鱼「订单详情」整页：商品标题、订单号、下单时间、实付金额、收货信息都在一张图里。</div></div>';
+      var im = mask.querySelector('img');
+      im.addEventListener('error', function () {
+        im.style.display = 'none';
+        mask.querySelector('#sampleHint').textContent = '样例图还没放上来 —— 把一张真实订单截图放到 media/orders/sample-order.jpg 就能看到。';
+      });
+      mask.querySelector('button').addEventListener('click', function () { mask.remove(); });
+      mask.addEventListener('click', function (ev) { if (ev.target === mask) { mask.remove(); } });
+      document.body.appendChild(mask);
+    });
+  }
+
+  refreshMoney();
+})();
+</script>
+{% endblock %}

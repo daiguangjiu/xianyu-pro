@@ -1,0 +1,166 @@
+{# 运费模板 / 闲鱼发货方式：上架商品时默认套用的规则（全局默认 + 关联供应商 + 关联类目） #}
+{% extends "base.html" %}
+{% block title %}运费模板 / 发货方式{% endblock %}
+{% block heading %}运费模板 / 发货方式{% endblock %}
+{% block sub %}上架商品时默认套用的运费与发货方式：一条全局默认，也可以按供应商 / 类目细分{% endblock %}
+{% block actions %}
+  <a class="btn {{ 'primary' if kind == 'freight' else '' }}" href="/shipping-rules?kind=freight">运费模板</a>
+  <a class="btn {{ 'primary' if kind == 'method' else '' }}" href="/shipping-rules?kind=method">闲鱼发货方式</a>
+  <a class="btn" href="/products/new">去发布商品</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>{{ kind_label }}</b>
+      <div class="scope-note">
+        当前默认：{% if default_rule %}{{ default_rule.name }}{% else %}<span class="badge">还没设全局默认</span>{% endif %}
+      </div>
+    </div>
+    <p class="help" style="margin:0;max-width:640px;">
+      命中顺序：<b>供应商 + 类目 &gt; 类目 &gt; 供应商 &gt; 全局默认</b>。
+      只关联供应商的规则对所有类目生效，只关联类目的规则对所有供应商生效；
+      发布商品时留「自动」就会按商品当前的供应商与类目套用。<br>
+      类目口径：<b>只到一级类目</b>（二三级太细，运费与发货方式按品类分就够了）——
+      下拉里只有一级（顺序跟「类目管理」里的一致），保存时会自动收敛到一级。
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="post" action="/shipping-rules/create">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <div class="field-row auto">
+      <div class="field"><label>名称</label>
+        <input type="text" name="name" required maxlength="64"
+               placeholder="{{ '如：全国包邮 / 固定运费 ¥6' if kind == 'freight' else '如：邮寄-包邮（默认）' }}">
+      </div>
+      {% if kind == 'freight' %}
+        <div class="field"><label>运费金额</label>
+          <input type="number" name="fee" min="0" step="0.01" value="0">
+          <p class="help">包邮填 0</p>
+        </div>
+      {% else %}
+        <div class="field"><label>发货方式</label>
+          <select name="mode">
+            {% for value, text in method_choices %}<option value="{{ value }}">{{ text }}</option>{% endfor %}
+          </select>
+        </div>
+      {% endif %}
+      <div class="field"><label>关联供应商</label>
+        <select name="supplier_id">
+          <option value="">不限（所有供应商）</option>
+          {% for s in suppliers %}<option value="{{ s.id }}">{{ s.name }}{% if s.code %}（{{ s.code }}）{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>关联类目（一级）</label>
+        <select name="category_id">
+          <option value="">不限（所有类目）</option>
+          {% for c in category_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>优先级</label>
+        <input type="number" name="priority" value="100">
+        <p class="help">数字小的优先</p>
+      </div>
+      <div class="field"><label>全局默认</label>
+        <label class="check"><input type="checkbox" name="is_default" value="1"> 设为默认</label>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn primary">新增{{ kind_label }}</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="sec-title">
+    <i class="bi bi-list-check"></i> 已有{{ kind_label }}（{{ rows|length }} 条）
+  </div>
+  {% if not rows %}
+    <p class="help">还没有规则。先加一条「全局默认」，之后想按供应商或类目细分再加。</p>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:280px;">名称 / 内容</th>
+          <th>适用范围</th>
+          <th style="width:200px;">优先级 · 默认 · 启用</th>
+          <th>备注</th>
+          <th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        {% set rule = row.rule %}
+        <tr class="{% if rule.is_default %}is-default{% endif %}">
+          <td colspan="5" style="padding:0;">
+            {# 一行即一条记录：字段按宽度自适应排一行，勾选与按钮跟输入框同高居中 #}
+            <form method="post" action="/shipping-rules/edit" class="row-form" style="padding:10px 12px;">
+              <input type="hidden" name="id" value="{{ rule.id }}">
+              <input type="hidden" name="kind" value="{{ rule.kind }}">
+              <div class="field">
+                <input type="text" name="name" value="{{ rule.name }}" maxlength="64" aria-label="名称" placeholder="名称">
+              </div>
+              {% if rule.kind == 'freight' %}
+                <div class="field">
+                  <input type="number" name="fee" min="0" step="0.01" value="{{ '%.2f' % (rule.fee or 0) }}" aria-label="运费金额">
+                </div>
+              {% else %}
+                <div class="field">
+                  <select name="mode" aria-label="发货方式">
+                    <option value="">（不指定）</option>
+                    {% for value, text in method_choices %}
+                      <option value="{{ value }}" {% if rule.mode == value %}selected{% endif %}>{{ text }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              {% endif %}
+              <div class="field">
+                <select name="supplier_id" aria-label="关联供应商">
+                  <option value="">不限供应商</option>
+                  {% for s in suppliers %}
+                    <option value="{{ s.id }}" {% if rule.supplier_id and rule.supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <select name="category_id" aria-label="关联类目">
+                  <option value="">不限类目</option>
+                  {% for c in category_options %}
+                    <option value="{{ c.id }}" {% if rule.category_id and rule.category_id == c.id %}selected{% endif %}>{{ c.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <input type="number" name="priority" value="{{ rule.priority }}" aria-label="优先级">
+              </div>
+              <div class="field">
+                <input type="text" name="note" value="{{ rule.note }}" placeholder="备注" maxlength="200" aria-label="备注">
+              </div>
+              <div class="row-form-actions">
+                <label class="check"><input type="checkbox" name="is_default" value="1" {% if rule.is_default %}checked{% endif %}> 默认</label>
+                <label class="check"><input type="checkbox" name="enabled" value="1" {% if rule.enabled %}checked{% endif %}> 启用</label>
+                <button class="btn sm primary">保存</button>
+              </div>
+            </form>
+            <form method="post" action="/shipping-rules/delete" class="form-actions" style="margin:0;padding:0 12px 10px;">
+              <input type="hidden" name="id" value="{{ rule.id }}">
+              <button class="btn sm danger" data-confirm="删除「{{ rule.name }}」？已经上架的商品上存的值不会被改动。">删除</button>
+              <span class="scope-note">{{ row.scope }}{% if row.mode_label %} · {{ row.mode_label }}{% endif %}</span>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  <p class="help" style="margin-top: var(--s-3);">
+    改运费模板名时，商品上已经存下的同名模板会自动跟着改，不会出现「商品写着旧名字、规则里已经没有」的情况。
+  </p>
+</div>
+
+{% endblock %}

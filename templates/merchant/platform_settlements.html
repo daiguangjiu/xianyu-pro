@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}结算管理 · 审核台{% endblock %}
+
+{% block content %}
+{% if not can_write %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid #b26a00;">
+  <div class="card-body" style="padding: 12px 16px; font-size: 14px;">
+    <i class="bi bi-lock"></i> 当前为<strong>只读浏览</strong>。审核操作需
+    <a href="/self/merchant/login?next=/platform/settlements" style="color:var(--c-primary);">以平台管理员登录</a>。
+  </div>
+</div>
+{% endif %}
+{% if request.query_params.get('msg') %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid var(--c-success);">
+  <div class="card-body" style="padding: 12px 16px;">
+    <i class="bi bi-check-circle"></i> {{ request.query_params.get('msg') }}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>结算管理</h1>
+    <span class="page-subtitle">为商家生成结算单 · 标记已结算后金额转入可提现</span>
+  </div>
+</div>
+
+{# ====== 商家钱包 ====== #}
+<div class="card" style="margin-bottom: var(--s-4);">
+  <div class="card-header"><i class="bi bi-wallet2"></i> 商家钱包</div>
+  <div class="card-body" style="padding:0;">
+    {% if merchants %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" style="margin:0;">
+        <thead>
+          <tr>
+            <th>商家</th>
+            <th style="width:90px;">佣金率</th>
+            <th style="width:110px;">可提现</th>
+            <th style="width:110px;">待结算</th>
+            <th style="width:110px;">冻结</th>
+            <th style="width:110px;">已提现</th>
+            <th style="width:140px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for m in merchants %}
+          {% set w = wallets.get(m.id) %}
+          <tr>
+            <td>
+              <div style="font-weight:600;">{{ m.name }}</div>
+              <div style="font-size:12px;color:var(--c-text-muted);">
+                {{ m.short_name or '' }} · {{ m.contact_phone or '' }}
+              </div>
+            </td>
+            <td>{{ '{:.1f}'.format((m.commission_rate or 0) * 100) }}%</td>
+            <td>¥{{ '{:,.2f}'.format(w.available_balance or 0) if w else '0.00' }}</td>
+            <td>¥{{ '{:,.2f}'.format(w.pending_balance or 0) if w else '0.00' }}</td>
+            <td>¥{{ '{:,.2f}'.format(w.frozen_balance or 0) if w else '0.00' }}</td>
+            <td>¥{{ '{:,.2f}'.format(w.withdrawn_total or 0) if w else '0.00' }}</td>
+            <td>
+              <form method="post" action="/self/platform/settlements/generate" style="margin:0;">
+                <input type="hidden" name="merchant_id" value="{{ m.id }}">
+                <button type="submit" class="btn btn-sm btn-primary" {% if not can_write %}disabled title="需要平台管理员登录"{% endif %}>生成结算单</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="padding:32px;text-align:center;color:var(--c-text-muted);">暂无已审核通过的商家</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ====== 结算单 ====== #}
+<div class="card">
+  <div class="card-header"><i class="bi bi-receipt"></i> 结算单</div>
+  <div class="card-body" style="padding:0;">
+    {% if bills %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" style="margin:0;">
+        <thead>
+          <tr>
+            <th>结算单号</th>
+            <th style="width:80px;">商家</th>
+            <th style="width:60px;">订单</th>
+            <th style="width:100px;">货款</th>
+            <th style="width:90px;">佣金</th>
+            <th style="width:90px;">退款</th>
+            <th style="width:100px;">实结</th>
+            <th style="width:90px;">状态</th>
+            <th style="width:110px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for b in bills %}
+          {% set m = merchants | selectattr('id', 'equalto', b.merchant_id) | list | first %}
+          <tr>
+            <td class="mono-sm">{{ b.bill_no }}</td>
+            <td>{{ (m.short_name or m.name) if m else b.merchant_id }}</td>
+            <td>{{ b.order_count }}</td>
+            <td>¥{{ '{:,.2f}'.format(b.goods_amount or 0) }}</td>
+            <td>-¥{{ '{:,.2f}'.format(b.commission or 0) }}</td>
+            <td>¥{{ '{:,.2f}'.format(b.refund_amount or 0) }}</td>
+            <td><strong>¥{{ '{:,.2f}'.format(b.settle_amount or 0) }}</strong></td>
+            <td>
+              {% if b.status == 'pending' %}
+                <span class="badge" style="background:#fff4e5;color:#b26a00;">待结算</span>
+              {% elif b.status == 'settled' %}
+                <span class="badge" style="background:#e6f7ee;color:#0a7a45;">已结算</span>
+              {% else %}
+                <span class="badge" style="background:#eef0f3;color:#555;">{{ b.status_text }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if b.status == 'pending' %}
+              <form method="post" action="/self/platform/settlements/{{ b.id }}/settle" style="margin:0;">
+                <button type="submit" class="btn btn-sm btn-outline-secondary" {% if not can_write %}disabled title="需要平台管理员登录"{% endif %}>标记已结</button>
+              </form>
+              {% else %}
+              <span style="font-size:12px;color:var(--c-text-muted);">
+                {{ (b.settled_at | string)[:10] if b.settled_at else '-' }}
+              </span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="padding:32px;text-align:center;color:var(--c-text-muted);">
+      暂无结算单。点上方「生成结算单」按已发货订单汇总出账
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

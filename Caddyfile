@@ -1,0 +1,14 @@
+# 自动申请并续期 Let's Encrypt 证书，80/443 需能从公网访问
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy app:8000
+
+	# 订单截图可能较大，放宽上传/响应体限制
+	request_body {
+		max_size 30MB
+	}
+
+	log {
+		output stdout
+	}
+}

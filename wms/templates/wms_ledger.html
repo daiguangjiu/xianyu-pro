@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}库存账本{% endblock %}
+{% block sub %}余额由流水算出，流水只增不改（幂等键防重复提交）{% endblock %}
+{% block actions %}<a class="btn" href="/wms/items">库存台账</a>{% endblock %}
+
+{% block content %}
+{% if negative %}
+<div class="note danger"><b>负库存告警：</b>{{ negative | length }} 个桶出现负库存，说明有流程没走流水。</div>
+{% endif %}
+
+<div class="card flush">
+  <h2>库存余额（仓库 × 状态 × 等级）</h2>
+  {% if balances %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>仓库</th><th>状态</th><th>等级</th><th class="num">数量</th><th class="num">在途</th><th>最后流水</th></tr></thead>
+    <tbody>{% for b in balances %}
+      <tr>
+        <td>{{ wms_warehouse_label(b.warehouse_code) }}</td>
+        <td>{{ bits.status_badge(b.status) }}</td>
+        <td>{{ bits.grade_badge(b.grade) }}</td>
+        <td class="num {{ 'danger' if b.qty < 0 }}">{{ b.qty }}</td>
+        <td class="num muted">{{ b.in_transit_qty }}</td>
+        <td class="mono muted">#{{ b.last_ledger_id }}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}{{ bits.empty('余额表是空的（还没有任何库存流水）') }}{% endif %}
+</div>
+
+<div class="card flush">
+  <h2>库存流水（最近 {{ ledgers | length }} 条）</h2>
+  {% if ledgers %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>条码</th><th>类型</th><th>从</th><th>到</th><th class="num">变动</th>
+      <th>操作人</th><th>备注</th><th>时间</th></tr></thead>
+    <tbody>{% for l in ledgers %}
+      <tr>
+        <td class="nowrap mono">{{ l.barcode }}</td>
+        <td>{{ wms_ledger_label(l.biz_type) }}</td>
+        <td class="muted">{{ wms_warehouse_label(l.from_warehouse) }}{{ ' ' + wms_status_label(l.from_status) if l.from_status }}</td>
+        <td>{{ wms_warehouse_label(l.to_warehouse) }}{{ ' ' + wms_status_label(l.to_status) if l.to_status }}</td>
+        <td class="num">{{ l.qty_delta }}</td>
+        <td>{{ l.operator or '—' }}</td>
+        <td class="wrap2 muted"><span class="clamp2">{{ l.remark or '—' }}</span></td>
+        <td class="nowrap muted">{{ l.operated_at | dt }}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有流水') }}{% endif %}
+</div>
+{% endblock %}

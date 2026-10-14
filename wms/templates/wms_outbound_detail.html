@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}{{ order.order_no }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/wms/outbound">返回列表</a>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">类型</div><div class="value sm">{{ order.type }}</div></div>
+  <div class="stat"><div class="label">状态</div><div class="value sm">{{ order.status }}</div></div>
+  <div class="stat"><div class="label">件数</div><div class="value">{{ order.item_count }}</div></div>
+  <div class="stat"><div class="label">发货仓</div><div class="value sm">{{ wms_warehouse_label(order.warehouse_code) }}</div>
+    <div class="hint">{% if order.to_warehouse %}→ {{ wms_warehouse_label(order.to_warehouse) }}{% endif %}</div></div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>拣货（扫码校验）</h2>
+    <p class="d">
+      后端强制 5 项校验：① 条码存在 ② 销售出库必须是本单锁定的货 ③ 等级 == 订单要求等级
+      ④ 库位等级区一致（A 档不能放 S 区）⑤ 账实一致（有流水支撑）。错一个当场拦。
+    </p>
+    <form method="post" action="/wms/outbound/{{ order.id }}/pick">
+      <div class="field-row auto">
+        <div class="field"><label for="p-b">扫条码</label>
+          <input id="p-b" type="text" name="barcode" placeholder="QCPH26100012" autofocus></div>
+        <div class="field"><label for="p-g">订单要求等级</label>
+          <select id="p-g" name="require_grade"><option value="">不校验</option>
+            {% for v, t in [['S','S 完美'],['A','A 微瑕']] %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="p-a">动作</label>
+          <select id="p-a" name="action"><option value="pick">拣货校验</option>
+            <option value="lock">先锁货</option></select></div>
+      </div>
+      <button class="btn primary">提交</button>
+    </form>
+    <div class="note">
+      销售出库的正确顺序：<b>打面单 → 扫条码锁货 → 拣货校验 → 出库核销</b>。
+      先发货后打单必然发错货。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>出库核销</h2>
+    <form method="post" action="/wms/outbound/{{ order.id }}/ship">
+      <div class="field-row auto">
+        <div class="field"><label for="s-e">快递公司</label>
+          <input id="s-e" type="text" name="express_company" value="{{ order.express_company or '' }}"></div>
+        <div class="field"><label for="s-w">运单号（销售出库必填）</label>
+          <input id="s-w" type="text" name="waybill_no" value="{{ order.waybill_no or '' }}"></div>
+      </div>
+      <button class="btn primary">出库核销（写流水 + 结转成本）</button>
+    </form>
+    {# 库存同步（2026-10-10）：核销 = 货真卖了 —— 渔集库存减少的同时，渔枢商品库存与
+       渔货栈平台库存按条码跟着减，不用再让人手动去改两边的数 #}
+    <div class="note">
+      核销时按<b>条码</b>把库存同步出去：渔枢那款商品的库存、以及它上架到渔货栈后的平台库存
+      会一起减掉（一台带 N 台就减 N）。渔枢没这款商品（没扫条码建过档）也不影响出库，只是没得同步。
+    </div>
+    {% if order.status != 'shipped' and order.status != 'cancelled' %}
+    <form method="post" action="/wms/outbound/{{ order.id }}/cancel" style="margin-top:var(--s-3)">
+      <button class="btn danger">取消出库单（释放锁定的货）</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {# 物流轨迹（2026-10-13）：三端共用的轨迹服务，查完本地存档，不重复调菜鸟 #}
+  <div class="card">
+    <h2>物流轨迹{% if trace.mail_no %}<span class="muted" style="font-size:12px;font-weight:400;margin-left:8px">{{ '本地存档' if trace.from_cache else '实时查询' }}{% if trace.queried_at %} · {{ trace.queried_at | dt('%m-%d %H:%M') }}{% endif %} · <a href="?force=1">刷新</a></span>{% endif %}</h2>
+    {% if trace.mail_no %}
+      {% if trace.status %}
+        <p class="d">当前状态：<b>{{ trace.status_label or trace.status }}</b>{% if trace.abnormal %}<span class="badge failed">异常</span>{% endif %}</p>
+      {% endif %}
+      {% if trace.nodes %}
+        <table>
+          <tbody>
+          {% for n in trace.nodes[:8] %}
+            <tr><td class="mono" style="width:150px">{{ n.time or '—' }}</td><td>{{ n.desc }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% if trace.nodes|length > 8 %}<div class="note">仅显示最近 8 条</div>{% endif %}
+      {% elif trace.msg %}
+        <div class="note">{{ trace.msg }}</div>
+      {% else %}
+        <div class="note">还没查到轨迹（刚发货的单一般要等快递揽收才有）。</div>
+        {% if trace.official_url %}
+          <div class="note">菜鸟这边暂时查不到{{ trace.official_name or '这家快递' }}的轨迹，可到<a href="{{ trace.official_url }}" target="_blank" rel="noopener">{{ trace.official_name or '快递公司' }}官网</a>查询。</div>
+        {% endif %}
+      {% endif %}
+    {% else %}
+      <div class="note">还没填运单号：出库核销时填上，这里就能看到轨迹。</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card flush">
+  <h2>出库明细（{{ lines | length }}）</h2>
+  {% if lines %}
+  <div class="table-wrap"><table>
+    {# 数量（2026-10-10）：一台货可以带 N 台，出库发的是「台」不是「条」 #}
+    <thead><tr><th>条码</th><th>品牌型号</th><th class="num">数量</th><th>要求等级</th>
+      <th>实际等级</th><th class="num">售价</th><th class="num">成本</th><th>时间</th></tr></thead>
+    <tbody>
+    {% for l in lines %}
+      <tr>
+        <td class="nowrap mono">{{ l.barcode }}</td>
+        <td class="wrap2"><span class="clamp2">{{ l.title }}</span></td>
+        <td class="num"><span class="qty-pill {{ 'many' if (l.qty or 1) > 1 }}">{{ l.qty or 1 }}</span></td>
+        <td>{{ bits.grade_badge(l.require_grade) if l.require_grade else '—' }}</td>
+        <td>{{ bits.grade_badge(l.grade) }}</td>
+        <td class="num">{{ bits.money_cell(l.price) }}</td>
+        <td class="num">{{ bits.money_cell(l.cost) }}</td>
+        <td class="nowrap muted">{{ (l.picked_at or l.created_at) | dt }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没拣货') }}{% endif %}
+</div>
+{% endblock %}

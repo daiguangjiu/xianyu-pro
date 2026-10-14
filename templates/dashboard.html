@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}概览 · 供应链小鱼{% endblock %}
+
+{% macro status_badge(status) -%}
+  <span class="badge badge-status-{{ status }}" title="{{ status }}">{{ status_text(status) }}</span>
+{%- endmacro %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>概览</h1>
+    <span class="page-subtitle">实时数据 · 最后刷新 {{ now | dt('%Y-%m-%d %H:%M:%S') }}</span>
+  </div>
+  <a href="/self/overview" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-clockwise"></i> 刷新
+  </a>
+</div>
+
+{# ============ KPI 卡片（4 列） ============ #}
+<div class="row g-3 mb-4">
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-cart-check icon"></i> 今日订单</span>
+        <span class="kpi-value">{{ kpi.today_orders }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-hourglass-split icon"></i> 待推单</span>
+        <span class="kpi-value" style="color: var(--c-warning);">{{ kpi.pending_push }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-truck icon"></i> 已发货 PO</span>
+        <span class="kpi-value" style="color: var(--c-success);">{{ kpi.shipped_po }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card hoverable">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-cash-stack icon"></i> 今日预估利润</span>
+        <span class="kpi-value" style="color: var(--c-success);">¥{{ '%.2f' % kpi.profit_today }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ============ 图表区（2 列） ============ #}
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <i class="bi bi-pie-chart icon"></i> 下游订单状态分布
+      </div>
+      <div class="card-body">
+        {% if dso_status %}
+          <canvas id="dsoChart" height="200"></canvas>
+        {% else %}
+          <div class="text-center text-secondary py-5 small">暂无数据</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <i class="bi bi-bar-chart icon"></i> 采购单状态分布
+      </div>
+      <div class="card-body">
+        {% if po_status %}
+          <canvas id="poChart" height="200"></canvas>
+        {% else %}
+          <div class="text-center text-secondary py-5 small">暂无数据</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ============ 数据规模 + 系统状态（2 列） ============ #}
+<div class="row g-3 mb-4">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <i class="bi bi-database icon"></i> 数据规模
+      </div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>授权店铺</dt><dd>{{ counts['shops'] }} 家</dd>
+          <dt>货源快照</dt><dd>{{ counts['items'] }} 条</dd>
+          <dt>SKU 映射</dt><dd>{{ counts['mappings'] }} 条</dd>
+          <dt>已铺货商品</dt><dd>{{ counts['listings'] }} 条</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header">
+        <i class="bi bi-info-circle icon"></i> 系统状态
+      </div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>环境</dt>
+          <dd><span class="env-pill">{{ env }}</span></dd>
+          <dt>版本</dt><dd>{{ version }}</dd>
+          <dt>数据库</dt><dd class="text-secondary">{{ db_url_masked }}</dd>
+        </dl>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+{# ============ 修复状态（合并到一张卡，更克制） ============ #}
+<div class="card">
+  <div class="card-header" style="background: var(--c-success-soft); color: var(--c-success-fg);">
+    <i class="bi bi-shield-check icon"></i> 库存一致性 / 并发修复状态
+  </div>
+  <div class="list-group list-group-flush">
+    <div class="list-group-item d-flex justify-content-between align-items-center">
+      <span>
+        <span class="badge bg-success me-2">#3 已修</span>
+        <code>mark_failed</code> 归还 <code>reserved_stock</code>；幂等标记挂 DSO，
+        避免重推后二次释放把别单预占一起扣掉
+      </span>
+      <code class="k">_release_reserved</code>
+    </div>
+    <div class="list-group-item d-flex justify-content-between align-items-center">
+      <span>
+        <span class="badge bg-success me-2">#4a 已修</span>
+        failed PO 可重推（删旧建新，最终恰好 1 个 PO 且状态 = init）
+      </span>
+      <code class="k">push_order_for_dso</code>
+    </div>
+    <div class="list-group-item d-flex justify-content-between align-items-center">
+      <span>
+        <span class="badge bg-success me-2">#4c 已修</span>
+        并发 accept 改原子条件 UPDATE（不再读改写超卖）；
+        并发 push 加 DSO 行锁 + <code>IntegrityError</code> 兜底
+      </span>
+      <code class="k">_reserve_stock</code>
+    </div>
+    <div class="list-group-item d-flex justify-content-between align-items-center">
+      <span>
+        <span class="badge bg-secondary me-2">#4b by design</span>
+        accept 二次调用为幂等 no-op（不自动重推）—— 推单是显式动作
+      </span>
+      <small class="text-secondary">设计预期</small>
+    </div>
+  </div>
+  <div class="card-footer">
+    回归：<code class="k">smoke_inventory.py</code>（5 case）+ <code class="k">smoke_purchase.py</code>（6 case）全绿
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // 与状态徽章一致的扁平化调色板（≤ 5 色）
+  const STATUS_COLORS = {
+    pending: '#F59E0B',
+    confirmed: '#6366F1',
+    pushed: '#16A34A',
+    shipped: '#16A34A',
+    completed: '#16A34A',
+    refunded: '#8B5CF6',
+    exception: '#F97316',
+    failed: '#EF4444',
+    init: '#94A3B8',
+  };
+  // 状态码 → 中文标签（与页面徽章一致）
+  const STATUS_TEXT = {{ status_text_map | tojson }};
+  function renderDoughnut(id, rows) {
+    const el = document.getElementById(id);
+    if (!el || !rows.length) return;
+    new Chart(el, {
+      type: 'doughnut',
+      data: {
+        labels: rows.map(r => STATUS_TEXT[r.status] || r.status),
+        datasets: [{
+          data: rows.map(r => r.count),
+          backgroundColor: rows.map(r => STATUS_COLORS[r.status] || '#94A3B8'),
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        cutout: '68%',
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: {
+              boxWidth: 10,
+              boxHeight: 10,
+              padding: 12,
+              color: '#64748B',
+              font: { family: 'Inter', size: 12, weight: '500' },
+              usePointStyle: true,
+              pointStyle: 'circle',
+            },
+          },
+        },
+        responsive: true,
+        maintainAspectRatio: false,
+      },
+    });
+  }
+  renderDoughnut('dsoChart', {{ dso_status | tojson }});
+  renderDoughnut('poChart', {{ po_status | tojson }});
+</script>
+{% endblock %}

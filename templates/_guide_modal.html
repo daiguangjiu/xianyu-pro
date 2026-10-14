@@ -1,0 +1,119 @@
+{# —— 渔货栈新手指引（2026-10-11）——
+   只有「外部学员」看得到：按「建店铺 → 选品铺货 → 下载素材 → 出第一单」走一遍。
+
+   弹窗的关闭规则（用户 2026-10-11 拍板）：
+     · 点任意一个「去干什么」、点 ✕、点「跳过」、点遮罩 —— 都算关掉这一次；
+     · 关掉之后本次会话（浏览器标签页）内不再弹，**下次登录还会弹**；
+     · 底部勾了「以后不再弹出」再关 —— 记到服务端，**永远不再弹**（换设备也一样）。 #}
+{% if guide and not guide.finished %}
+<div class="gd-mask" id="guideMask" hidden>
+  <div class="gd-box" role="dialog" aria-modal="true" aria-label="新手指引">
+    <div class="gd-head">
+      <div>
+        <b>先把这 4 件事做一遍</b>
+        <div class="scope-note">已完成 {{ guide.done }} / {{ guide.total }} · 做完了就不再弹了</div>
+      </div>
+      <button class="gd-x" type="button" onclick="guideClose()" title="关闭" aria-label="关闭">✕</button>
+    </div>
+
+    <ol class="gd-steps">
+      {% for step in guide.steps %}
+      <li class="gd-step {{ 'done' if step.done }}">
+        <div class="gd-ico"><i class="bi {{ step.icon }}"></i></div>
+        <div class="gd-txt">
+          <div class="gd-t">
+            {{ loop.index }}. {{ step.title }}
+            {% if step.done %}<span class="badge done">已完成</span>
+            {% else %}<span class="badge pending">待完成</span>{% endif %}
+          </div>
+          <div class="gd-d">{{ step.desc }}</div>
+        </div>
+        {# 点「去干什么」= 关掉弹窗（勾了「不再弹出」的话，顺手记到服务端再跳） #}
+        <a class="btn sm {{ 'primary' if not step.done }}" href="{{ self_url(step.url) }}"
+           onclick="guideClose()">{{ step.btn }}</a>
+      </li>
+      {% endfor %}
+    </ol>
+
+    <div class="gd-foot">
+      <div class="gd-foot-row">
+        <button class="btn" type="button" onclick="guideClose()">跳过，直接进入系统</button>
+        <label class="gd-never" title="勾上以后（换电脑、换浏览器）都不再弹出这个引导">
+          <input type="checkbox" id="guideNever"> 以后不再弹出
+        </label>
+      </div>
+      <span class="help">这次关掉，下次登录还会提醒；勾上「以后不再弹出」就再也不会打扰你（四步走完也会自动不弹）。</span>
+    </div>
+  </div>
+</div>
+<script>
+(function () {
+  var mask = document.getElementById('guideMask');
+  if (!mask) { return; }
+  // 本次会话已经关过就不再弹（关掉浏览器 / 换设备还会提醒，直到做完或勾了「不再弹出」）
+  try { if (sessionStorage.getItem('selfGuideSkip') === '1') { return; } } catch (e) {}
+  var NEVER_URL = {{ self_url('/guide/hide') | tojson }};
+
+  mask.hidden = false;
+  document.body.style.overflow = 'hidden';
+
+  // 关掉弹窗：点任意按钮 / ✕ / 跳过 / 遮罩都走这里。
+  // 勾了「以后不再弹出」就顺手记到服务端（keepalive：点步骤链接跳页也不丢这次请求）。
+  window.guideClose = function () {
+    var cb = document.getElementById('guideNever');
+    if (cb && cb.checked) {
+      try {
+        fetch(NEVER_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+          keepalive: true
+        });
+      } catch (e) {}
+    }
+    try { sessionStorage.setItem('selfGuideSkip', '1'); } catch (e) {}
+    mask.hidden = true;
+    document.body.style.overflow = '';
+  };
+  // 老名字（老模板 / 老书签里可能还写着 guideSkip），保留同义实现
+  window.guideSkip = window.guideClose;
+  mask.addEventListener('click', function (e) { if (e.target === mask) { window.guideClose(); } });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !mask.hidden) { window.guideClose(); }
+  });
+})();
+</script>
+<style>
+  .gd-mask { position: fixed; inset: 0; background: rgba(15, 23, 42, .55); z-index: 9999;
+             display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .gd-box { background: #fff; border-radius: 12px; width: 100%; max-width: 560px;
+            max-height: 88vh; overflow: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, .25); }
+  .gd-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+             padding: 16px 18px 10px; border-bottom: 1px solid var(--c-line, #e5e7eb); }
+  .gd-head b { font-size: 17px; }
+  .gd-x { border: 0; background: transparent; font-size: 18px; line-height: 1; cursor: pointer;
+          color: var(--c-muted, #6b7280); padding: 4px 6px; }
+  .gd-steps { list-style: none; margin: 0; padding: 8px 18px; }
+  .gd-step { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0;
+             border-bottom: 1px dashed var(--c-line, #e5e7eb); }
+  .gd-step:last-child { border-bottom: 0; }
+  .gd-ico { flex: 0 0 34px; height: 34px; border-radius: 9px; display: flex; align-items: center;
+            justify-content: center; background: #fff7ed; color: var(--pdp-brand, #FF6A00); font-size: 17px; }
+  .gd-step.done .gd-ico { background: #ecfdf5; color: #059669; }
+  .gd-txt { flex: 1 1 auto; min-width: 0; }
+  .gd-t { font-weight: 600; font-size: 14px; }
+  .gd-d { color: var(--c-muted, #6b7280); font-size: 12px; margin-top: 3px; }
+  .gd-step .btn { flex: 0 0 auto; align-self: center; }
+  .gd-foot { padding: 10px 18px 16px; border-top: 1px solid var(--c-line, #e5e7eb); }
+  .gd-foot-row { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                 flex-wrap: wrap; }
+  .gd-never { display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+              color: var(--c-muted, #6b7280); cursor: pointer; user-select: none; }
+  .gd-never input { width: 15px; height: 15px; accent-color: var(--pdp-brand, #FF6A00); cursor: pointer; }
+  .gd-foot .help { display: block; margin-top: 8px; }
+  @media (max-width: 560px) {
+    .gd-step { flex-wrap: wrap; }
+    .gd-step .btn { margin-left: 46px; }
+  }
+</style>
+{% endif %}

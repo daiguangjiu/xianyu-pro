@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}盘点与差异处理{% endblock %}
+{% block sub %}扫一个记一个，未扫到的不自动算盘亏；差异需审批后才生成调整流水{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>开盘点单</h2>
+  <form class="filters" method="post" action="/wms/stocktake">
+    <div class="field"><label for="t-s">盘点类型</label>
+      <select id="t-s" name="scope">{% for v, t in scopes %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="t-w">仓库</label>
+      <select id="t-w" name="warehouse_code"><option value="">全部仓</option>
+        {% for w in warehouses %}<option value="{{ w.code }}">{{ w.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="t-g">等级</label>
+      <select id="t-g" name="grade"><option value="">全部等级</option>
+        {% for v, t in grades %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="t-b">批次（批次盘点）</label>
+      <select id="t-b" name="batch_id"><option value="">—</option>
+        {% for b in batches %}<option value="{{ b.id }}">{{ b.batch_no }}</option>{% endfor %}</select></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">开单</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  <h2>盘点单（{{ takes | length }}）</h2>
+  {% if takes %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>盘点单号</th><th>类型</th><th>范围</th><th class="num">账面</th><th class="num">实盘</th>
+      <th class="num">差异</th><th class="num">差异金额</th><th>状态</th><th>盘点人</th></tr></thead>
+    <tbody>
+    {% for t in takes %}
+      <tr>
+        <td class="nowrap"><a href="/wms/stocktake/{{ t.id }}"><b>{{ t.take_no }}</b></a></td>
+        <td>{{ t.scope }}</td>
+        <td class="muted">{{ wms_warehouse_label(t.warehouse_code) if t.warehouse_code else '全部仓' }}
+          {{ t.grade or '' }}</td>
+        <td class="num">{{ t.plan_qty }}</td>
+        <td class="num">{{ t.actual_qty }}</td>
+        <td class="num {{ 'danger' if t.diff_qty else '' }}">{{ t.diff_qty }}</td>
+        <td class="num">¥{{ money(t.diff_amount) }}</td>
+        <td>{% if t.need_upgrade and t.status != 'approved' %}<span class="badge failed">需主管核查</span>
+            {% elif t.status == 'approved' %}<span class="badge done">已审批</span>
+            {% elif t.status == 'done' %}<span class="badge pending">待审批</span>
+            {% else %}<span class="badge muted">盘点中</span>{% endif %}</td>
+        <td>{{ t.operator or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有盘点单') }}{% endif %}
+</div>
+{% endblock %}

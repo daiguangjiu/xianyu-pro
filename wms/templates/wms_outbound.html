@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}出库管理{% endblock %}
+{% block sub %}共 {{ total }} 张单 · 拣货扫码校验：错货 / 错等级当场拦{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>新建出库单</h2>
+  <form class="filters" method="post" action="/wms/outbound">
+    <div class="field"><label for="o-t">类型</label>
+      <select id="o-t" name="type">{% for v, t in types %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="o-w">发货仓</label>
+      <select id="o-w" name="warehouse_code">
+        {% for w in warehouses %}{% if w.can_out %}<option value="{{ w.code }}">{{ w.name }}</option>{% endif %}{% endfor %}</select></div>
+    <div class="field"><label for="o-tw">目标仓（调拨用）</label>
+      <select id="o-tw" name="to_warehouse"><option value="">—</option>
+        {% for w in warehouses %}<option value="{{ w.code }}">{{ w.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="o-tn">关联单据号</label>
+      <input id="o-tn" type="text" name="target_no" placeholder="销售订单号 / 报修单号"></div>
+    <div class="field"><label for="o-r">收货人</label><input id="o-r" type="text" name="receiver_name"></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">创建</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  <div class="filters padded">
+    <form method="get" action="/wms/outbound">
+      <div class="field grow"><label for="f-q">单号 / 关联单号 / 运单号</label>
+        <input id="f-q" type="search" name="q" value="{{ filters.q }}"></div>
+      <div class="field"><label for="f-t">类型</label>
+        <select id="f-t" name="type"><option value="">全部</option>
+          {% for v, t in types %}<option value="{{ v }}" {{ 'selected' if filters.type == v }}>{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="f-s">状态</label>
+        <select id="f-s" name="status"><option value="">全部</option>
+          {% for v, t in statuses %}<option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label>&nbsp;</label><button class="btn">筛选</button></div>
+    </form>
+  </div>
+  {% if orders %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>出库单号</th><th>类型</th><th>发货仓</th><th>关联单号</th><th class="num">件数</th>
+      <th>收货人</th><th>运单号</th><th>状态</th><th>时间</th></tr></thead>
+    <tbody>
+    {% for o in orders %}
+      <tr>
+        <td class="nowrap"><a href="/wms/outbound/{{ o.id }}"><b>{{ o.order_no }}</b></a></td>
+        <td><span class="badge {{ 'ok' if o.type == 'SALE' else 'muted' }}">{{ o.type }}</span></td>
+        <td>{{ wms_warehouse_label(o.warehouse_code) }}</td>
+        <td class="mono muted">{{ o.target_no or '—' }}</td>
+        <td class="num">{{ o.item_count }}</td>
+        <td>{{ o.receiver_name or '—' }}</td>
+        <td class="mono muted">{{ o.waybill_no or '—' }}</td>
+        <td><span class="badge {{ 'done' if o.status == 'shipped' else 'pending' if o.status == 'picking' else 'muted' }}">{{ o.status }}</span></td>
+        <td class="nowrap muted">{{ o.created_at | dt }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有出库单') }}{% endif %}
+</div>
+{% endblock %}

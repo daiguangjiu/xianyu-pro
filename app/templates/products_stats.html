@@ -1,0 +1,224 @@
+{# 商品统计：先给结论（KPI 卡），再看结构（分布条形图），最后看动销 TOP 表 #}
+{% extends "base.html" %}
+{% block title %}商品统计{% endblock %}
+{% block heading %}商品统计{% endblock %}
+{% block sub %}按商品属性 / 审核 / 上架 / 类目 / 供应链看商品盘子，以及卖得最好的几款{% endblock %}
+{% block actions %}
+  <a class="btn" href="/products">返回列表</a>
+  <a class="btn primary" href="/products/new">发布商品</a>
+{% endblock %}
+{% block content %}
+
+{# ============================================================ 一、盘子（KPI） #}
+<section class="grid grid-5 stat-grid">
+  <a class="stat kpi kpi-indigo" href="/products" title="商品总数，点进去看全部商品">
+    <div class="label"><i class="bi bi-box-seam"></i> 商品总数</div>
+    <div class="value">{{ total }}</div>
+    <div class="hint">在售 {{ on_sale }} · 待审核 {{ pending_audit }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </a>
+  <a class="stat kpi kpi-emerald" href="/products?status=on_sale" title="已标记为在售的商品，点进去看在售列表">
+    <div class="label"><i class="bi bi-shop"></i> 在售商品</div>
+    <div class="value">{{ on_sale }}</div>
+    <div class="hint">占全部 {{ ((on_sale / total * 100) if total else 0) | round(1) }}%</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </a>
+  <a class="stat kpi kpi-amber" href="/products?audit=pending" title="等待审核的商品，点进去直接处理">
+    <div class="label"><i class="bi bi-hourglass-split"></i> 待审核</div>
+    <div class="value">{{ pending_audit }}</div>
+    <div class="hint">审完才能上架</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </a>
+  <div class="stat kpi kpi-sky" title="启用了库存管理的商品，当前库存件数合计">
+    <div class="label"><i class="bi bi-boxes"></i> 库存合计</div>
+    <div class="value">{{ stock_total }}</div>
+    <div class="hint">只统计启用库存的商品</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  <div class="stat kpi kpi-rose" title="各款商品供货成本合计（按款累加，不是订单成本）">
+    <div class="label"><i class="bi bi-cash-coin"></i> 成本合计</div>
+    <div class="value">¥{{ money(cost_total) }}</div>
+    <div class="hint">售价合计 ¥{{ money(price_total) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+</section>
+
+{# ============================================================ 二、卖得怎么样 #}
+<section class="card stat-panel">
+  <header class="stat-panel-head">
+    <h2 style="margin:0"><i class="bi bi-graph-up-arrow"></i> 经营概览</h2>
+    <span class="stat-panel-sub">按挂到商品上的订单统计（不含已撤回）</span>
+  </header>
+  <div class="stat-inline">
+    <div class="si-item">
+      <span class="si-k">已动销商品</span>
+      <span class="si-v">{{ moving }}<small> / {{ total }}</small></span>
+    </div>
+    <div class="si-item">
+      <span class="si-k">订单数</span>
+      <span class="si-v">{{ order_count }}</span>
+    </div>
+    <div class="si-item">
+      <span class="si-k">件数</span>
+      <span class="si-v">{{ quantity_total }}</span>
+    </div>
+    <div class="si-item">
+      <span class="si-k">销售额</span>
+      <span class="si-v">¥{{ money(sale_total) }}</span>
+    </div>
+    <div class="si-item">
+      <span class="si-k">毛利</span>
+      <span class="si-v {{ 'ok' if profit_total >= 0 else 'danger' }}">¥{{ money(profit_total) }}</span>
+      <span class="si-h">毛利率 {{ (profit_rate * 100) | round(1) }}%</span>
+    </div>
+  </div>
+</section>
+
+{# ============================================================ 三、结构（分布） #}
+<section class="grid grid-2 dist-grid">
+  <div class="card dist-card">
+    <h2><i class="bi bi-tags"></i> 按商品属性</h2>
+    {% if source_rows %}
+    <ul class="dist-list">
+      {% for row in source_rows %}
+      <li>
+        <a class="dist-row" href="{{ row.url or '/products' }}">
+          <span class="dist-label">{{ row.label }}</span>
+          <span class="dist-bar"><i style="width: {{ row.pct }}%"></i></span>
+          <span class="dist-num">{{ row.count }}<small> · {{ row.pct }}%</small></span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="dist-empty">还没有商品</p>{% endif %}
+  </div>
+
+  <div class="card dist-card">
+    <h2><i class="bi bi-clipboard-check"></i> 按审核状态</h2>
+    {% if audit_rows %}
+    <ul class="dist-list">
+      {% for row in audit_rows %}
+      <li>
+        <a class="dist-row" href="{{ row.url or '/products' }}">
+          <span class="dist-label">{{ row.label }}</span>
+          <span class="dist-bar"><i style="width: {{ row.pct }}%"></i></span>
+          <span class="dist-num">{{ row.count }}<small> · {{ row.pct }}%</small></span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="dist-empty">还没有商品</p>{% endif %}
+  </div>
+
+  <div class="card dist-card">
+    <h2><i class="bi bi-shop-window"></i> 按上架状态</h2>
+    {% if status_rows %}
+    <ul class="dist-list">
+      {% for row in status_rows %}
+      <li>
+        <a class="dist-row" href="{{ row.url or '/products' }}">
+          <span class="dist-label">{{ row.label }}</span>
+          <span class="dist-bar"><i style="width: {{ row.pct }}%"></i></span>
+          <span class="dist-num">{{ row.count }}<small> · {{ row.pct }}%</small></span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="dist-empty">还没有商品</p>{% endif %}
+  </div>
+
+  <div class="card dist-card">
+    <h2><i class="bi bi-collection"></i> 按类目（前 10）</h2>
+    {% if category_rows %}
+    <ul class="dist-list">
+      {% for row in category_rows %}
+      <li>
+        <a class="dist-row" href="{{ row.url or '/products' }}">
+          <span class="dist-label">{{ row.label }}</span>
+          <span class="dist-bar"><i style="width: {{ row.pct }}%"></i></span>
+          <span class="dist-num">{{ row.count }}<small> · {{ row.pct }}%</small></span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="dist-empty">还没有商品</p>{% endif %}
+  </div>
+</section>
+
+{% if supplier_rows %}
+<section class="card dist-card">
+  <h2><i class="bi bi-truck"></i> 按供应链（前 8）</h2>
+  <ul class="dist-list">
+    {% for row in supplier_rows %}
+    <li>
+      <a class="dist-row" href="{{ row.url or '/products' }}">
+        <span class="dist-label">{{ row.label }}</span>
+        <span class="dist-bar"><i style="width: {{ row.pct }}%"></i></span>
+        <span class="dist-num">{{ row.count }}<small> · {{ row.pct }}%</small></span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{# ============================================================ 四、动销 TOP #}
+<section class="card flush">
+  <div class="card-head stat-panel-head">
+    <h2 style="margin:0"><i class="bi bi-trophy"></i> 动销 TOP（按销售额）</h2>
+    <span class="stat-panel-sub">共 {{ moving }} 款商品有成交</span>
+  </div>
+  {% if best %}
+  <div class="table-wrap">
+    <table class="table table-hover">
+      <thead>
+        <tr>
+          <th class="col-rank">#</th>
+          <th>商品</th>
+          <th>属性</th>
+          <th>类目</th>
+          <th class="num">订单</th>
+          <th class="num">件数</th>
+          <th class="num">销售额</th>
+          <th class="num">成本</th>
+          <th class="num">毛利</th>
+          <th class="num">毛利率</th>
+          <th class="nowrap">最近出单</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in best %}
+        <tr>
+          <td class="col-rank">{{ loop.index }}</td>
+          <td class="col-name">
+            <a href="{{ product_url(row.product) }}">{{ row.product.name }}</a>
+            <span class="mono-sm text-secondary">{{ row.product.code or row.product.id }}</span>
+          </td>
+          <td>
+            {% if (row.product.source_type or 'self_operated') == 'self_operated' %}
+              <span class="src-badge self">自营</span>
+            {% else %}
+              <span class="src-badge third" title="{{ row.product.supplier_name or '未指定供应链' }}">供应链</span>
+            {% endif %}
+          </td>
+          <td class="text-secondary">{{ row.product.category or '—' }}</td>
+          <td class="num">{{ row.stat.orders }}</td>
+          <td class="num">{{ row.stat.quantity }}</td>
+          <td class="num strong">¥{{ money(row.stat.sale) }}</td>
+          <td class="num">¥{{ money(row.stat.cost) }}</td>
+          <td class="num {{ 'ok' if row.stat.profit >= 0 else 'danger' }}">¥{{ money(row.stat.profit) }}</td>
+          <td class="num">{{ (row.stat.profit_rate * 100) | round(1) }}%</td>
+          <td class="nowrap text-secondary">{{ row.stat.last_at | dt('%Y-%m-%d') if row.stat.last_at else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty" style="padding: var(--s-8) var(--s-6); text-align:center;">
+    <p class="muted">还没有挂到商品上的订单。等新订单归档后会自动匹配到商品。</p>
+  </div>
+  {% endif %}
+</section>
+
+{% endblock %}

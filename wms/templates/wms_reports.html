@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}报表中心{% endblock %}
+{% block sub %}两个最该盯的数：残值回收率（D 档有没有被当废品扔）与报修超时单数（货悬在别人手里）{% endblock %}
+
+{% block content %}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">库存货值（成本）</div><div class="value">¥{{ money(data.value.cost) }}</div>
+    <div class="hint">{{ data.value.qty }} 台 · 在途 {{ data.value.in_transit_qty }}</div></div>
+  <div class="stat"><div class="label">售价口径货值</div><div class="value">¥{{ money(data.value.price) }}</div>
+    <div class="hint">理论残值 ¥{{ money(data.value.residual) }}</div></div>
+  <div class="stat {{ 'warn' if data.recovery.rate < 0.5 and data.recovery.est else 'ok' }}">
+    <div class="label">残值回收率</div><div class="value">{{ (data.recovery.rate * 100) | round(1) }}%</div>
+    <div class="hint">{{ data.recovery.sold }}/{{ data.recovery.parts }} 件已变现</div></div>
+  <div class="stat {{ 'danger' if data.repair.timeout else '' }}"><div class="label">报修超时</div>
+    <div class="value">{{ data.repair.timeout }}</div>
+    <div class="hint">平均 {{ data.repair.avg_days }} 天 · 垫付 ¥{{ money(data.repair.paid) }}</div></div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card flush">
+    <h2>分级分布（检测完的货里各档占比）</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>等级</th><th class="num">数量</th><th class="num">占比</th><th></th></tr></thead>
+      <tbody>{% for g in data.grades %}
+        <tr><td>{{ bits.grade_badge(g.grade) }}</td><td class="num">{{ g.qty }}</td>
+          <td class="num">{{ (g.rate * 100) | round(1) }}%</td>
+          <td><div class="bar"><div style="width:{{ (g.rate * 100) | round(1) }}%"></div></div></td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </div>
+
+  <div class="card flush">
+    <h2>库存账龄（该降价清仓的是 90 天以上的）</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>账龄</th><th class="num">数量</th><th class="num">成本货值</th></tr></thead>
+      <tbody>{% for a in data.aging %}
+        <tr><td>{{ a.label }}</td><td class="num">{{ a.qty }}</td><td class="num">¥{{ money(a.cost) }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </div>
+</div>
+
+<div class="card flush">
+  <h2>分级分布按批次（哪一批的货质量差）</h2>
+  {% if data.batches %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>批次</th><th>来源</th><th>供应商</th><th class="num">台数</th>
+      <th>S</th><th>A</th><th>B</th><th>C</th><th>D</th><th class="num">C+D 占比</th></tr></thead>
+    <tbody>{% for b in data.batches %}
+      <tr>
+        <td class="nowrap mono">{{ b.batch_no }}</td><td>{{ b.source }}</td>
+        <td class="wrap2"><span class="clamp2">{{ b.supplier or '—' }}</span></td><td class="num">{{ b.total }}</td>
+        <td class="num">{{ b.grades.get('S', 0) }}</td><td class="num">{{ b.grades.get('A', 0) }}</td>
+        <td class="num">{{ b.grades.get('B', 0) }}</td><td class="num">{{ b.grades.get('C', 0) }}</td>
+        <td class="num">{{ b.grades.get('D', 0) }}</td>
+        <td class="num {{ 'danger' if b.bad_rate > 0.3 }}">{{ (b.bad_rate * 100) | round(1) }}%</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有批次数据') }}{% endif %}
+</div>
+
+<div class="grid grid-2">
+  <div class="card flush">
+    <h2>呆滞库存（可售但 30 天没有出库）</h2>
+    {% if data.dormant %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>显示编码</th><th>品牌型号</th><th>等级</th><th class="num">售价</th></tr></thead>
+      <tbody>{% for it in data.dormant %}
+        <tr><td class="nowrap">{{ bits.barcode_cell(it) }}</td><td class="wrap2"><span class="clamp2">{{ it.title }}</span></td>
+          <td>{{ bits.grade_badge(it.grade) }}</td><td class="num">{{ bits.money_cell(it.selling_price) }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% else %}{{ bits.empty('没有呆滞库存') }}{% endif %}
+  </div>
+
+  <div class="card flush">
+    <h2>检测产能与准确率</h2>
+    {% if data.testers %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>检测员</th><th class="num">检测台数</th><th class="num">复检次数</th><th class="num">与引擎一致率</th></tr></thead>
+      <tbody>{% for t in data.testers %}
+        <tr><td>{{ t.tester }}</td><td class="num">{{ t.total }}</td><td class="num">{{ t.recheck }}</td>
+          <td class="num {{ 'warn' if t.rate < 0.9 }}">{{ (t.rate * 100) | round(1) }}%</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% else %}{{ bits.empty('还没有检测记录') }}{% endif %}
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card flush">
+    <h2>报修时效</h2>
+    <div class="table-wrap"><table>
+      <tbody>
+        <tr><th>工单总数</th><td class="num">{{ data.repair.total }}</td></tr>
+        <tr><th>在途未回</th><td class="num">{{ data.repair.in_transit }}</td></tr>
+        <tr><th>超时单数</th><td class="num">{{ data.repair.timeout }}</td></tr>
+        <tr><th>撤单率</th><td class="num">{{ (data.repair.cancel_rate * 100) | round(1) }}%</td></tr>
+        <tr><th>平均修复天数</th><td class="num">{{ data.repair.avg_days }}</td></tr>
+        <tr><th>在途垫付金额</th><td class="num">¥{{ money(data.repair.paid_transit) }}</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card flush">
+    <h2>已售毛利（按出库明细）</h2>
+    <div class="table-wrap"><table>
+      <tbody>
+        <tr><th>已售件数</th><td class="num">{{ data.profit.qty }}</td></tr>
+        <tr><th>销售额</th><td class="num">¥{{ money(data.profit.revenue) }}</td></tr>
+        <tr><th>成本</th><td class="num">¥{{ money(data.profit.cost) }}</td></tr>
+        <tr><th>毛利</th><td class="num">¥{{ money(data.profit.profit) }}</td></tr>
+        <tr><th>毛利率</th><td class="num">{{ (data.profit.margin * 100) | round(1) }}%</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+{% if data.negative %}
+<div class="note danger"><b>负库存告警：</b>{{ data.negative | length }} 个桶出现负库存，
+  说明前面有流程走漏了（出库没走流水 / 盘点直接改了表）。</div>
+{% endif %}
+{% endblock %}

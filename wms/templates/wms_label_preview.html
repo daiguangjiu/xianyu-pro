@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}标签预览{% endblock %}
+{% block sub %}按毫米坐标画出来的样子 —— 预览与真打出来的一一对应（条码是真 Code128）{% endblock %}
+{% block actions %}
+<a class="btn" href="/wms/labels">回打印队列</a>
+<a class="btn" href="/wms/print-settings">打印设置</a>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  {{ preview_css | safe }}
+  /* 预览页把标签放大看：纸面加一圈浅底，好确认留白与居中 */
+  .pv-stage { padding: 22px 20px; background: var(--c-bg-subtle, #f6f8f9);
+    border: 1px solid var(--c-line, #e5e7eb); border-radius: var(--r-input, 8px);
+    text-align: center; }
+  .pv-meta { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 12.5px;
+    color: var(--c-text-muted, #6b7280); margin-bottom: 12px; }
+  .pv-meta b { color: var(--c-text, #111827); font-weight: 600; }
+  .pv-xml pre { margin: 0; padding: 12px 14px; background: var(--c-bg-subtle, #f7f9fa);
+    border: 1px solid var(--c-line, #e5e7eb); border-radius: var(--r-input, 8px);
+    font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.7;
+    overflow-x: auto; }
+  .pv-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div class="pv-meta">
+    <span>货品：<b>{{ row.display_code or row.barcode or '—' }}</b></span>
+    <span>等级：<b>{{ grade_text }}</b></span>
+    <span>标签类型：<b>{{ '正式标' if row.label_type == 'formal' else ('临时标' if row.label_type == 'temp' else '补打') }}</b></span>
+    <span>打印机：<b>{{ (printer.name ~ '（' ~ printer.sn ~ '）') if printer else (row.printer_sn or '还没选机器') }}</b></span>
+    <span>链路：<b>{{ '云打印（芯烨条码云）' if is_cloud else (row.transport or '未下发') }}</b></span>
+    <span>状态：<b>{{ status_text }}</b></span>
+    {% if row.order_no %}<span>云端单号：<b>{{ row.order_no }}</b></span>{% endif %}
+    {% if row.error %}<span style="color:var(--c-danger)">失败原因：{{ row.error }}</span>{% endif %}
+  </div>
+  {% if item %}
+  <div class="pv-meta">
+    <span>品名：<b>{{ item.product_name or item.title or '—' }}</b></span>
+    <span>条码：<b>{{ item.barcode or row.barcode }}</b></span>
+    {% if row.operator %}<span>操作人：<b>{{ row.operator }}</b></span>{% endif %}
+    <span>排入队列：<b>{{ row.created_at | dt }}</b></span>
+  </div>
+  {% endif %}
+
+  {% if preview.ok %}
+  <div class="pv-stage">{{ preview.html | safe }}</div>
+  <div class="lbl-foot">{{ preview.footer }}{% if preview.count_text %} · {{ preview.count_text }}{% endif %}</div>
+  {% else %}
+  <div class="note warn">
+    这张的指令画不出预览图（不是芯烨云的 XML 模板 —— 多半是本地链路 NET9100 / CUPS 的
+    TSPL 指令，或者模板写坏了）。下面给的是原始指令，照样能排错。
+  </div>
+  {% endif %}
+
+  <div class="pv-acts">
+    {% if row.status != 'printed' %}
+    <form class="inline-form" method="post" action="/wms/labels/{{ row.id }}/push">
+      <button class="btn primary">下发到云打印机</button></form>
+    {% endif %}
+    {% if row.order_no and row.status == 'sent' %}
+    <form class="inline-form" method="post" action="/wms/labels/{{ row.id }}/sync">
+      <button class="btn primary"><i class="bi bi-cloud-check"></i> 回查云端</button></form>
+    {% endif %}
+    {% if row.status != 'printed' %}
+    <form class="inline-form" method="post" action="/wms/labels/{{ row.id }}/printed">
+      <button class="btn primary"><i class="bi bi-check2-square"></i> 标记已打印</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card pv-xml">
+  <h2>{{ '渲染后的 XML（发给云打印机的就是它）' if is_cloud else '打印指令（原始）' }}</h2>
+  <details open><summary style="cursor:pointer;font-size:12.5px;color:var(--c-text-muted)">
+    展开 / 收起</summary>
+    <div style="margin-top:8px"><pre>{{ xml }}</pre></div>
+  </details>
+</div>
+{% endblock %}

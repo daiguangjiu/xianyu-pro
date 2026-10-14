@@ -1,0 +1,40 @@
+{# 统计图表宏：纯 CSS 实现（conic-gradient 饼图 + flex 柱状图），不依赖外部图表库，离线也能用
+  入参 items：[{'name': 名称, 'value': 数值, 'text': 展示文案, 'short': 柱状图短标签, 'color': 颜色}, ...] #}
+
+{% macro pie_chart(items, size=150) %}
+{% set total = items|map(attribute='value')|sum or 1 %}
+<div class="chart-pie-row">
+  <div class="chart-pie" style="width:{{ size }}px;height:{{ size }}px;background:conic-gradient(
+    {%- set acc = namespace(v=0) -%}
+    {%- for it in items -%}
+      {%- set a = (acc.v / total * 360)|round(2) -%}
+      {%- set b = ((acc.v + it.value) / total * 360)|round(2) -%}
+      {{ it.color }} {{ a }}deg {{ b }}deg{{ ', ' if not loop.last }}
+      {%- set acc.v = acc.v + it.value -%}
+    {%- endfor -%}
+  )"></div>
+  <ul class="chart-legend">
+    {% for it in items %}
+    <li title="{{ it.name }}：{{ it.text or it.value }}">
+      <i style="background:{{ it.color }}"></i>
+      <span class="lg-name">{{ it.name }}</span>
+      <span class="lg-val">{{ it.text or it.value }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}
+
+
+{% macro bar_chart(items, height=150, label='销售额') %}
+{% set maxv = items|map(attribute='value')|max or 1 %}
+<div class="chart-bars" style="height:{{ height }}px">
+  {% for it in items %}
+  <div class="cb" title="{{ it.name }}：{{ it.text or it.value }}">
+    <div class="cb-bar" style="height:{{ ((it.value / maxv) * 100)|round(1) }}%;background:{{ it.color }}"></div>
+    <div class="cb-label">{{ it.short or it.name }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% if label %}<div class="note muted" style="margin-top:6px">柱高按{{ label }}对比（最高的一根 = 100%）</div>{% endif %}
+{% endmacro %}

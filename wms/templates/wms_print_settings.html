@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}打印设置{% endblock %}
+{% block sub %}芯烨条码云（XP-420B）：账号、打印机、标签模板都在这儿改，改完立刻生效{% endblock %}
+{% block actions %}<a class="btn" href="/wms/labels">标签打印与贴标复核</a>{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 一台打印机一行：左边固定「名称 / 编号」，右边纸张与份数，动作按钮靠右
+     （跟「仓库与货架」页一个套路，机器一多也不会横七竖八） */
+  .ps-row { display: grid; grid-template-columns: 235px minmax(0, 1fr); gap: 10px 18px;
+    align-items: start; border-bottom: 1px solid var(--c-border); padding: 14px 0; margin: 0; }
+  .ps-row:last-child { border-bottom: none; }
+  .ps-meta .ps-name { font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+  .ps-meta .ps-sn { font-family: var(--font-mono); font-size: 11px; color: var(--c-text-muted);
+    margin-top: 3px; overflow-wrap: anywhere; }
+  .ps-meta .ps-note { font-size: 11.5px; color: var(--c-text-subtle); margin-top: 4px; line-height: 1.7; }
+  .ps-edit { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
+  .ps-edit .field { min-width: 92px; margin-bottom: 0; }
+  .ps-edit .field.grow { flex: 1 1 150px; }
+  .ps-edit .check { white-space: nowrap; padding-bottom: 9px; }
+  .ps-acts { display: flex; gap: 6px; align-items: center; margin-left: auto; padding-bottom: 1px; flex-wrap: wrap; }
+  /* 模板编辑区 */
+  .tpl-edit textarea { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.7;
+    min-height: 240px; }
+  .tpl-preview pre { margin: 0; padding: 12px 14px; background: var(--c-bg-subtle, #f7f9fa);
+    border: 1px solid var(--c-border); border-radius: var(--r-input, 8px);
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.7; overflow-x: auto; }
+  .tpl-vars td { font-size: 12px; vertical-align: top; }
+  .tpl-vars td.k { font-family: var(--font-mono); white-space: nowrap; color: var(--c-primary); }
+  @media (max-width: 900px) {
+    .ps-row { grid-template-columns: minmax(0, 1fr); }
+    .ps-acts { margin-left: 0; width: 100%; }
+  }
+  /* 标签预览图：样式口径统一在 wms/label_preview.py::preview_css 里（另加页面间距） */
+  {{ preview_css | safe }}
+  .lbl-stage { margin-top: 2px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if not ready %}
+<div class="note warn">
+  <b>还没接通：</b>填好开发者ID与 UserKEY 并勾「启用云打印」就能发单 ——
+  两个值都在<a href="https://platform-barcode.xpyun.net" target="_blank" rel="noopener">芯烨条码云打印机平台</a>
+  「个人中心 → 我的资料」里；打印机的机身编号（SN）在机器顶部标签上，
+  <b>打印之前必须先在这儿绑定一次</b>（官方接口第一步）。
+</div>
+{% else %}
+<div class="note">
+  <b>已接通：</b>开发者ID <code>{{ cfg.cloud_user }}</code> · 接口 <code>{{ cfg.base_url }}</code>。标签打印页排进队列的任务{% if cfg.auto_push == '1' %}<b>会自动下发</b>{% else %}需要手动点「下发」{% endif %}。
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>① 云打印账号</h2>
+    <p class="d">
+      调接口的三件套：<b>开发者ID + 时间戳 + 签名</b>（签名 = sha1(开发者ID + UserKEY + 时间戳)，
+      代码里算，不用你填）。密钥只存库、页面上只回显掩码 —— 想换就填新的，留着掩码表示不改。
+    </p>
+    <form method="post" action="/wms/print-settings">
+      <div class="field-row auto">
+        <div class="field grow"><label for="p-user">开发者ID（user）</label>
+          <input id="p-user" type="text" name="cloud_user" value="{{ cfg.cloud_user }}" placeholder="如 testuser@google.com"></div>
+        <div class="field grow"><label for="p-key">UserKEY（开发者密钥）</label>
+          <input id="p-key" type="password" name="cloud_key" value="{{ cfg.cloud_key }}" placeholder="留着不改就别动" autocomplete="new-password"></div>
+      </div>
+      <div class="field-row auto">
+        <div class="field grow"><label for="p-url">接口地址（芯烨官方给的，一般不用改）</label>
+          <input id="p-url" type="text" name="base_url" value="{{ cfg.base_url }}"
+                 placeholder="https://open-barcode.xpyun.net/api/openapi/sprinter"></div>
+        <div class="field"><label for="p-timeout">超时（秒）</label>
+          <input id="p-timeout" type="number" min="1" max="60" name="timeout" value="{{ cfg.timeout }}"></div>
+        <div class="field"><label for="p-copies">默认份数</label>
+          <input id="p-copies" type="number" min="1" max="10" name="copies" value="{{ cfg.copies }}"></div>
+      </div>
+      {# 这个标记告诉后台「本表单带开关」；模板 / 回调那两个表单没有它，
+         免得它们保存时把开关当成没勾、悄悄清零（2026-10-09 修） #}
+      <input type="hidden" name="switches" value="1">
+      <div class="field-row auto">
+        <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if cfg.enabled == '1' }}> 启用云打印</label>
+        <label class="check"><input type="checkbox" name="auto_push" value="1" {{ 'checked' if cfg.auto_push == '1' }}> 排进队列就自动下发</label>
+        <label class="check"><input type="checkbox" name="mode" value="1" {{ 'checked' if cfg.mode == '1' }}> 离线也排队（联网后自动补打）</label>
+      </div>
+      {# 2026-10-09：线上真有人把回调域名填进了这一栏，结果所有云调用都打到了自己家 #}
+      {% if 'xpyun' not in cfg.base_url %}
+      <div class="note warn" style="margin-top:8px">
+        接口地址不像芯烨官方地址（应该是
+        <code>https://open-barcode.xpyun.net/api/openapi/sprinter</code>）——
+        填错的话添加打印机、打印、查状态会全部失败。把它改回上面这串再保存即可
+        （留空不生效，得填上去）。
+      </div>
+      {% endif %}
+      <button class="btn primary">保存账号与行为</button>
+    </form>
+
+    {# 一键自检：账号对不对 / 云接口通不通 / 机器在不在 / 能不能打出纸，一步说清 #}
+    <form method="post" action="/wms/print-settings/test" style="margin-top:12px">
+      <button class="btn">测试连接并打一张测试页</button>
+      <span style="font-size:12px;color:var(--c-text-muted);margin-left:8px">
+        点一下就知道这条链路通不通：账号与签名 → 云接口 → 机器在不在 → 真打一张测试页
+      </span>
+    </form>
+
+    {% if test_result %}
+    <div class="note {{ '' if test_result.ok else 'warn' }}" style="margin-top:12px">
+      <b>{{ '上次自检通过' if test_result.ok else '上次自检没通过' }}</b>
+      · {{ test_result.at }} · 耗时 {{ test_result.ms }} ms
+      <ol style="margin:8px 0 0 20px;padding:0;line-height:1.9">
+        {% for s in test_result.steps %}
+        <li>{% if s.ok %}✓{% elif s.ok is none %}·{% else %}✗{% endif %} {{ s.text }}</li>
+        {% endfor %}
+      </ol>
+    </div>
+    {% endif %}
+
+    <div class="note">
+      「离线也排队」＝官方文档的 <code>mode=1</code>：不检查在线就生成订单，打印机联网后自动打出来；
+      不勾的话机器一离线就直接回「设备不在线」，单子丢了。
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② 打印机（{{ printers | length }} 台）</h2>
+    <p class="d">
+      现场每台机器一行：<b>机身编号（SN）</b>是云打印认机器的唯一凭据，纸张与间隙按实际标签填
+      （间隙纸填间隙毫米数，连续纸填 0）。标了<b>默认</b>的那台是自动下发的落脚点。
+    </p>
+    {% if printers %}
+    {% for p in printers %}
+    <form class="ps-row" method="post" action="/wms/print-settings/printers">
+      <input type="hidden" name="printer_id" value="{{ p.id }}">
+      <div class="ps-meta">
+        <div class="ps-name">{{ p.name }}
+          {% if p.is_default %}<span class="badge done">默认</span>{% endif %}
+          {% if not p.enabled %}<span class="badge muted">已停用</span>{% endif %}
+        </div>
+        <div class="ps-sn">{{ p.sn }}</div>
+        <div class="ps-note">{{ '标签纸' if p.kind == 'label' else '小票（连续纸）' }} ·
+          {{ p.width_mm }}×{{ p.height_mm }}mm · 间隙 {{ p.gap_mm }}mm · {{ p.copies }} 份{% if p.note %}<br>{{ p.note }}{% endif %}</div>
+      </div>
+      <div class="ps-edit">
+        <div class="field grow"><label>名称</label><input type="text" name="name" value="{{ p.name }}"></div>
+        <div class="field grow"><label>机身编号 SN</label><input type="text" name="sn" value="{{ p.sn }}"></div>
+        <div class="field"><label>类型</label>
+          <select name="kind"><option value="label" {{ 'selected' if p.kind == 'label' }}>标签纸</option>
+            <option value="receipt" {{ 'selected' if p.kind == 'receipt' }}>小票</option></select></div>
+        <div class="field"><label>纸宽 mm</label><input type="number" name="width_mm" value="{{ p.width_mm }}" min="1"></div>
+        <div class="field"><label>纸长 mm</label><input type="number" name="height_mm" value="{{ p.height_mm }}" min="1"></div>
+        <div class="field"><label>间隙 mm</label><input type="number" name="gap_mm" value="{{ p.gap_mm }}" min="0"></div>
+        <div class="field"><label>份数</label><input type="number" name="copies" value="{{ p.copies }}" min="1"></div>
+        <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if p.enabled }}>启用</label>
+        <button class="btn sm primary">保存</button>
+        <div class="ps-acts">
+          {% if not p.is_default %}<button class="btn sm" formaction="/wms/print-settings/printers/{{ p.id }}/default">设为默认</button>{% endif %}
+          <button class="btn sm" formaction="/wms/print-settings/printers/{{ p.id }}/status">查状态</button>
+          <button class="btn sm" formaction="/wms/print-settings/printers/{{ p.id }}/test">测试打印</button>
+          <button class="btn sm" formaction="/wms/print-settings/printers/{{ p.id }}/toggle">{{ '启用' if not p.enabled else '停用' }}</button>
+          <button class="btn sm danger" formaction="/wms/print-settings/printers/{{ p.id }}/clear"
+                  onclick="return confirm('清空这台机器在云端的待打印队列？还没打出来的单子会被清掉。')">清队列</button>
+          <button class="btn sm danger" formaction="/wms/print-settings/printers/{{ p.id }}/delete"
+                  onclick="return confirm('删除「{{ p.name }}」？只是不再从本系统发单给它，云端绑定不受影响。')">删除</button>
+        </div>
+      </div>
+    </form>
+    {% endfor %}
+    {% else %}{{ bits.empty('还没登记打印机：在下面加一台（机身顶部的标签上有编号）') }}{% endif %}
+
+    <form method="post" action="/wms/print-settings/printers" style="margin-top:14px;border-top:1px solid var(--c-border);padding-top:14px">
+      <h3 style="font-size:14px;margin:0 0 8px">加一台打印机</h3>
+      <div class="field-row auto">
+        <div class="field"><label for="n-sn">机身编号 SN（必填）</label>
+          <input id="n-sn" type="text" name="sn" placeholder="XPY123456789A"></div>
+        <div class="field"><label for="n-name">名称</label>
+          <input id="n-name" type="text" name="name" placeholder="仓库 1 号标签机"></div>
+        <div class="field"><label for="n-kind">类型</label>
+          <select id="n-kind" name="kind"><option value="label">标签纸</option><option value="receipt">小票</option></select></div>
+        <div class="field"><label for="n-w">纸宽 mm</label><input id="n-w" type="number" name="width_mm" value="60" min="1"></div>
+        <div class="field"><label for="n-h">纸长 mm</label><input id="n-h" type="number" name="height_mm" value="40" min="1"></div>
+        <div class="field"><label for="n-gap">间隙 mm</label><input id="n-gap" type="number" name="gap_mm" value="2" min="0"></div>
+        <div class="field"><label for="n-copies">份数</label><input id="n-copies" type="number" name="copies" value="1" min="1"></div>
+      </div>
+      <label class="check"><input type="checkbox" name="verify" value="1" checked> 同时把设备号绑到开发者ID下（首次添加必勾）</label>
+      <button class="btn primary">添加</button>
+    </form>
+</div>
+
+<div class="card tpl-edit">
+  <h2>③ 标签模板（XML）</h2>
+  <p class="d">
+    芯烨云打印的标签内容就是这段 XML（<code>&lt;PAGE&gt;</code> 是一整单，<code>&lt;LABEL&gt;</code> 是一张）。
+    花括号里的占位符会被换成真值；<b>坐标单位是毫米</b>，1mm = 8dot。
+    条码设 <code>a="center"</code> 时 <code>x</code> 必须填 <code>{cx}</code>（纸宽的一半），否则会打偏。
+  </p>
+  <p class="d">
+    <b>字号（f）只能用这几个：</b>带中文的行必须用 <code>f="7"</code>（汉字 3mm）或
+    <code>f="8"</code>（更小）；想放大就加 <code>xw</code> / <code>yh</code>（倍数 1~10）。
+    <b><code>f="1"</code>~<code>f="6"</code> 是英数字体</b> —— 中文喂进去会一个字节一个字母
+    印成一串拉丁字母（打出来像 <code>ÊÃ ä Ð</code>），英文数字与条码仍然正常。
+  </p>
+  {% if template_warnings %}
+  <div class="note warn">
+    <span>⚠️</span>
+    <div>
+      <b>这个模板打出来中文会是乱码，先改掉再打：</b>
+      <ul style="margin:6px 0 0;padding-left:18px">
+        {% for w in template_warnings %}<li>{{ w }}</li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% endif %}
+  <form method="post" action="/wms/print-settings/template">
+    <div class="field"><label for="t-tpl">模板内容</label>
+      <textarea id="t-tpl" name="template" rows="14">{{ cfg.template }}</textarea></div>
+    <button class="btn primary">保存模板</button>
+  </form>
+
+  <div class="grid grid-2" style="margin-top:14px">
+    <div>
+      <h3 style="font-size:13px;margin:0 0 6px">能用的占位符</h3>
+      <div class="table-wrap"><table class="tpl-vars">
+        <tbody>
+        {% for k, desc in template_vars %}
+          <tr><td class="k">{{ k }}</td><td>{{ desc }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+    </div>
+    <div>
+      <h3 style="font-size:13px;margin:0 0 6px">标签预览图 —— 「测试打印」打的就是这一张{% if default_sn %} · 默认机 {{ default_sn }}{% endif %}</h3>
+      <div class="muted" style="font-size:12px;margin:0 0 8px">版面 = 上面这段模板，内容 = 队列里最近一台货的样例数据；字号放大（xw / yh）、条码都按毫米坐标算进去，与真打出来一一对应。</div>
+      {% if preview.ok %}
+      <div class="lbl-stage">{{ preview.html | safe }}</div>
+      <div class="lbl-foot">{{ preview.footer }}{% if preview.count_text %} · {{ preview.count_text }}{% endif %}</div>
+      {% else %}
+      <div class="note warn">这段模板画不出预览 —— 检查 <code>&lt;PAGE&gt;</code> /
+        <code>&lt;LABEL&gt;</code> 有没有闭合、引号有没有配对；下面是渲染后的原文。</div>
+      {% endif %}
+      <details style="margin-top:8px">
+        <summary style="cursor:pointer;font-size:12.5px;color:var(--c-text-muted)">看渲染后的 XML</summary>
+        <div class="tpl-preview"><pre>{{ sample }}</pre></div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>④ 云打印回调（平台把打印结果推回来）</h2>
+  <p class="d">
+    芯烨云平台只认<b>域名形式</b>的回调地址 —— 这台机器已经配好了 https 域名，
+    直接把下面这个地址填进芯烨后台就行（不用再折腾转发）。
+    平台收到 <code>{"data":"ok"}</code> 才算地址有效（<b>3 秒内不回就算失败</b>）——
+    所以我们在收到推送时只落库、不往外发任何请求。
+  </p>
+  <form method="post" action="/wms/print-settings/callback">
+    <div class="field-row auto">
+      <div class="field grow"><label for="c-base">公网域名（回调地址的前半段）</label>
+        <input id="c-base" type="text" name="public_base_url" value="{{ cfg.public_base_url }}"
+               placeholder="https://service-xxxxxxxx.gz.apigw.tencentcs.com/release"></div>
+      <div class="field grow"><label for="c-token">回调令牌（选填）</label>
+        <input id="c-token" type="text" name="callback_token" value="{{ cfg.callback_token }}"
+               placeholder="留空 = 谁来都收"></div>
+    </div>
+    <button class="btn primary">保存回调设置</button>
+  </form>
+  <div class="note">
+    填进芯烨后台的地址：<code id="cb-url">{{ callback_url }}</code>
+    <button class="btn sm" type="button"
+            onclick="navigator.clipboard && navigator.clipboard.writeText(document.getElementById('cb-url').textContent.trim())">复制</button>
+    {% if not cfg.public_base_url %}
+    <div style="margin-top:6px">还没填公网域名 —— 上面这个是用当前访问地址拼的
+      <b>IP 形式</b>，芯烨后台多半不收；填了域名这里会跟着变。</div>
+    {% endif %}
+    {% if cfg.callback_token %}
+    <div style="margin-top:6px">设了令牌：地址后面要带 <code>?token={{ cfg.callback_token }}</code>，
+      对不上就只留痕、不改动打印任务。</div>
+    {% endif %}
+  </div>
+
+  <h3 style="font-size:13px;margin:16px 0 6px">最近收到的回调（{{ events | length }}）</h3>
+  {% if events %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>时间</th><th>类型</th><th>订单号</th><th>结果</th><th>说明</th><th>报文</th><th>本地任务</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td class="nowrap muted">{{ e.created_at | dt }}</td>
+        <td>{{ {'order': '打印结果', 'printer': '机器状态', 'unknown': '未识别'}.get(e.event_type, e.event_type) }}</td>
+        <td class="mono">{{ e.order_no or '—' }}</td>
+        <td><span class="badge {{ 'done' if e.state == 'printed' else ('warn' if e.state == 'failed' else ('pending' if e.state == 'queued' else 'muted')) }}">{{ state_label(e.state) }}</span></td>
+        <td class="wrap2"><span class="clamp2">{{ e.message or '—' }}</span></td>
+        <td><details><summary style="cursor:pointer">原文</summary>
+          <div class="tpl-preview"><pre>{{ e.payload }}</pre></div></details></td>
+        <td class="nowrap">{% if e.matched_print_id %}<a href="/wms/labels">#{{ e.matched_print_id }}</a>{% else %}<span class="muted">没对上</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  {{ bits.empty('还没收到过推送：地址填好后，在芯烨后台点「测试」或打一张标签，这里就会出现记录') }}
+  {% endif %}
+  <div class="note">
+    认不出的推送也照样存着（报文一字不改）—— 回调里订单号 / 状态的字段名各家写法不一样，
+    收到真实报文后照着补一条解析规则就行，不用为了试字段再打一张标签。
+  </div>
+</div>
+{% endblock %}

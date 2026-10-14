@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}解析规则{% endblock %}
+{% block heading %}解析规则{% endblock %}
+{% block sub %}按飞书群里的真实模板调整字段标签与正则{% endblock %}
+{% block actions %}
+  <form method="post" action="/rules/reset" style="display:inline" data-confirm="确认恢复默认规则？当前修改将被覆盖。">
+    <button class="btn">恢复默认</button>
+  </form>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>规则文件</h2>
+  <div class="muted" style="margin-bottom:10px">路径：<span class="mono">{{ rules_path }}</span> · 保存后立即生效，无需重启服务。</div>
+  <form method="post" action="/rules">
+    <div class="field"><textarea name="yaml_text" rows="26" class="mono">{{ yaml_text }}</textarea></div>
+    <button class="btn primary">保存规则</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>规则测试</h2>
+  <div class="muted" style="margin-bottom:10px">把飞书群里的真实订单消息粘贴进来，立即查看解析结果；字段缺失时补充 <span class="mono">labels</span> 或 <span class="mono">patterns</span> 即可。</div>
+  <form id="parse-test-form">
+    <div class="grid grid-2">
+      <div class="field">
+        <label>平台（留空自动识别）</label>
+        <select name="platform">
+          <option value="">自动识别</option>
+          {% for key in rules.platform_keys() %}<option value="{{ key }}">{{ rules.platforms[key].label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>截图 OCR 文本（可选，用于兜底补字段）</label><input type="text" name="ocr_text" placeholder="粘贴 OCR 识别结果"></div>
+    </div>
+    <div class="field"><label>消息文本</label><textarea name="text" rows="10" placeholder="【闲鱼订单】&#10;订单号：2026010112345&#10;买家：张三&#10;商品：iPhone 13 128G 黑色&#10;数量：1&#10;金额：¥2999.00&#10;收货人：李四 13800138000&#10;地址：广东省深圳市南山区…&#10;供应商：深圳华强北"></textarea></div>
+    <button class="btn primary" type="submit">测试解析</button>
+  </form>
+  <div id="parse-test-result" style="margin-top:14px"></div>
+</div>
+
+<div class="card">
+  <h2>当前字段定义</h2>
+  {% for key in rules.platform_keys() %}
+    {% set p = rules.platforms[key] %}
+    <h3>{{ p.label }}（{{ key }}）</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th class="num">序号</th><th>字段</th><th>标签</th><th>类型</th><th>必填</th><th>标签别名</th><th>正则</th></tr></thead>
+        <tbody>
+        {% for f in p.fields %}
+          <tr>
+            <td class="num muted">{{ loop.index }}</td>
+            <td class="mono">{{ f.key }}</td>
+            <td>{{ f.label }}</td>
+            <td>{{ f.type }}</td>
+            <td>{{ '是' if f.required else '' }}</td>
+            <td class="muted">{{ f.labels|join('、') }}</td>
+            <td class="muted mono">{{ f.patterns|join(' ; ') }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

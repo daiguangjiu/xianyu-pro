@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}批次与建档{% endblock %}
+{% block sub %}共 {{ total }} 个批次 · 号段预留，入库不重号{% endblock %}
+{% block actions %}<a class="btn" href="/wms/items">库存台账</a>{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>新建批次</h2>
+  <p class="d">批次单先领号段（如 2610-01 的 0001~0500），入库时按段发码 —— 条码由服务端生成，客户端不参与。</p>
+  {% if not suppliers %}
+  <div class="note warn">
+    <i class="bi bi-shop"></i> <b>供应商列表是空的</b> —— 供应商档案统一在渔枢系统的「供应商管理」里维护，检测仓只读不写。
+    请联系<b>渔枢管理员</b>在渔枢系统的「供应商管理」里添加供应商后再来选。
+  </div>
+  {% endif %}
+  <form class="filters" method="post" action="/wms/batches">
+    <div class="field"><label for="b-src">来源</label>
+      <select id="b-src" name="source_type">{% for v, t in sources %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+    <div class="field grow"><label for="b-sup">供应商 / 来源方</label>
+      {% if suppliers %}
+      <select id="b-sup" name="supplier_name">
+        <option value="">（不选）</option>
+        {% for s in suppliers %}
+        <option value="{{ s.name }}">{{ s.name }}{% if s.code %} · {{ s.code }}{% endif %}{% if s.category %} · {{ s.category }}{% endif %}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <select id="b-sup" name="supplier_name" disabled>
+        <option value="">供应商列表为空</option>
+      </select>
+      {% endif %}</div>
+    <div class="field"><label for="b-qty">预计数量</label>
+      <input id="b-qty" type="number" name="qty_expected" value="50" min="1" required></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">创建批次</button></div>
+  </form>
+  <p class="d" style="margin-top:8px">
+    吃进来的货常常是「某一家的某一批」，什么类目都有、品牌型号规格这时候还定不了 ——
+    所以建批次<b>只管来源、供应商和号段，不问品类</b>：建完批次用 <b>Excel 导入</b>
+    把供应商的清单灌进来，品类 / 货号 / 产品名都按清单每行定（条码里的品类码也跟着每行走）。
+  </p>
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/wms/batches">
+    <div class="field grow"><label for="f-q">搜索批次号 / 供应商</label>
+      <input id="f-q" type="search" name="q" value="{{ filters.q }}" placeholder="2610-01"></div>
+    <div class="field"><label for="f-s">状态</label>
+      <select id="f-s" name="status"><option value="">全部</option>
+        {% for v, t in statuses %}<option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label>&nbsp;</label><button class="btn">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if batches %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>批次号</th><th>品类</th><th>来源</th><th>供应商</th>
+      <th class="num">预计</th><th class="num">已建档</th><th class="num">已定级</th><th>号段</th><th>时间</th>
+      <th>操作</th></tr></thead>
+    <tbody>
+    {% for b in batches %}
+      <tr>
+        <td class="nowrap"><a href="/wms/batches/{{ b.id }}"><b>{{ b.batch_no }}</b></a>
+          {% if not b.enabled %}<span class="badge muted" title="不再参与建档与检测，货品和流水都还在">已停用</span>{% endif %}</td>
+        <td>{% if b.mixed %}<span class="badge muted" title="建批次时不问品类，品类按导入清单每行定">按清单行定</span>
+          {% else %}{{ wms_category_label(b.category) }}{% endif %}</td>
+        <td>{{ b.source_type }}</td>
+        <td class="wrap2"><span class="clamp2">{{ b.supplier_name or '—' }}</span></td>
+        <td class="num">{{ b.qty_expected }}</td>
+        <td class="num">{{ b.qty_actual }}</td>
+        <td class="num muted">{{ b.serial_next - 1 }}</td>
+        <td class="num mono">{{ '%04d'|format(b.serial_start) }}~{{ '%04d'|format(b.serial_end) }}</td>
+        <td class="nowrap muted">{{ b.created_at | dt }}</td>
+        <td class="nowrap">
+          <form method="post" action="/wms/batches/{{ b.id }}/disable" class="inline-form">
+            <button class="btn sm">{{ '恢复' if not b.enabled else '停用' }}</button></form>
+          <form method="post" action="/wms/batches/{{ b.id }}/delete" class="inline-form"
+                onsubmit="return confirm('删除批次 {{ b.batch_no }}？（只有一台货都没有的空批次才删得掉，有货的请改用「停用」）')">
+            <button class="btn sm danger">删除</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有批次。建一个批次 → 领号段 → 逐台扫码建档') }}{% endif %}
+</div>
+{% endblock %}

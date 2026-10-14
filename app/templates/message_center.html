@@ -1,0 +1,63 @@
+{# 消息中心：自己的一级菜单（地址 /message-center），不挂在系统设置下面。
+   以前叫 settings_messages.html（是系统设置的一个 tab），独立后改名，免得路径与归属继续混着。 #}
+{% extends "base.html" %}
+{% block title %}消息中心{% endblock %}
+{% block heading %}消息中心{% endblock %}
+{% block sub %}系统对外下发的每一条消息，逐个定「发群里还是发私信」{% endblock %}
+{% block content %}
+
+<div class="card">
+  <p class="muted" style="margin-top:0">
+    下面就是系统<b>会主动发出去的全部消息</b>。每条消息都能单独定发给谁：<br>
+    · <b>群里回复</b>＝在那条消息下面回一句并 @ 到人（群里保留完整记录，但容易被刷过去）<br>
+    · <b>私信同步给发送人</b>＝再单独发一条给发消息的人本人（他盯着自己私信就不会漏）<br>
+    · <b>私信发给通知同步人</b>＝给通知同步人（牛磊等）单独发一份私信<br>
+    三个都不勾 = 这条消息不往外发。
+  </p>
+  <p class="muted" style="margin-top:6px">
+    <b>现在的勾选就是系统一直在用的老样子</b>，一个都不动的话行为和以前完全一样；改了保存后<b>立即生效</b>。
+    {% if notify_mode == 'direct' %}
+      <br><span class="badge pending">注意</span><b>：上方下发方式现在是「只私信」，此时群里那一列不生效</b>（消息一律私下光发给发送人和通知同步人）。
+    {% elif notify_mode == 'off' %}
+      <br><span class="badge pending">注意</span><b>：上方下发方式现在是「关闭下发」，此时回执类消息一律不发</b>（每日汇总不受影响，要停请在汇总设置里关）。
+    {% endif %}
+  </p>
+</div>
+
+<form method="post" action="/message-center">
+  {% for row in rows %}
+  {% set k = row.kind %}
+  <div class="card">
+    <div class="row-between">
+      <div>
+        <h2 style="margin:0">{{ loop.index }}. {{ k.name }}</h2>
+        <div class="muted" style="margin-top:4px">触发时机：{{ k.trigger }}</div>
+        {% if k.receiver %}<div class="muted">默认发给：{{ k.receiver }}</div>{% endif %}
+      </div>
+      <div class="muted">{{ k.rules }}</div>
+    </div>
+    <div class="field" style="margin-top:10px">
+      <label>发送方式（可多选）</label>
+      {% for ch, ch_name in channels %}
+        <label class="muted" style="font-weight:400;display:inline-block;margin-right:18px">
+          <input type="checkbox" name="{{ k.key }}__{{ ch }}" value="1"
+                 {{ 'checked' if ch in row.channels }}>
+          {{ ch_name }}
+        </label>
+      {% endfor %}
+      {% if not row.channels %}<span class="badge">这条消息当前不发送</span>{% endif %}
+    </div>
+    {% if k.template_key %}
+      <div class="muted">文案模板：<span class="mono">{{ k.template_key }}</span>
+        <a href="/settings#templates">（到系统设置里改文案）</a>
+      </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <div class="btn-row">
+    <button class="btn primary" type="submit">保存发送方式</button>
+  </div>
+</form>
+
+{% endblock %}

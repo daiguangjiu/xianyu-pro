@@ -1,0 +1,18 @@
+[Unit]
+Description=Xianyu Order Hub (闲鱼订单归档推单系统)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/srv/xianyu-order-hub
+Environment="PATH=/srv/xianyu-order-hub/.venv/bin:/usr/bin:/bin"
+# 端口与其余配置统一从 WorkingDirectory 下的 .env 读取
+ExecStart=/srv/xianyu-order-hub/.venv/bin/python -m app.cli serve
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

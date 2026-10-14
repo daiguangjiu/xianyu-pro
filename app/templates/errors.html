@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}异常日志{% endblock %}
+{% block heading %}异常日志{% endblock %}
+{% block sub %}共 {{ total }} 条 · 近 24 小时 {{ stat.recent }} 条 · 出错时页面上的编号就是这里的序号{% endblock %}
+{% block content %}
+
+<style>
+  .err-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .err-card { border: 1px solid var(--c-border); border-radius: 10px; padding: 10px 12px; }
+  .err-card .k { font-size: 12px; color: var(--c-text-muted); }
+  .err-card .v { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .err-msg { max-width: 420px; white-space: pre-wrap; word-break: break-word; }
+  .err-tb pre { margin: 0; padding: 10px 12px; background: var(--c-bg-subtle, #f7f9fa);
+    border: 1px solid var(--c-border); border-radius: 8px; font-size: 12px; line-height: 1.6;
+    overflow-x: auto; max-height: 320px; }
+</style>
+
+<div class="card">
+  <div class="err-cards">
+    <div class="err-card"><div class="k">全部</div><div class="v">{{ stat.total }}</div></div>
+    <div class="err-card"><div class="k">近 24 小时</div><div class="v">{{ stat.recent }}</div></div>
+    <div class="err-card"><div class="k">服务端异常</div><div class="v">{{ stat.server }}</div></div>
+    <div class="err-card"><div class="k">前端上报</div><div class="v">{{ stat.client }}</div></div>
+    {% for key, label in scopes.items() %}
+    <div class="err-card"><div class="k">{{ label }}</div><div class="v">{{ stat.by_scope.get(key, 0) }}</div></div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/errors">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="路径 / 异常类型 / 消息 / 账号">
+    </div>
+    <div class="field"><label>子系统</label>
+      <select name="scope">
+        <option value="">全部</option>
+        {% for key, label in scopes.items() %}
+        <option value="{{ key }}" {{ 'selected' if filters.scope == key }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>来源</label>
+      <select name="kind">
+        <option value="">全部</option>
+        {% for key, label in kinds.items() %}
+        <option value="{{ key }}" {{ 'selected' if filters.kind == key }}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+  <div style="display:flex;justify-content:flex-end;margin-top:8px">
+    <form method="post" action="/errors/prune"
+          onsubmit="return confirm('清理 30 天前的异常日志？近期的会保留。')">
+      <button class="btn">清理 30 天前的记录</button>
+    </form>
+  </div>
+</div>
+
+<div class="card flush">
+  {% if logs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr>
+        <th class="num">编号</th><th>时间</th><th>子系统</th><th>来源</th>
+        <th>请求</th><th>状态</th><th>账号</th><th>出错信息</th><th>详情</th>
+      </tr></thead>
+      <tbody>
+      {% for log in logs %}
+        <tr>
+          <td class="num mono">#{{ log.id }}</td>
+          <td class="nowrap mono">{{ human_time(log.created_at) }}</td>
+          <td class="nowrap">
+            <span class="badge {{ 'template' if log.scope == 'wms' else ('done' if log.scope == 'hub' else 'muted') }}">
+              {{ scope_label(log.scope) }}
+            </span>
+          </td>
+          <td class="nowrap">{{ kind_label(log.kind) }}</td>
+          <td class="nowrap mono">{{ log.method }} {{ log.path }}</td>
+          <td class="nowrap">
+            {% if log.status_code and log.status_code >= 500 %}
+            <span class="badge err">{{ log.status_code }}</span>
+            {% else %}
+            <span class="badge muted">{{ log.status_code or '-' }}</span>
+            {% endif %}
+          </td>
+          <td class="nowrap mono">{{ log.username or '未登录' }}<span class="muted">{{ (' · ' + log.ip) if log.ip }}</span></td>
+          <td class="err-msg">
+            {% if log.exc_type %}<span class="mono">{{ log.exc_type }}</span> · {% endif %}{{ log.message or '-' }}
+          </td>
+          <td style="min-width:260px">
+            {% if log.detail or log.traceback or log.ua %}
+            <details>
+              <summary style="cursor:pointer;font-size:12.5px;color:var(--c-text-muted)">展开现场</summary>
+              <div class="err-tb" style="margin-top:6px">
+                {% if log.detail %}<div class="muted" style="font-size:12.5px;margin-bottom:6px">{{ log.detail }}</div>{% endif %}
+                {% if log.ua %}<div class="muted mono" style="font-size:11.5px;margin-bottom:6px">{{ log.ua }}</div>{% endif %}
+                {% if log.traceback %}<pre>{{ log.traceback }}</pre>{% endif %}
+              </div>
+            </details>
+            {% else %}<span class="muted">-</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有异常记录 —— 一直空着是好事。一旦某个页面 / 接口报错，这里会自动出现一条，带堆栈与请求现场。</div>
+  {% endif %}
+</div>
+
+{{ pager(page, pages, '/errors', filters, total) }}
+{% endblock %}

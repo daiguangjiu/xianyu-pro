@@ -1,0 +1,418 @@
+{# ============================================================================
+   库位选择器（2026-10-11，用户反馈「货架位置选项太长、挑起来太麻烦」）
+
+   老样子是一个 <select>，把「可售仓 › 可售区 1 区 › 货架 1」这种全路径一条条列出来，
+   库位一多就得在几十条长长的中文里从头读到尾。现在换成**搜索联想**：
+
+     · 每条库位有一个**层级序号短码**（短码 = 第几个仓 › 第几个区 › 第几个货架），
+       如 ``7-1-1``；输 ``711`` 或 ``7-1-1`` 直接命中（数字键盘就能敲）；
+     · 认名称与**拼音首字母**：``hj1`` → 货架 1、``ks`` → 可售仓 下的库位；
+     · 空着不输时按「在用台数」把常用的排最上面，只列前 12 条，其余靠输入缩小；
+     · 空格分隔多个词是「与」的关系（``可售 货架1``）。
+
+   **值还是存在一个隐藏的 <select> 里**，id / name 与老写法一字不差：
+   服务端校验、`$('location').value`、表单提交（`name="location_code"`）全都不用改，
+   只是把「那一长条下拉」换成了输入框 + 联想列表。
+
+   用法（模板里 import 了才有，注意 with context —— 宏里要读 locations）：
+
+     from "_warehouse_picker.html" import warehouse_picker with context
+     检测台（页面里自己用 JS 取值）：warehouse_picker('location')
+     移库表单（要提交字段）：warehouse_picker('mv-loc', 'location_code', item.location_code,
+                                              '—（不放具体库位）')
+   ============================================================================ #}
+{% macro warehouse_picker(select_id, field_name='', selected='', blank='—（还没上架）',
+                          placeholder='输短码或名称，如 711 / 货架1 / hj1') %}
+{%- set codes = locations | map(attribute='code') | list -%}
+{%- set legacy = selected if (selected and selected not in codes) else '' -%}
+{%- set roots = wh_roots if wh_roots else [] -%}
+<div class="loc-pick" data-target="{{ select_id }}">
+  {%- if roots %}
+  {# 「?」短码说明（2026-10-11 用户要求）：短码第 1 位是「第几个仓」，现场不知道
+     1~N 各指哪个仓，等于短码只有一半好用。这里把对照表写清楚 —— 由下面的 JS
+     **塞进「库位 / 货架位置」这个标签的文字后面**（紧跟文字，不换行；没标签就留在
+     选择器上方），用 details 折叠，没 JS 也能点开。 #}
+  {%- set ex = roots[1].name if roots | length >= 2 else roots[0].name %}
+  <details class="lp-legend" data-for="{{ select_id }}">
+    <summary title="短码里的数字是什么意思？点一下看 1~{{ roots | length }} 各是哪个仓">?</summary>
+    <div class="lp-legend-box">
+      <b>短码第 1 位 = 第几个仓</b>
+      <div class="lp-legend-list">
+        {%- for r in roots %}
+        <span class="lp-li"><b>{{ r.n }}</b>{{ r.name }}{% if not r.enabled %}<i>停用</i>{% endif %}</span>
+        {%- endfor %}
+      </div>
+      <span class="lp-legend-foot">后面几位依次是 <b>区 › 货架 › 层 › 位</b>。例：<b>2-1-3</b>
+        = {{ ex }} › 第 1 个区 › 第 3 个货架。顺序就是「仓库与货架」页里的上下顺序
+        （在那页按 ↑↓ 调顺序，短码跟着变）</span>
+    </div>
+  </details>
+  {%- endif %}
+  <div class="lp-box">
+    <i class="bi bi-search"></i>
+    <input type="text" class="lp-input" autocomplete="off" spellcheck="false" role="combobox"
+           aria-expanded="false" aria-autocomplete="list" aria-controls="{{ select_id }}-lp"
+           placeholder="{{ placeholder }}">
+    <button type="button" class="lp-x" tabindex="-1" title="清空（不放具体库位）">×</button>
+  </div>
+  <ul class="lp-list" id="{{ select_id }}-lp" role="listbox" hidden></ul>
+  <select id="{{ select_id }}" class="lp-native" tabindex="-1" aria-hidden="true"
+          {%- if field_name %} name="{{ field_name }}"{% endif %}>
+    <option value="">{{ blank }}</option>
+    {%- for loc in locations %}
+    {# 注意 loc.search 不能写成 loc.keys（Jinja 会取到 dict 的 .keys 方法） #}
+    <option value="{{ loc.code }}" data-short="{{ loc.short }}" data-leaf="{{ loc.name }}"
+            data-root="{{ loc.root_name }}" data-up="{{ loc.parent_path }}"
+            data-use="{{ loc.use }}" data-keys="{{ loc.search }}"
+            data-full="{{ loc.full_path }}"{{ ' selected' if loc.code == selected }}>{{ loc.full_path }}</option>
+    {%- endfor %}
+    {%- if legacy %}
+    {# 老数据里手填的自由文本（下拉时代之前）：留一条，改别的东西时别把历史值抹成空 #}
+    <option value="{{ legacy }}" data-keys="{{ legacy }}" data-full="{{ legacy }}（历史手填，已不在维护表里）"
+            selected>{{ legacy }}（历史手填，已不在维护表里）</option>
+    {%- endif %}
+  </select>
+  <div class="hint">
+    {%- if locations -%}
+      输<b>短码</b>（如 711）或<b>名称 / 首字母</b>（如 货架1、hj1）就选中；不输则按「在用台数」排。
+      库位在「仓库与货架」页维护。
+    {%- else -%}
+      还没有库位：先去「仓库与货架」加一个
+    {%- endif -%}
+  </div>
+</div>
+{{ warehouse_picker_script() }}
+{% endmacro %}
+
+
+{% macro warehouse_picker_script() %}
+<script>
+(function () {
+  if (window.wmsLocPicker) { return; }          /* 一页多个选择器时只装一次 */
+  window.wmsLocPicker = true;
+
+  var SEP = /[\s\u00a0\-_/\\|·•›>»（）()\[\]【】,，。.]/g;
+  var EMPTY_LIMIT = 12;                        /* 一个都不输时最多列这么多条 */
+
+  function norm(s) { return String(s == null ? '' : s).toLowerCase().replace(SEP, ''); }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function each(list, fn) { Array.prototype.forEach.call(list, fn); }
+
+  function rowsOf(sel) {
+    return Array.prototype.map.call(sel.options, function (o, i) {
+      var short = o.getAttribute('data-short') || '';
+      var leaf = o.getAttribute('data-leaf') || o.textContent;
+      return {
+        value: o.value,
+        full: o.getAttribute('data-full') || o.textContent,
+        short: short,
+        leaf: leaf,
+        up: o.getAttribute('data-up') || '',
+        root: o.getAttribute('data-root') || '',
+        use: parseInt(o.getAttribute('data-use') || '0', 10) || 0,
+        blank: o.value === '',
+        i: i,
+        nk: norm(o.getAttribute('data-keys') || o.textContent),
+        ns: norm(short),
+        nl: norm(leaf)
+      };
+    });
+  }
+
+  function textOf(sel) {
+    var o = sel.options[sel.selectedIndex];
+    return o ? (o.getAttribute('data-full') || o.textContent) : '';
+  }
+
+  /* 值统一从这里改：id 与老写法一致，检测台里的 setSelectValue 已换成它 */
+  function setValue(id, value) {
+    var sel = document.getElementById(id);
+    if (!sel) { return; }
+    var want = String(value == null ? '' : value);
+    var hit = false;
+    each(sel.options, function (o) { if (o.value === want) { hit = true; } });
+    if (want && !hit) {                        /* 历史手填值：补一条，别把老数据抹掉 */
+      var opt = document.createElement('option');
+      opt.value = want;
+      opt.textContent = want + '（历史手填，已不在维护表里）';
+      opt.setAttribute('data-full', want + '（历史手填，已不在维护表里）');
+      opt.setAttribute('data-keys', want);
+      sel.appendChild(opt);
+    }
+    sel.value = want;
+    var wrap = sel.closest ? sel.closest('.loc-pick') : null;
+    if (wrap && wrap.wmsSync) { wrap.wmsSync(); }
+  }
+  window.wmsLocSet = setValue;
+
+  function setup(wrap) {
+    var sel = wrap.querySelector('select.lp-native');
+    var input = wrap.querySelector('.lp-input');
+    var list = wrap.querySelector('.lp-list');
+    var xbtn = wrap.querySelector('.lp-x');
+    if (!sel || !input || !list) { return; }
+
+    var rows = rowsOf(sel);
+    var items = [];        /* 当前渲染出来的行（含「还没上架」） */
+    var active = 0;
+    var opened = false;
+    var dirty = false;     /* 输入框里的字是「用户正在搜的」还是「已选中的全路径」 */
+
+    function sync() {
+      input.value = sel.value ? textOf(sel) : '';
+      input.title = input.value;
+      wrap.classList.toggle('has-value', !!sel.value);
+      dirty = false;
+    }
+    wrap.wmsSync = sync;
+    wrap.wmsPlace = place;       /* 给窗口 resize / 页面滚动用：重新量一次位置 */
+
+    function tokens() {
+      return input.value.split(/\s+/).map(norm).filter(function (t) { return t; });
+    }
+
+    function rank(qs) {
+      var out = [];
+      rows.forEach(function (r) {
+        if (!r.blank && qs.length) {
+          for (var t = 0; t < qs.length; t++) {
+            if (r.nk.indexOf(qs[t]) < 0) { return; }
+          }
+        }
+        var q = qs.join('');
+        var sc = 3;
+        if (r.blank) { sc = -1; }                        /* 「还没上架」永远第一条 */
+        else if (!q) { sc = 2; }
+        else if (r.ns && r.ns.indexOf(q) === 0) { sc = 0; }   /* 短码前缀最优先 */
+        else if (r.nl && r.nl.indexOf(q) === 0) { sc = 1; }   /* 名称前缀其次 */
+        out.push({ r: r, sc: sc });
+      });
+      out.sort(function (a, b) {
+        if (a.sc !== b.sc) { return a.sc - b.sc; }
+        if (b.r.use !== a.r.use) { return b.r.use - a.r.use; }   /* 常用的排前面 */
+        return a.r.i - b.r.i;
+      });
+      return out;
+    }
+
+    function html(r, idx) {
+      var cls = 'lp-it' + (idx === active ? ' on' : '') + (r.blank ? ' lp-it-none' : '');
+      if (r.blank) {
+        return '<li class="' + cls + '" data-i="' + idx + '" role="option">'
+          + '<i class="bi bi-dash-circle"></i><span class="lp-leaf">' + esc(r.leaf) + '</span></li>';
+      }
+      /* title 给全路径：列表再宽也可能遇到特别长的货架名，鼠标停一下能看全 */
+      return '<li class="' + cls + '" data-i="' + idx + '" role="option" title="' + esc(r.full) + '">'
+        + (r.short ? '<span class="lp-code">' + esc(r.short) + '</span>' : '')
+        + '<span class="lp-leaf">' + esc(r.leaf) + '</span>'
+        + (r.up ? '<span class="lp-up">' + esc(r.up) + '</span>' : '')
+        + (r.use > 0 ? '<span class="lp-use">在用 ' + r.use + '</span>' : '')
+        + '</li>';
+    }
+
+    /* 列表定位（2026-10-11，用户反馈「下拉里的字被遮挡、看不全」）：
+       老写法是 CSS 绝对定位 + min(100%,440px)，窄屏/靠右的表单里会顶出视口被裁掉。
+       现在每次打开都量一次输入框在屏幕上的位置，自己算 ——
+         · 宽度：至少 480px（一行要放下短码 + 名称 + 上级路径 + 在用台数），
+           但也绝不超出视口（两边各留 8px）；
+         · 左右：默认贴着输入框左边，右边放不下就整体左移，保证整块都在屏幕里；
+         · 上下：下面宽敞就往下弹，下面不够 160px 就翻到输入框上面；
+         · 高度：按上下剩多少给（最多 360px，内部自己滚）。
+       用 fixed 定位还有个好处：外层卡片就算写了 overflow:hidden 也裁不掉它。 */
+    var LIST_MIN_W = 480, LIST_MAX_H = 360, GAP = 8;
+
+    function place() {
+      var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+      var vh = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (!vw || !vh) { return; }
+      var r = input.getBoundingClientRect();
+      var maxW = Math.max(220, vw - GAP * 2);
+      var w = Math.max(Math.min(r.width, maxW), Math.min(LIST_MIN_W, maxW));
+      var left = Math.min(Math.max(GAP, r.left), Math.max(GAP, vw - GAP - w));
+      list.style.position = 'fixed';
+      list.style.right = 'auto';
+      list.style.width = Math.round(w) + 'px';
+      list.style.left = Math.round(left) + 'px';
+      var below = vh - r.bottom - GAP - 4;
+      if (below >= 160) {
+        list.style.top = Math.round(r.bottom + 4) + 'px';
+        list.style.bottom = 'auto';
+        list.style.maxHeight = Math.round(Math.min(LIST_MAX_H, below)) + 'px';
+      } else {
+        var above = r.top - GAP - 4;
+        list.style.top = 'auto';
+        list.style.bottom = Math.round(vh - r.top + 4) + 'px';
+        list.style.maxHeight = Math.round(Math.max(140, Math.min(LIST_MAX_H, above))) + 'px';
+      }
+    }
+
+    /* opts.reset：把高亮拉回第一条（正在输入时用）；opts.follow：跟到当前已选中的那条 */
+    function render(opts) {
+      opts = opts || {};
+      var qs = tokens();
+      rows = rowsOf(sel);                       /* 历史值可能刚被 setValue 补进来 */
+      var ranked = rank(qs);
+      var blanks = [], pool = [];
+      ranked.forEach(function (x) { (x.r.blank ? blanks : pool).push(x.r); });
+      var cap = (!qs.length && pool.length > EMPTY_LIMIT) ? EMPTY_LIMIT : pool.length;
+      items = blanks.concat(pool.slice(0, cap));
+      if (opts.reset) {
+        /* 正在输入：高亮第一条**真库位**，别停在「还没上架」上 ——
+           输完 311 直接回车，落的应该是 3-1-1 那个货架，不是把库位清空 */
+        active = 0;
+        for (var j = 0; j < items.length; j++) {
+          if (!items[j].blank) { active = j; break; }
+        }
+      } else if (opts.follow && sel.value) {
+        active = 0;
+        for (var k = 0; k < items.length; k++) {
+          if (items[k].value === sel.value) { active = k; break; }
+        }
+      }
+      if (active < 0 || active >= items.length) { active = 0; }
+      var out = items.map(function (r, i) { return html(r, i); });
+      if (items.length && cap < pool.length) {
+        out.push('<li class="lp-more">还有 ' + (pool.length - cap)
+          + ' 个库位 · 继续输短码 / 名称缩小</li>');
+      }
+      if (items.length === 1 && qs.length) {
+        out.push('<li class="lp-more">没找到 · 换个词，或去「仓库与货架」页加一个</li>');
+      }
+      list.innerHTML = out.join('');
+      place();                       /* 量着屏幕定位（宽 440px 起、绝不顶出视口） */
+      if (opts.follow && list.children[active] && list.children[active].scrollIntoView) {
+        list.children[active].scrollIntoView({ block: 'nearest' });   /* 已选中那条滚进视野 */
+      }
+      opened = true;
+      list.hidden = false;
+      wrap.classList.add('open');
+      input.setAttribute('aria-expanded', 'true');
+    }
+
+    function close() {
+      list.hidden = true;
+      wrap.classList.remove('open');
+      input.setAttribute('aria-expanded', 'false');
+      opened = false;
+    }
+
+    function pick(idx) {
+      var r = items[idx];
+      if (!r) { return; }
+      sel.value = r.value;
+      sync();
+      try { sel.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* 老浏览器 */ }
+      close();
+      if (typeof input.blur === 'function') { input.blur(); }
+    }
+
+    function move(step) {
+      if (!opened) { render({ follow: true }); return; }
+      if (!items.length) { return; }
+      active = (active + step + items.length) % items.length;
+      var nodes = list.querySelectorAll('.lp-it');
+      for (var i = 0; i < nodes.length; i++) {
+        nodes[i].classList.toggle('on', i === active);
+      }
+      if (nodes[active] && nodes[active].scrollIntoView) {
+        nodes[active].scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    input.addEventListener('focus', function () {
+      /* 已选中时框里是那串全路径：先清掉再列，否则一进来就拿它当搜索词，列表几乎空白。
+         没选中的话什么都不动（用户可能点回来接着改）。 */
+      if (!dirty) { input.value = ''; }
+      render({ follow: true });
+    });
+    input.addEventListener('input', function () { dirty = true; render({ reset: true }); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
+      else if (e.key === 'Enter') {
+        if (opened && items.length) { e.preventDefault(); pick(active); }
+        else { close(); }
+      } else if (e.key === 'Escape') { e.preventDefault(); close(); sync(); }
+      else if (e.key === 'Tab') { close(); }
+    });
+    input.addEventListener('blur', function () {
+      /* 点列表用 mousedown + preventDefault，不会走到这里；这里是「点了别处」的收尾 */
+      setTimeout(function () { close(); sync(); }, 120);
+    });
+    list.addEventListener('mousedown', function (e) {
+      var li = e.target.closest ? e.target.closest('.lp-it') : null;
+      if (!li) { return; }
+      e.preventDefault();
+      pick(parseInt(li.getAttribute('data-i'), 10));
+    });
+    if (xbtn) {
+      xbtn.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      xbtn.addEventListener('click', function () {
+        setValue(sel.id, '');
+        close();                                /* 清空后不自动弹列表，免得又糊一屏 */
+      });
+    }
+    /* 老标签 <label for="mv-loc"> 指的是隐藏的 select：点标签改成聚焦输入框
+       （点「?」那块要放过 —— 见下面 legend 的处理） */
+    var lab = document.querySelector('label[for="' + sel.id + '"]');
+    if (lab) {
+      lab.addEventListener('click', function (e) {
+        /* 点「?」时什么都不做：**绝不能 preventDefault** —— summary 的展开也是这个 click
+           的默认动作，拦了它就点不开（2026-10-11 实测），label 的 for 指向隐藏 select，
+           不拦也不会真聚焦到什么 */
+        if (e.target && e.target.closest && e.target.closest('.lp-legend')) { return; }
+        e.preventDefault();
+        input.focus();
+      });
+    }
+    /* 「?」说明**塞进标签里、紧跟文字**（2026-10-11 用户反馈：「放到文字后面不可以吗？
+       干嘛要换行显示」）—— label 是 display:block，插到它后面必然独占一行；塞进 label
+       末尾渲染出来就是「库位（选填）?」。页面上没有标签的（宏用在别处）就留在选择器上方。
+       气泡打开时量一下，右边要顶出屏幕就整体左移，跟联想列表一个规矩 */
+    var legend = wrap.querySelector('.lp-legend');
+    if (legend) {
+      if (lab) { lab.appendChild(legend); }
+      var box = legend.querySelector('.lp-legend-box');
+      legend.addEventListener('toggle', function () {
+        if (!legend.open || !box) { return; }
+        box.style.left = '0px';
+        var vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        var r = box.getBoundingClientRect();
+        var over = r.right - (vw - 8);
+        if (over > 0) { box.style.left = Math.round(-over) + 'px'; }
+      });
+    }
+    sync();
+  }
+
+  /* 窗口变了 / 页面滚了：开着的话重新定位一次，别让列表跟输入框错位（列表自己内部滚不算） */
+  window.addEventListener('resize', function () {
+    each(document.querySelectorAll('.loc-pick.open'), function (wrap) {
+      if (wrap.wmsPlace) { wrap.wmsPlace(); }
+    });
+  });
+  window.addEventListener('scroll', function (e) {
+    var t = e.target;
+    each(document.querySelectorAll('.loc-pick.open'), function (wrap) {
+      var list = wrap.querySelector('.lp-list');
+      if (list && t && t !== document && list.contains && list.contains(t)) { return; }
+      if (wrap.wmsPlace) { wrap.wmsPlace(); }
+    });
+  }, true);
+
+  function boot() {
+    each(document.querySelectorAll('.loc-pick'), function (wrap) {
+      if (wrap.dataset && wrap.dataset.lpReady) { return; }
+      if (wrap.dataset) { wrap.dataset.lpReady = '1'; }
+      setup(wrap);
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else { boot(); }
+})();
+</script>
+{% endmacro %}

@@ -1,0 +1,17 @@
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data
+backups
+tests
+*.db
+*.db-wal
+*.db-shm
+.DS_Store

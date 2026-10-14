@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑' if card else '新建' }}引流名片{% endblock %}
+{% block heading %}{{ '编辑' if card else '新建' }}引流名片{% endblock %}
+{% block sub %}卡片只认 ① 那三样（标题 / 简介 / <b>横图封面 ≥1200×630</b> —— 竖图 / 小图抖音常常不渲染卡片）；② 决定点开卡片跳哪儿（秒数填 0 = 直接跳走，没有中间页），③ 是跳之前那一屏，不填也行{% endblock %}
+{% block actions %}
+  <a class="btn" href="/share-cards">返回列表</a>
+  {% if card %}<a class="btn" href="/share-cards/{{ card.id }}/preview" target="_blank">整页预览</a>{% endif %}
+{% endblock %}
+{% block content %}
+
+<style>
+  .sc-wrap{display:grid;grid-template-columns:minmax(0,1fr) 392px;gap:16px;align-items:start}
+  @media (max-width:1180px){
+    .sc-wrap{grid-template-columns:minmax(0,1fr)}
+    .sc-prev{order:-1;position:static !important}
+  }
+  /* ---------- 右侧预览 ---------- */
+  .sc-prev{position:sticky;top:16px}
+  .sc-phone{background:#f4f5f7;border-radius:14px;padding:12px;border:1px solid var(--c-line,#e5e7eb)}
+  .sc-chat{display:flex;flex-direction:column;gap:10px}
+  .sc-time{text-align:center;font-size:11px;color:#9aa5b1}
+  .sc-bubble{align-self:flex-start;max-width:88%;background:#fff;border-radius:12px;overflow:hidden;
+             box-shadow:0 1px 3px rgba(15,23,42,.10)}
+  .sc-cover{display:block;width:100%;height:172px;object-fit:cover;background:#eef0f3}
+  .sc-nocover{display:flex;align-items:center;justify-content:center;height:172px;background:#eef0f3;
+              color:#9aa5b1;font-size:12.5px;text-align:center;padding:0 16px;line-height:1.6}
+  .sc-meta{padding:9px 11px 11px;background:#f7f8fa}
+  .sc-meta .t{font-size:13.5px;color:#1f2933;font-weight:600;line-height:1.4;
+              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .sc-meta .d{font-size:12px;color:#7b8794;margin-top:3px;
+              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .sc-meta .site{display:flex;align-items:center;gap:4px;margin-top:6px;font-size:11.5px;color:#9aa5b1}
+  .sc-meta .site i{font-size:13px}
+  .sc-prev-tip{margin:8px 0 0;font-size:12px;color:#7b8794;text-align:center}
+  .sc-frame{width:100%;height:460px;border:1px solid var(--c-line,#e5e7eb);border-radius:12px;
+            background:#fff;display:block}
+  .sc-prev-title{display:flex;align-items:center;gap:8px;margin:14px 0 8px;font-size:13px;font-weight:600}
+  .sc-prev-title .help{font-weight:400}
+  /* ---------- 折叠的「选填」卡片 ---------- */
+  .sc-fold{padding:0}
+  .sc-fold > details > summary{cursor:pointer;padding:14px 16px;list-style:none;font-size:14.5px;
+        display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .sc-fold > details > summary::-webkit-details-marker{display:none}
+  .sc-fold > details > summary::before{content:"▸";color:#9aa5b1;font-size:12px}
+  .sc-fold > details[open] > summary::before{content:"▾"}
+  .sc-fold > details[open] > summary{border-bottom:1px solid var(--c-line,#e5e7eb)}
+  .sc-fold .sc-fold-body{padding:14px 16px 16px}
+</style>
+
+{% if not site_https %}
+  <div class="note warn">对外域名是 <b>{{ site_base or '（还没配）' }}</b>，不是 HTTPS —— 抖音爬虫基本不抓 http，卡片出不来。</div>
+{% endif %}
+
+<div class="sc-wrap">
+
+  <!-- ============================ 左：表单 ============================ -->
+  <form method="post" id="scForm" action="{% if card %}/share-cards/{{ card.id }}/edit{% else %}/share-cards/create{% endif %}">
+
+    <div class="card">
+      <h3 style="margin:0 0 4px;font-size:14.5px;">① OG —— 抖音卡片上显示的就是这三样</h3>
+      <p class="help" style="margin:0 0 12px;">爬虫只读 <code>&lt;head&gt;</code> 里的这几个标签，不读页面正文，也不执行 JS。</p>
+      <div class="field-row auto">
+        <div class="field">
+          <label>卡片标题 <b style="color:#c0392b">*</b></label>
+          <input type="text" name="og_title" id="fTitle" required maxlength="120"
+                 value="{{ card.og_title if card else '' }}" placeholder="如：渔枢二手优品 · 一台也是批发价">
+          <p class="help">卡片上那行大字，控制在 20 字内最稳（太长会被截断）</p>
+        </div>
+        <div class="field">
+          <label>卡片简介</label>
+          <input type="text" name="og_desc" id="fDesc" maxlength="255"
+                 value="{{ card.og_desc if card else '' }}" placeholder="如：官方验机 · 七天无理由 · 当天发货">
+          <p class="help">标题下面那行小字，几十字以内</p>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>封面图 <b style="color:#c0392b">*</b>（横图 ≥1200×630，约 1.91:1）</label>
+        <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap;">
+          <input type="text" name="og_image" id="fImage" style="flex:1 1 260px;"
+                 value="{{ card.og_image if card else '' }}"
+                 placeholder="上传后自动填，也可以直接贴一个 https 图片地址">
+          <input type="file" id="coverFile" accept="image/*" hidden onchange="scUpload(this)">
+          <button type="button" class="btn" onclick="document.getElementById('coverFile').click()">
+            <i class="bi bi-upload"></i> 上传封面图
+          </button>
+        </div>
+        <p class="help" id="uploadTip" style="margin:6px 0 0;">
+          必须是公网能直接打开的 HTTPS 地址 —— 系统里上传的图自动满足{% if max_mb %}（单张 ≤ {{ max_mb }}MB）{% endif %}。
+          图不对（本地图 / 内网图 / 要登录才能看）就是一张空白卡片。
+        </p>
+        <div id="coverCheck" class="note warn" style="margin:8px 0 0;{% if not cover_advice %}display:none;{% endif %}">{{ cover_advice }}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 4px;font-size:14.5px;">② 点开卡片跳到哪儿</h3>
+      <p class="help" style="margin:0 0 12px;">
+        要「点开就进我的页面」就填这里：秒数填 <b>0</b> = 打开瞬间就跳走，中间没有这一页。
+        跳转靠前端 JS —— <b>爬虫不执行 JS</b>，卡片本身不受影响；<b>不填地址</b> = 点开停在这一页看内容。
+      </p>
+      <div class="field-row auto">
+        <div class="field">
+          <label>跳转地址</label>
+          <input type="text" name="jump_url" id="fJump" maxlength="500" value="{{ card.jump_url if card else '' }}"
+                 placeholder="https://...（留空 = 不跳转）">
+        </div>
+        <div class="field">
+          <label>打开后几秒跳</label>
+          <input type="number" name="jump_seconds" id="fJumpSec" min="0" max="30" value="{{ card.jump_seconds if card else 0 }}">
+          <p class="help">0 = 立刻跳（推荐）；填 3 就是先停 3 秒再跳</p>
+        </div>
+      </div>
+      <div id="riskTip" class="note warn" style="display:none;margin-top:4px;"></div>
+    </div>
+
+    <div class="card sc-fold">
+      <details {% if card and (card.body_title or card.body_text or card.qr_image) %}open{% endif %}>
+        <summary>
+          <b>③ 跳之前先给人看一屏？（选填）</b>
+          <span class="help">不填 = 没有中间页，点开直接跳走</span>
+        </summary>
+        <div class="sc-fold-body">
+          <p class="help" style="margin:0 0 12px;">
+            填了才会有这一屏：大标题 + 正文 + 二维码，秒数得比 0 大（比如 3），人才来得及看。
+          </p>
+          <div class="field">
+            <label>页面大标题</label>
+            <input type="text" name="body_title" id="fBodyTitle" maxlength="120"
+                   value="{{ card.body_title if card else '' }}" placeholder="留空 = 用卡片标题">
+          </div>
+          <div class="field">
+            <label>正文</label>
+            <textarea name="body_text" id="fBody" rows="4" placeholder="第一段&#10;&#10;第二段（空一行分段）">{{ card.body_text if card else '' }}</textarea>
+          </div>
+          <div class="field" style="margin-bottom:0;">
+            <label>二维码图片地址（选填）</label>
+            <input type="text" name="qr_image" id="fQr" maxlength="500" value="{{ card.qr_image if card else '' }}"
+                   placeholder="图片地址（HTTPS）">
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h3 style="margin:0 0 4px;font-size:14.5px;">④ 链接与备注</h3>
+      <div class="field-row auto">
+        <div class="field">
+          <label>英文短名（链接里那段）</label>
+          <input type="text" name="slug" id="fSlug" maxlength="64" value="{{ card.slug if card else '' }}"
+                 placeholder="留空自动按标题生成">
+          <p class="help">长链接形如 <b>{{ site_base }}/c/短名</b>，复制它贴到抖音群</p>
+        </div>
+        <div class="field">
+          <label>内部备注（自己认这张卡）</label>
+          <input type="text" name="name" id="fName" maxlength="64"
+                 value="{{ card.name if card else '' }}" placeholder="如：10 月抖音群引流">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <button class="btn primary" type="submit">{{ '保存' if card else '生成名片' }}</button>
+      <a class="btn" href="/share-cards" style="margin-left:8px;">取消</a>
+      <span class="help" style="margin-left:10px;">保存后回列表复制长链接{% if card %}；改了内容记得用「重新抓取」链接{% endif %}</span>
+    </div>
+  </form>
+
+  <!-- ============================ 右：实时预览 ============================ -->
+  <aside class="sc-prev">
+    <div class="card">
+      <h3 style="margin:0 0 2px;font-size:14.5px;">实时预览</h3>
+      <p class="help" style="margin:0 0 12px;">跟着左边填的内容变，不用保存。</p>
+
+      <div class="sc-phone">
+        <div class="sc-chat">
+          <div class="sc-time">13:14</div>
+          <div class="sc-bubble" id="pvBubble">
+            <img class="sc-cover" id="pvCover" src="{{ card.og_image if card else '' }}" alt=""
+                 onerror="scCoverBroken()" onload="scCoverOk()">
+            <div class="sc-nocover" id="pvNoCover" style="display:none;">
+              <div>
+                <div style="font-size:13px;margin-bottom:2px;">还没传封面图</div>
+                <div style="font-size:11.5px;">没有封面图，卡片就是一片空白</div>
+              </div>
+            </div>
+            <div class="sc-meta">
+              <div class="t" id="pvTitle"></div>
+              <div class="d" id="pvDesc"></div>
+              <div class="site"><i class="bi bi-link-45deg"></i><span id="pvSite"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="sc-prev-tip">↑ 这是抖音群里卡片的样子（示意）</p>
+
+      <div class="sc-prev-title">
+        点开卡片后看到的页面 <span class="help">真实渲染，不是画出来的</span>
+      </div>
+      <iframe class="sc-frame" id="pvFrame" title="落地页预览" src="about:blank"></iframe>
+      <p class="sc-prev-tip" id="pvTip">正在生成…</p>
+    </div>
+  </aside>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var SC_SITE = {{ site_base|tojson }};
+
+// 风控词：系统只提醒不拦 —— 抖音吞卡片 / 限流的账得让人自己知道
+var SC_RISK = ['微信', 'weixin', 'vx', 'v信', '企微', '加我', '加好友', '私聊', '扫我', '扫码加', '扣扣', 'qq', '加v'];
+
+function scVal(id) {
+  var el = document.getElementById(id);
+  return el ? (el.value || '').trim() : '';
+}
+
+// ---------- 卡片预览（纯前端，跟着输入即时变） ----------
+function scRenderCard() {
+  var title = scVal('fTitle') || '卡片标题（还没填）';
+  var desc = scVal('fDesc');
+  var img = scVal('fImage');
+  document.getElementById('pvTitle').textContent = title;
+  document.getElementById('pvDesc').textContent = desc;
+  document.getElementById('pvDesc').style.display = desc ? '' : 'none';
+  var host = (SC_SITE || location.origin || '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  document.getElementById('pvSite').textContent = host || '未配置对外域名';
+  var cover = document.getElementById('pvCover');
+  if (img) { cover.src = img; } else { cover.removeAttribute('src'); scCoverBroken(); }
+}
+
+function scCoverBroken() {
+  document.getElementById('pvCover').style.display = 'none';
+  var box = document.getElementById('pvNoCover');
+  box.style.display = '';
+  box.style.height = '';
+  scCoverCheck(0, 0);
+}
+function scCoverOk() {
+  var cover = document.getElementById('pvCover');
+  cover.style.display = 'block';
+  document.getElementById('pvNoCover').style.display = 'none';
+  scCoverCheck(cover.naturalWidth, cover.naturalHeight);
+}
+
+// 封面图体检：抖音卡片配图要横图 ≥1200×630，竖图 / 小图常常不渲染卡片（贴外链图也走这里）
+function scCoverCheck(w, h) {
+  var box = document.getElementById('coverCheck');
+  var msg = '';
+  if (w && h) {
+    if (w / h < 1.4) {
+      msg = '这张图是 ' + w + '×' + h + ' 的竖图，抖音卡片配图要横图（约 1.91:1，如 1200×630），竖图常常不出卡片';
+    } else if (w < 1200 || h < 630) {
+      msg = '这张图只有 ' + w + '×' + h + '，抖音卡片配图要 ≥1200×630 的横图，小图很可能只显示一条纯文本链接';
+    }
+  }
+  box.textContent = msg;
+  box.style.display = msg ? '' : 'none';
+}
+
+var SC_TIP_ERR = false;   // 预览请求报错时置位，别让后续输入把红字盖掉
+
+// 点开卡片之后会发生什么：直接跳走 / 停几秒再跳 / 不跳
+function scJumpTip() {
+  var jump = scVal('fJump');
+  var sec = scVal('fJumpSec');
+  if (!jump) { return '没填跳转地址：点开卡片会停在这一页看内容'; }
+  if (!sec || sec === '0') { return '点开卡片会立刻跳到目标地址（预览框里不跳，真发出去才跳）'; }
+  return '点开后 ' + sec + ' 秒跳到目标地址（预览框里不跳）';
+}
+
+// ---------- 落地页预览（服务端同一份渲染，防抖 400ms） ----------
+var SC_TIMER = null;
+var SC_SEQ = 0;   // 只认最后一次请求的结果，防止先发后到把旧的盖回去
+function scReloadPage() {
+  var seq = ++SC_SEQ;
+  SC_TIP_ERR = false;
+  var tip = document.getElementById('pvTip');
+  tip.textContent = '正在生成…';
+  tip.style.color = '';
+  var fd = new FormData(document.getElementById('scForm'));
+  window.fetchJson('/share-cards/preview-html', {
+    method: 'POST', body: fd, where: '引流名片 · 实时预览'
+  }).then(function (res) {
+    if (seq !== SC_SEQ) { return; }
+    if (res.ok && res.data && res.data.html) {
+      document.getElementById('pvFrame').srcdoc = res.data.html;
+      scUpdateTip();
+    } else {
+      SC_TIP_ERR = true;
+      tip.textContent = (res.data && res.data.error) || '预览生成失败';
+      tip.style.color = '#c0392b';
+    }
+  }).catch(function (err) {
+    if (seq !== SC_SEQ) { return; }
+    SC_TIP_ERR = true;
+    tip.textContent = (err && err.message) || '预览生成失败';
+    tip.style.color = '#c0392b';
+  });
+}
+
+// 提示行跟着跳转字段即时变；上一次请求失败时的红字别被盖掉
+function scUpdateTip() {
+  if (SC_TIP_ERR) { return; }
+  var tip = document.getElementById('pvTip');
+  tip.textContent = scJumpTip();
+  tip.style.color = '';
+}
+
+function scSchedule() {
+  scRenderCard();
+  scCheckRisk();
+  scUpdateTip();
+  clearTimeout(SC_TIMER);
+  SC_TIMER = setTimeout(scReloadPage, 400);
+}
+
+function scCheckRisk() {
+  var blob = ['fTitle', 'fDesc', 'fBody'].map(scVal).join(' ').toLowerCase();
+  var hits = SC_RISK.filter(function (w) { return blob.indexOf(w.toLowerCase()) !== -1; });
+  var tip = document.getElementById('riskTip');
+  if (!hits.length) { tip.style.display = 'none'; return; }
+  tip.style.display = '';
+  tip.innerHTML = '⚠️ 文案里有「' + hits.join(' / ') +
+    '」这类引流话术：抖音可能吞卡片、拦截消息，严重的限制账号。要不要用你自己决定。';
+}
+
+// 事件委托：表单里任何输入都触发预览刷新（以后加字段也不用改这里）
+var scForm = document.getElementById('scForm');
+scForm.addEventListener('input', scSchedule);
+scForm.addEventListener('change', scSchedule);
+
+// ---------- 封面图上传 ----------
+function scUpload(input) {
+  var file = input.files && input.files[0];
+  if (!file) { return; }
+  var tip = document.getElementById('uploadTip');
+  tip.textContent = '正在上传…';
+  tip.style.color = '';
+  var fd = new FormData();
+  fd.append('file', file);
+  window.fetchJson('/share-cards/upload-image', {
+    method: 'POST', body: fd, where: '引流名片 · 上传封面图'
+  }).then(function (res) {
+    if (res.ok && res.data && res.data.url) {
+      var d = res.data;
+      document.getElementById('fImage').value = d.url;
+      scCoverCheck(d.width, d.height);
+      tip.textContent = d.advice ? '已上传，但这张图抖音可能不认（看下面的黄字）' : '已上传：' + (d.abs || d.url);
+      scSchedule();
+    } else {
+      tip.textContent = (res.data && res.data.error) || '上传失败';
+      tip.style.color = '#c0392b';
+    }
+    input.value = '';
+  }).catch(function (err) {
+    tip.textContent = (err && err.message) || '上传失败，请重试';
+    tip.style.color = '#c0392b';
+    input.value = '';
+  });
+}
+
+// 首屏渲染一次（编辑页用库里已有的值，新建页给空态）
+scRenderCard();
+scCheckRisk();
+scReloadPage();
+</script>
+{% endblock %}

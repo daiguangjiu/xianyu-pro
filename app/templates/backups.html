@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}数据备份与更新日志{% endblock %}
+{% block heading %}数据备份{% endblock %}
+{% block sub %}每日北京时间 {{ '%02d' % backup_hour }}:00 自动备份订单数据，保留最近 {{ keep_days }} 天{% endblock %}
+{% block actions %}
+  <form method="post" action="/backups/create" style="display:inline">
+    <button class="btn primary">立即备份一次</button>
+  </form>
+  <form method="post" action="/backups/prune" style="display:inline" data-confirm="确认清理超过 {{ keep_days }} 天的备份文件？">
+    <button class="btn">清理过期备份</button>
+  </form>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="kv">
+    <div class="k">自动备份</div><div class="v">
+      {% if backup_enabled %}<span class="badge done">已开启</span> 每天 <b>{{ '%02d' % backup_hour }}:00</b>（北京时间）自动跑一次
+      {% else %}<span class="badge ignored">未开启</span> 请配置 BACKUP_ENABLED=1{% endif %}
+    </div>
+    <div class="k">下次备份</div><div class="v"><span class="mono">{{ next_run }}</span></div>
+    <div class="k">保留策略</div><div class="v">超过 <b>{{ keep_days }}</b> 天的备份自动删除（BACKUP_KEEP_DAYS）</div>
+    <div class="k">备份内容</div><div class="v">订单表完整快照（含金额、成本、供应商、物流单号、资金归属等），JSON 格式</div>
+    <div class="k">备份目录</div><div class="v"><span class="mono">{{ backup_dir }}</span></div>
+    <div class="k">占用空间</div><div class="v">共 {{ total_count }} 个文件 · {{ total_size }}</div>
+  </div>
+  {% if not backup_enabled %}<div class="note danger" style="margin-top:10px">自动备份当前是关闭状态，数据只保留在数据库里，建议开启。</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>备份文件</h2>
+  {% if files %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th class="num">序号</th><th>备份时间</th><th>文件名</th><th class="num">订单数</th><th class="num">大小</th><th>来源</th><th></th></tr></thead>
+      <tbody>
+      {% for f in files %}
+        <tr>
+          <td class="num muted">{{ loop.index }}</td>
+          <td class="nowrap">{{ f.generated_at }}</td>{# 后端已按北京时间格式化 #}
+          <td class="mono">{{ f.file }}</td>
+          <td class="num">{{ f.order_count if f.order_count is not none else '-' }}</td>
+          <td class="num muted">{{ f.size_text }}</td>
+          <td class="muted">{{ '手动备份' if f.source == 'manual' else ('自动备份' if f.source == 'auto' else (f.source or '-')) }}</td>
+          <td>
+            <div class="row-actions">
+              <a class="btn sm" href="/backups/download/{{ f.file }}">下载</a>
+              <form method="post" action="/backups/delete/{{ f.file }}" data-confirm="确认删除备份 {{ f.file }}？删除后不可恢复。" style="display:inline">
+                <button class="btn sm danger">删除</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="note muted" style="margin-top:10px">
+    文件名格式 <span class="mono">orders_年月日_时分秒.json</span>，下载后可直接查看或按需导入；
+    每天凌晨自动备份后会自动清理 {{ keep_days }} 天前的旧文件。
+  </div>
+  {% else %}
+  <div class="empty">还没有备份文件。点右上角「立即备份一次」马上生成一份，系统也会在每天 {{ '%02d' % backup_hour }}:00 自动备份。</div>
+  {% endif %}
+</div>
+
+{% if updates %}
+<div class="card" id="changelog">
+  <div class="row-between">
+    <h2>更新日志</h2>
+    <span class="muted">当前版本 <b class="mono">{{ current_version }}</b> · 内容维护在 config/changelog.json</span>
+  </div>
+  {% for u in updates %}
+    <div class="log-entry">
+      <div class="log-head">
+        <span class="badge template">{{ u.version }}</span>
+        <b>{{ u.title }}</b>
+        <span class="muted">{{ u.date }}</span>
+      </div>
+      {% if u['items'] %}
+      <ul class="tick-list">
+        {% for item in u['items'] %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  {% endfor %}
+  <a class="btn sm" href="/changelog">查看全部更新日志</a>
+</div>
+{% endif %}
+{% endblock %}

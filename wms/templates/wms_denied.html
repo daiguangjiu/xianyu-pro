@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}没有权限{% endblock %}
+
+{% block content %}
+<div class="card panel-narrow">
+  <h3><i class="bi bi-lock" style="color:var(--c-error)"></i> 检测仓没有给你这个权限</h3>
+  <p class="d">
+    打开 <span class="mono">{{ from_path or '这一页' }}</span> 需要「<b>{{ perm_label }}</b>」{% if perm %}<span class="mono muted">{{ perm }}</span>{% endif %} ——
+    这是检测仓自己的权限，跟渔枢系统的角色勾选不是一套。
+  </p>
+  <p class="hint">找 <b>{{ contact }}</b> 在「<a href="/wms/members">人员与授权</a>」里给账号分配角色；没角色的人一律访问不了任何检测仓页面。</p>
+  <div class="btn-row center" style="margin-top:var(--s-4)">
+    <a class="btn primary" href="/wms"><i class="bi bi-house"></i> 回检测仓总览</a>
+    <a class="btn" href="/">回渔枢系统</a>
+  </div>
+</div>
+{% endblock %}

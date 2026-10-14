@@ -1,0 +1,655 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}{{ '编辑货品' if mode == 'edit' else '手动建档' }}{% endblock %}
+{% block actions %}
+{% if mode == 'edit' %}
+  <a class="btn" href="/wms/items/{{ item.id }}">回货品详情</a>
+  <form method="post" action="/wms/items/{{ item.id }}/delete" class="inline-form"
+        onsubmit="return confirm('删除货品 {{ item.display_code }}？只有从没检测 / 出库 / 报修 / 盘点过的才删得掉（删了库存流水一并清掉）')">
+    <button class="btn danger">删除这台</button></form>
+{% else %}
+  <a class="btn" href="/wms/batches/{{ batch.id }}">回批次</a>
+  <a class="btn" href="/wms/batches/{{ batch.id }}/import">Excel 导入建档</a>
+{% endif %}
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* —— 分区（2026-10-12）：按模块分区，录入时不用在一堆字段里来回找 —— */
+  .frm-sec{border-top:1px solid var(--c-border);margin-top:var(--s-4);padding-top:var(--s-4)}
+  .frm-sec:first-of-type{border-top:0;margin-top:0;padding-top:0}
+  .frm-sec-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;
+    margin-bottom:var(--s-3);color:var(--c-text)}
+  .frm-sec-head .num{width:22px;height:22px;border-radius:50%;background:var(--c-primary-soft);
+    color:var(--c-primary-hover);display:inline-flex;align-items:center;justify-content:center;
+    font-size:12px;flex:0 0 auto}
+  .frm-sec-head .tip{font-weight:400;font-size:12.5px;color:var(--c-text-muted);margin-left:auto;
+    text-align:right;flex:1 1 auto}
+
+  /* —— 分组小标题（2026-10-12 用户要求）：一块里的信息再分组，重点先看见 —— */
+  .frm-sub{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;
+    color:var(--c-text-muted);margin:var(--s-3) 0 8px}
+  .frm-sub:first-child{margin-top:0}
+  .frm-sub i{color:var(--c-primary);font-size:13px}
+  .frm-sub .d{font-weight:400;margin:0}
+  .frm-sub::after{content:"";flex:1 1 auto;height:1px;background:var(--c-border)}
+
+  /* —— 重要信息高亮：淡主色底 + 左侧主色条（货号 / 品类 / 多规格矩阵） —— */
+  .hl-box{background:var(--c-primary-soft);border:1px solid var(--c-primary-border);
+    border-left:3px solid var(--c-primary);border-radius:var(--r-input);padding:var(--s-3)}
+  .hl-box label{color:var(--c-primary-hover)}
+  .field.key input{border-color:var(--c-primary-border);background:#fff;font-weight:600}
+  .req{color:var(--c-error)}
+
+  /* —— ① 识别行（2026-10-12 用户要求重新排位）：货号带按钮所以宽一格，
+        品牌 / 分类跟着排在它右边，产品 / 商品名称单独占一整行 —— */
+  .field-row.id-row{grid-template-columns:minmax(300px,1.35fr) minmax(120px,.65fr) minmax(160px,1fr)}
+  /* 系统生成货号：主色实心、跟输入框一样高，一眼能看见（原来是灰描边小按钮，人找不到） */
+  .sku-btn{flex:0 0 auto;white-space:nowrap;min-height:38px;font-weight:600}
+  @media (max-width:760px){
+    .field-row.id-row{grid-template-columns:minmax(0,1fr)}
+    .sku-btn{width:100%}
+  }
+
+  /* —— 规格维度（照渔枢「新建商品」的规格编辑器）—— */
+  .spec-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+  .spec-row .spec-name{width:150px;flex:0 0 auto}
+  .tag-input{display:flex;flex-wrap:wrap;gap:6px;align-items:center;flex:1 1 240px;min-height:38px;
+    border:1px solid var(--c-border);border-radius:var(--r-input);padding:5px 8px;background:#fff}
+  .tag-input:focus-within{border-color:var(--c-primary);box-shadow:0 0 0 3px var(--c-primary-soft)}
+  .tag-input input{border:0;flex:1 1 120px;min-width:120px;height:26px;padding:0;
+    box-shadow:none!important;background:transparent}
+  .tag{display:inline-flex;align-items:center;gap:4px;background:#fff;color:var(--c-primary-hover);
+    border:1px solid var(--c-primary-border);border-radius:var(--r-pill);padding:2px 8px;font-size:12.5px}
+  .tag i{cursor:pointer;font-size:13px}
+  .tag i:hover{color:var(--c-error)}
+
+  /* —— 批量设置（2026-10-12 照渔枢「规格 · 价格 · 库存」的批量卡）：
+        成本价 / 渔货价 / 建议售价 / 市场价 / 库存 五个字段一行排开 ——
+        它既是多规格的默认值，也是「不加规格」时这一条货自己的值 —— */
+  .sku-batch{border:1px dashed var(--c-primary-border);border-radius:var(--r-input);
+    padding:var(--s-3);margin:8px 0}
+  .sku-batch .hd{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;margin-bottom:8px}
+  .sku-batch .hd .btn{margin-left:auto}
+  .field-row.five{grid-template-columns:repeat(5,minmax(0,1fr))}
+  @media (max-width:1080px){.field-row.five{grid-template-columns:repeat(3,minmax(0,1fr))}}
+  @media (max-width:680px){.field-row.five{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+  /* —— 置灰不可点（2026-10-12 晚 用户要求）：还没选分类时的「应用类目规格模板」。
+       这里只用样式置灰、不用 disabled 属性 —— 真 disabled 的按钮浏览器根本不发 click，
+       「点了给一句『请先选择商品的类目！』」就弹不出来了。 —— */
+  .btn.off{opacity:.5;cursor:not-allowed}
+  .btn.off:hover{background:transparent;border-color:transparent;color:var(--c-text-muted)}
+
+  /* —— 规格矩阵 —— */
+  .sku-table-wrap{overflow-x:auto;margin-top:var(--s-2)}
+  table.sku-table{min-width:880px;width:100%}
+  table.sku-table td{padding:4px 6px;vertical-align:middle}
+  table.sku-table input{height:34px}
+  table.sku-table td.sp{font-weight:600;white-space:nowrap}
+  table.sku-table input.qty{font-weight:700;color:var(--c-primary-hover);text-align:center}
+  .sku-sum{margin:8px 0 0;font-size:13px;color:var(--c-text-muted)}
+  .sku-sum b{color:var(--c-primary-hover);font-size:15px}
+
+  /* 商品字段区：跟「Excel 导入」页的沉淀字段块同一副长相 */
+  .extra-box .field-row{margin-bottom:0}
+</style>
+{% endblock %}
+
+{% block content %}
+{% if mode == 'edit' %}
+<div class="note"><b>条码 {{ item.barcode }}（{{ item.display_code }}）终身不变</b>：
+  改品类 / 品牌 / 型号都不会重发条码（等级、品类都不写进码里）；要换码只能删了重录。</div>
+{% endif %}
+<div class="card">
+  <h2>{% if mode == 'edit' %}编辑货品 · {{ item.display_code }}{% else %}手动建档 · 批次 {{ batch.batch_no }}{% endif %}</h2>
+  <p class="d">
+    字段口径与 Excel 清单<b>完全一致</b>，按下面几块填：
+    <b>① 货号与品类</b>（扫货与条码都靠它）→
+    {% if mode == 'create' %}<b>② 规格 · 价格 · 库存</b>（同款多规格一次建完，价格与库存都在这块）→
+    {% else %}<b>② 价格与库存</b>（这一台自己的价）→{% endif %}
+    <b>③ 商品字段</b>（导入时沉淀下来的列）
+    {% if mode == 'create' %}（手工单条：已经知道是什么货的时候补录用；整批清单走 Excel 导入）{% endif %}
+  </p>
+  <datalist id="catList">
+    {% for code, label in category_choices %}<option value="{{ label }}">{{ code }}</option>{% endfor %}
+  </datalist>
+  <form method="post" action="{{ form_action }}" onsubmit="return syncSpecs()">
+    {# 多规格矩阵（2026-10-12）：前端把规格行序列化到这里，服务端按行建档；
+       没填规格时它是空的，服务端走原来「一机一码 / 序列号清单」的老路 #}
+    <input type="hidden" name="specs_json" id="specsJson" value="">
+
+    {# ==================== ① 货号与品类（高亮） ==================== #}
+    <div class="frm-sec">
+      <div class="frm-sec-head"><span class="num">1</span> 货号与品类
+        <span class="tip">扫码检测认的是<b>货号</b>；货上没号（非扫码场景）点「系统生成货号」让系统发一个</span></div>
+      <div class="hl-box">
+        <div class="frm-sub"><i class="bi bi-upc-scan"></i> 识别 · 货号（扫货与条码都靠它）</div>
+        <div class="field-row id-row">
+          <div class="field key"><label for="m-sku">货号 <span class="req">*</span></label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input id="m-sku" type="text" name="sku_code" required value="{{ values.sku_code }}"
+                     placeholder="扫码商品的货号或条码，如果没有点击生成系统货号"
+                     oninput="renderSpecTable && renderSpecTable()">
+              {% if mode == 'create' %}
+              {# 系统生成货号（2026-10-12 用户要求）：货上没有清单号那种非扫码场景，
+                 点一下让系统按「YC + 年月 + 流水」发一个（规则见 wms/intake.py::next_sku_code） #}
+              <button type="button" class="btn primary sku-btn" onclick="genSkuCode()"
+                      title="货上没贴清单号时点它，系统发一个唯一货号（YC + 年月 + 流水）">
+                <i class="bi bi-magic"></i> 系统生成货号</button>
+              {% endif %}
+            </div></div>
+          <div class="field"><label for="m-brand">品牌</label>
+            <input id="m-brand" type="text" name="brand" value="{{ values.brand }}" placeholder="美的"></div>
+          <div class="field key"><label for="m-cat">分类</label>
+            <input id="m-cat" type="text" name="category" list="catList" value="{{ values.category_raw }}"
+                   placeholder="破壁机 / HA.KC.DFB"></div>
+        </div>
+        {# 型号 / 规格 / 检修后条码 一整块（连同下面两句说明）2026-10-12 晚 用户要求删掉：
+           型号 / 规格 归到 ② 的规格维度（一个规格就是一条货）；
+           检修后条码在「货品详情」页贴 —— 那边有登记 + 按规则生成两条路
+           （/wms/items/{id}/own-barcode，见 wms_item_detail.html），
+           贴上以后复检 / 出库扫它就认这台，功能一点没少。 #}
+        <div class="frm-sub"><i class="bi bi-card-text"></i> 基本资料</div>
+        <div class="field-row auto">
+          <div class="field"><label for="m-product">产品 / 商品名称</label>
+            <input id="m-product" type="text" name="product_name" value="{{ values.product_name }}"
+                   placeholder="清单里那串商品名"></div>
+          {% if mode == 'edit' %}
+          <div class="field"><label for="m-sn">序列号 / IMEI</label>
+            <input id="m-sn" type="text" name="serial_no" value="{{ values.serial_no }}"
+                   placeholder="机身序列号 / IMEI"></div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {% if mode == 'create' %}
+    {# ==================== ② 规格 · 价格 · 库存（照渔枢「新建商品」的规格区块） ==================== #}
+    <div class="frm-sec">
+      <div class="frm-sec-head"><span class="num">2</span> 规格 · 价格 · 库存
+        <span class="tip">同款货有多个规格就在这里一次建完：<b>一个规格 = 一条货 = 一个条码</b>，
+          价格与库存都在这块 —— 不加规格时批量设置就是这一条货自己的值</span></div>
+
+      {# —— 批量设置（照渔枢：先填一次 → 点按钮套用到全部规格；新加规格也默认带这套值）——
+          字段与渔枢「规格 · 价格 · 库存」一致：成本价 / 渔货价 / 建议售价 / 市场价 / 库存。
+          名字就是服务端字段名 —— 多规格时当行内留空的默认值，不加规格时就是单条货的值。 #}
+      <div class="sku-batch" id="batchBox">
+        <div class="hd"><i class="bi bi-sliders"></i> 批量设置
+          <span class="d" style="margin:0">填一次 → 套用到全部规格（不加规格就是这一条货的值）</span>
+          <button type="button" class="btn sm primary" onclick="batchFill()">
+            <i class="bi bi-magic"></i> 批量设置到全部规格</button></div>
+        <div class="field-row five">
+          <div class="field key"><label for="m-cost">成本价</label>
+            <input id="m-cost" type="number" step="0.01" name="purchase_cost"
+                   value="{{ values.purchase_cost }}" placeholder="对供应链 / 回收的采购价"></div>
+          {# 渔货价必填（2026-10-12 晚 用户要求）：检测出价不能高于它，所以不能留空 ——
+             页面标 *，输入框加 required（浏览器挡在提交前）。 #}
+          <div class="field key"><label for="m-fish">渔货价 <span class="req">*</span></label>
+            <input id="m-fish" type="number" step="0.01" name="selling_price" required
+                   value="{{ values.selling_price }}" placeholder="必填 · 检测出价不能高于它"></div>
+          <div class="field key"><label for="m-suggest">建议售价</label>
+            <input id="m-suggest" type="number" step="0.01" name="suggest_price"
+                   value="{{ values.suggest_price }}" placeholder="闲鱼建议卖价"></div>
+          <div class="field key"><label for="m-base">市场价（基准价）</label>
+            <input id="m-base" type="number" step="0.01" name="base_price"
+                   value="{{ values.base_price }}" placeholder="检测打分的底"></div>
+          <div class="field key"><label for="m-count">库存（台）</label>
+            <input id="m-count" type="number" name="qty" value="{{ values.qty }}" min="1" max="200"
+                   title="同一个条码底下有几台：清单写「数量 3」就填 3"></div>
+        </div>
+      </div>
+
+      {# —— 规格与 SKU —— #}
+      <div class="frm-sub"><i class="bi bi-diagram-3"></i> 规格与 SKU
+        <span class="d">添加规格并填上候选值 → 点「按照规则生成 SKU」出组合矩阵，逐行填价格与库存</span></div>
+      <div id="specZone">
+        <div id="specEditor"></div>
+        <div class="btn-row" style="margin:8px 0">
+          <button type="button" class="btn sm" onclick="addSpecRow()">
+            <i class="bi bi-plus-lg"></i> 添加规格</button>
+          {# 按照规则生成 SKU（2026-10-12 用户要求，照渔枢）：把上面手填的规格维度做组合，重建矩阵 #}
+          <button type="button" class="btn sm" onclick="genSkuMatrix()">
+            <i class="bi bi-diagram-3"></i> 按照规则生成 SKU</button>
+          {# 应用类目规格模板（照渔枢的叫法）：按分类套该类的既定模板（见 wms/web/router.py 的 _SPEC_TEMPLATES）。
+             2026-10-12 晚 用户要求：上面没选分类时置灰（.off）、点了给一句提示；
+             选了分类才真按该类目的模板带入规格维度，并把多规格矩阵填出来。 #}
+          <button type="button" class="btn sm ghost off" id="tplBtn" onclick="applyTpl()"
+                  title="请先选择商品的类目！">
+            <i class="bi bi-stars"></i> 应用类目规格模板</button>
+          <span class="d" id="skuGenNote" style="margin-left:auto"></span>
+        </div>
+        <div class="sku-table-wrap">
+          {# 矩阵字段照渔枢「规格 · 价格 · 库存」：成本价 / 渔货价 / 建议售价 / 市场价 / 库存 /
+             SKU 编码（渔集叫「货号」，扫码认货靠它，多规格按「货号-01」派生） #}
+          <table class="sku-table" id="specTable" style="display:none">
+            <thead><tr>
+              <th>规格组合</th>
+              <th style="width:110px">成本价</th>
+              <th style="width:110px">渔货价</th>
+              <th style="width:110px">建议售价</th>
+              <th style="width:110px">市场价</th>
+              <th style="width:90px">库存</th>
+              <th style="width:190px">货号</th>
+              <th style="width:36px"></th>
+            </tr></thead>
+            <tbody id="specBody"></tbody>
+          </table>
+        </div>
+        <p class="sku-sum" id="specSum" style="display:none"></p>
+        <p class="d" style="margin:8px 0 0">
+          价格那一行留空就按上面的批量设置走；<b>渔货价必填</b>（检测出价不能高于它）。
+          建议售价留空不影响 —— 检测定级时系统会按「市场价 × 该档系数」算出来，
+          渔枢 / 渔货栈按条码带出时用得上。
+        </p>
+      </div>
+      {# 没加规格维度时 = 单条货：序列号与模式还走原来那套（数量与价格在上面批量设置里） #}
+      <div id="singleOnly">
+        <div class="frm-sub"><i class="bi bi-box-seam"></i> 单条货的序列号（不加规格维度时走这条）</div>
+        <div class="field-row auto">
+          <div class="field"><label for="m-sn">序列号 / IMEI（选填）</label>
+            <input id="m-sn" type="text" name="serial_no" placeholder="相同型号可留空"></div>
+          <div class="field"><label for="m-mode">模式</label>
+            <select id="m-mode" name="mode" onchange="toggleMode()">
+              <option value="single">一机一码（同型号多台）</option>
+              <option value="bulk">按型号批量（序列号清单）</option>
+            </select></div>
+        </div>
+        <div class="field" id="bulkOnly" style="display:none">
+          <label for="m-serials">序列号清单（一行一个）</label>
+          <textarea id="m-serials" name="serials" rows="5" placeholder="35xxxxxx&#10;35yyyyyy"></textarea>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if mode == 'edit' %}
+    {# ==================== 价格与库存（只在编辑页） ====================
+       建档页（create）不再单列这块：价格与库存已并进 ② 的批量设置 + 规格矩阵
+       （一个规格 = 一条货，各自带价），2026-10-12 用户要求「上面多规格已经替代了」。
+       编辑页没有规格矩阵，所以这一台自己的价格 / 库存还在这里改。 #}
+    <div class="frm-sec">
+      <div class="frm-sec-head"><span class="num">2</span> 价格与库存
+        <span class="tip">这一台货自己的价 —— 改数量会写一条差额流水，库存台数跟着变（不拆分条码）</span></div>
+      <div class="frm-sub"><i class="bi bi-cash-coin"></i> 价格（检测出价按成本价与市场价算）</div>
+      <div class="field-row auto">
+        <div class="field key"><label for="m-cost">成本价（清单里的下单价格）</label>
+          <input id="m-cost" type="number" step="0.01" name="purchase_cost" value="{{ values.purchase_cost }}"></div>
+        <div class="field key"><label for="m-fish">渔货价 <span class="req">*</span></label>
+          <input id="m-fish" type="number" step="0.01" name="selling_price" required
+                 value="{{ values.selling_price }}" placeholder="必填 · 检测出价不能高于它"></div>
+        <div class="field key"><label for="m-suggest">建议售价</label>
+          <input id="m-suggest" type="number" step="0.01" name="suggest_price" value="{{ values.suggest_price }}"
+                 placeholder="留空 = 市场价 × 建议售价系数"></div>
+        <div class="field key"><label for="m-base">市场价（基准价）</label>
+          <input id="m-base" type="number" step="0.01" name="base_price" value="{{ values.base_price }}"></div>
+      </div>
+      <div class="frm-sub"><i class="bi bi-box-seam"></i> 库存（台）</div>
+      <div class="field-row auto">
+        <div class="field key"><label for="m-count">数量 / 库存（这台货有几台）</label>
+          <input id="m-count" type="number" name="qty" value="{{ values.qty }}" min="1" max="200"
+                 title="改数量会写一条差额流水，库存台数跟着变（不拆分条码）"></div>
+      </div>
+    </div>
+    {% endif %}
+
+    {# ==================== ③ 商品字段 ====================
+       建档页是 ①②③、编辑页是 ①②③（原来建档页有 ④，因为「价格与标识」曾单列一块；
+       2026-10-12 价格并进 ② 了，两边都只剩三块）。 #}
+    <div class="frm-sec">
+      <div class="frm-sec-head"><span class="num">3</span> 商品字段
+        <span class="tip">导入时认不出的列会沉淀在这里；留空即不填</span></div>
+      <div class="extra-box">
+        {% if extra_fields %}
+        <div class="frm-sub"><i class="bi bi-journal-text"></i> 沉淀字段（Excel 里认不出的列）</div>
+        <p class="d">这些字段在「<a href="/wms/fields">商品字段</a>」页能改名 / 排序 / 停用 ——
+          名字改了值不动（值按字段标识存）。</p>
+        <div class="field-row auto">
+          {% for f in extra_fields %}
+          {# 字段名后面不再挂「（来自 某表.xlsx（2610-03））」这类备注（2026-10-08 用户要求）；
+             出处只在「商品字段」管理页 hover 能看，建档 / 编辑 / 检测台一律干净 #}
+          <div class="field"><label for="x-{{ f.key }}">{{ f.label }}
+            {% if not f.enabled %}<span class="muted">（已停用，老值还留着）</span>{% endif %}</label>
+            <input id="x-{{ f.key }}" name="extra__{{ f.key }}"
+                   type="{{ 'number' if f.field_type == 'number' else 'text' }}"
+                   value="{{ extra_values.get(f.key, '') }}"></div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="d">还没有登记过商品字段 —— 走一次 Excel 导入（清单里多出来的列），
+          或者在「<a href="/wms/fields">商品字段</a>」页手工加几个。</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <button class="btn primary">{{ '保存修改' if mode == 'edit' else '生成条码并入库' }}</button>
+  </form>
+</div>
+
+{% if mode == 'create' %}
+<script>
+  // ————————————————————————————————————————————————————————————
+  // 多规格建档（2026-10-12）：规格维度 → 笛卡尔积出规格矩阵 → 一个规格一条货
+  // 交互照渔枢系统「新建商品」的规格编辑器（规格名 + 候选值 tag + 批量设置 + SKU 表）。
+  // 一个规格 = 一条货品 = 一个条码，规格组合写进 spec、台数写进 qty。
+  // ————————————————————————————————————————————————————————————
+  var SPEC_TEMPLATES = {{ spec_templates | tojson }};
+  var SPEC_HINTS = {{ spec_hints | tojson }};   // 类目码 → 一级类目名（挑规格模板用）
+  var defs = [];    // 规格维度 [{name, values:[]}]
+  // 规格行：字段照渔枢「规格 · 价格 · 库存」（成本价 / 渔货价 / 建议售价 / 市场价 / 库存 / 货号）
+  var srows = [];   // [{spec, cost, fish, suggest, market, qty, code}]
+  // 批量设置输入框（名字就是服务端字段名）：多规格时当行内留空的默认值，不加规格时就是单条货的值
+  var BATCH_IDS = { cost: 'm-cost', fish: 'm-fish', suggest: 'm-suggest', market: 'm-base', qty: 'm-count' };
+
+  // 批量设置当前值（空串表示没填）
+  function batchDefaults() {
+    var out = {};
+    Object.keys(BATCH_IDS).forEach(function (k) { out[k] = val(BATCH_IDS[k]); });
+    return out;
+  }
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function val(id) { var el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; }
+
+  // —— 系统生成货号（2026-10-12 用户要求）——
+  // 非扫码场景：货上没贴清单号，点按钮让系统发一个「YC + 年月 + 4 位流水」的货号。
+  // 号由服务端查库发（同前缀取最大 +1），两个人同时点也不会撞。
+  function genSkuCode() {
+    var el = document.getElementById('m-sku');
+    if (!el) { return; }
+    fetch('/wms/batches/{{ batch.id }}/next-sku', { headers: { 'Accept': 'application/json' } })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.sku_code) { throw new Error('empty'); }
+        el.value = d.sku_code;
+        renderSpecTable();     // 多规格那列的货号派生提示跟着刷新
+      })
+      .catch(function () { alert('生成货号失败 —— 刷新页面再点一次'); });
+  }
+  function hasSpecs() {
+    return defs.filter(function (d) { return d.name && d.values.length; }).length > 0;
+  }
+
+  // 有规格 → 矩阵接管（单条那几格收起来）；没规格 → 回到原来那套。
+  // 批量设置卡一直显示（2026-10-12）：它既给多规格当默认值，也是「不加规格」这条货自己的价格与库存。
+  function toggleBlocks() {
+    var on = hasSpecs();
+    ['specTable', 'specSum'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) { el.style.display = on ? '' : 'none'; }
+    });
+    var single = document.getElementById('singleOnly');
+    if (single) { single.style.display = on ? 'none' : ''; }
+    var zone = document.getElementById('specZone');
+    if (zone) { zone.className = on ? 'hl-box' : ''; }
+  }
+
+  // ---------------- 规格维度 ----------------
+  function addSpecRow() { defs.push({ name: '', values: [] }); renderSpecEditor(); rebuildRows(); }
+
+  function renderSpecEditor() {
+    var box = document.getElementById('specEditor');
+    box.innerHTML = '';
+    defs.forEach(function (def, idx) {
+      var row = document.createElement('div');
+      row.className = 'spec-row';
+
+      var nm = document.createElement('input');
+      nm.type = 'text';   // 显式写 type：全局输入框样式是按 input[type=text] 匹配的
+      nm.className = 'spec-name';
+      nm.placeholder = '规格名，如 颜色';
+      nm.value = def.name || '';
+      nm.oninput = function () { def.name = this.value; rebuildRows(); };
+      row.appendChild(nm);
+
+      var tags = document.createElement('div');
+      tags.className = 'tag-input';
+      def.values.forEach(function (v, vi) {
+        var tg = document.createElement('span');
+        tg.className = 'tag';
+        tg.innerHTML = esc(v) + ' <i class="bi bi-x"></i>';
+        tg.querySelector('i').onclick = function () {
+          def.values.splice(vi, 1); renderSpecEditor(); rebuildRows();
+        };
+        tags.appendChild(tg);
+      });
+      var vi2 = document.createElement('input');
+      vi2.type = 'text';
+      vi2.placeholder = '输入候选值后回车，如 黑色';
+      vi2.onkeydown = function (e) {
+        if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          var v = (this.value || '').trim().replace(/,$/, '');
+          if (!v) { return; }
+          if (def.values.indexOf(v) === -1) { def.values.push(v); }
+          this.value = '';
+          renderSpecEditor(); rebuildRows();
+          var boxes = document.querySelectorAll('.spec-row .tag-input input');
+          if (boxes[idx]) { boxes[idx].focus(); }
+        }
+      };
+      tags.appendChild(vi2);
+      row.appendChild(tags);
+
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'btn sm ghost';
+      del.innerHTML = '<i class="bi bi-trash"></i>';
+      del.onclick = function () { defs.splice(idx, 1); renderSpecEditor(); rebuildRows(); };
+      row.appendChild(del);
+
+      box.appendChild(row);
+    });
+  }
+
+  // 分类 → 规格模板 key：填三级码（HA.KC.DFB）时按码查表换成一级名；
+  // 填中文（破壁机 / 家用电器 › 厨房小电 › 破壁机）时直接用整串去匹配（串里含一级名）。
+  function specKeyOf(raw) {
+    var v = String(raw == null ? '' : raw).trim();
+    if (!v) { return ''; }
+    var up = v.toUpperCase();
+    if (SPEC_HINTS[up]) { return SPEC_HINTS[up]; }
+    var first = up.split('.')[0];
+    if (SPEC_HINTS[first]) { return SPEC_HINTS[first]; }
+    return v;
+  }
+
+  // 应用类目规格模板的可用状态（2026-10-12 晚 用户要求）：
+  // 上面没选分类时按钮置灰（.off）—— 但**不加 disabled 属性**，否则点击不派发、
+  // 提示弹不出来。分类一变就刷新状态，进页面先算一次。
+  function refreshTplBtn() {
+    var btn = document.getElementById('tplBtn');
+    if (!btn) { return; }
+    var on = !!val('m-cat');
+    btn.className = on ? 'btn sm ghost' : 'btn sm ghost off';
+    btn.title = on ? '按分类套用该类的既定规格维度' : '请先选择商品的类目！';
+  }
+
+  // 应用类目规格模板：按上面选的分类铺该类的既定维度（口径见 wms/web/router.py 的 _SPEC_TEMPLATES），
+  // 并把多规格矩阵（SKU 组合 + 批量设置那份默认值）一次填出来。
+  // 没选分类 → 给提示、什么都不动（2026-10-12 晚 用户要求）。
+  function applyTpl() {
+    var cat = val('m-cat');
+    if (!cat) { alert('请先选择商品的类目！'); return; }
+    var key = specKeyOf(cat);
+    var tpl = null, hit = '';
+    if (SPEC_TEMPLATES) {
+      for (var k in SPEC_TEMPLATES) {
+        if (k === '_default') { continue; }
+        if (key.indexOf(k) >= 0 || k.indexOf(key) >= 0) { tpl = SPEC_TEMPLATES[k]; hit = k; break; }
+      }
+    }
+    if (!tpl) { tpl = (SPEC_TEMPLATES && SPEC_TEMPLATES['_default']) || []; }
+    defs = tpl.map(function (t) { return { name: t.name, values: (t.values || []).slice() }; });
+    renderSpecEditor(); rebuildRows();
+    var note = document.getElementById('skuGenNote');
+    if (note) {
+      note.textContent = (hit ? '已按类目「' + hit + '」带入规格维度：'
+        : '类目「' + cat + '」没有专属模板，先按默认那套带入：')
+        + defs.map(function (d) { return d.name; }).join(' / ');
+    }
+  }
+
+  // 按照规则生成 SKU（2026-10-12 用户要求，照渔枢）：把上面手填的规格维度做组合，重建矩阵。
+  // 已填过的行按「规格组合」原地保留（rebuildRows 里那份 keep），数量与价格不会被冲掉。
+  function genSkuMatrix() {
+    var note = document.getElementById('skuGenNote');
+    var dims = defs.filter(function (d) { return d.name && d.values.length; });
+    if (!dims.length) {
+      if (note) { note.textContent = '先加一个规格维度并填上候选值（如 颜色 → 黑 / 白）'; }
+      return;
+    }
+    rebuildRows();
+    if (note) { note.textContent = '已按规则生成 ' + srows.length + ' 个 SKU 组合'; }
+  }
+
+  // ---------------- 规格矩阵 ----------------
+  function cartesian(list) {
+    var out = [];
+    function walk(i, prefix) {
+      if (i >= list.length) { out.push(prefix); return; }
+      var d = list[i];
+      if (!d.name || !d.values.length) { walk(i + 1, prefix); return; }
+      d.values.forEach(function (v) { walk(i + 1, prefix ? prefix + ' / ' + v : v); });
+    }
+    walk(0, '');
+    return out;
+  }
+
+  function rebuildRows() {
+    var combos = cartesian(defs.filter(function (d) { return d.name && d.values.length; }))
+      .filter(function (s) { return s; });
+    var keep = {};
+    srows.forEach(function (r) { keep[r.spec] = r; });
+    var b = batchDefaults();
+    srows = combos.map(function (spec) {
+      var old = keep[spec] || {};
+      return {
+        spec: spec,
+        cost: old.cost || b.cost || '',
+        fish: old.fish || b.fish || '',
+        suggest: old.suggest || b.suggest || '',
+        market: old.market || b.market || '',
+        qty: old.qty || b.qty || '1',
+        code: old.code || ''
+      };
+    });
+    renderSpecTable();
+  }
+
+  function numCell(r, key, ph, min, step) {
+    var td = document.createElement('td');
+    var ip = document.createElement('input');
+    ip.type = 'number'; ip.min = min; ip.step = step;
+    ip.className = key === 'qty' ? 'qty' : '';
+    // 价格留空 = 用上面的批量设置（服务端也会这么兜底，这里只给个提示）
+    ip.placeholder = ph;
+    ip.value = r[key] || '';
+    ip.oninput = function () { r[key] = this.value; refreshSum(); };
+    td.appendChild(ip);
+    return td;
+  }
+
+  function renderSpecTable() {
+    var body = document.getElementById('specBody');
+    if (!body) { return; }
+    body.innerHTML = '';
+    toggleBlocks();
+    var base = val('m-sku');
+    var many = srows.length > 1;
+    srows.forEach(function (r, idx) {
+      var tr = document.createElement('tr');
+      var td0 = document.createElement('td');
+      td0.className = 'sp';
+      td0.innerHTML = esc(r.spec);
+      tr.appendChild(td0);
+      // 列序照渔枢：成本价 / 渔货价 / 建议售价 / 市场价 / 库存 / SKU 编码（渔集叫货号）
+      tr.appendChild(numCell(r, 'cost', '同上', '0', '0.01'));
+      tr.appendChild(numCell(r, 'fish', '同上', '0', '0.01'));
+      tr.appendChild(numCell(r, 'suggest', '同上', '0', '0.01'));
+      tr.appendChild(numCell(r, 'market', '同上', '0', '0.01'));
+      tr.appendChild(numCell(r, 'qty', '1', '1', '1'));
+      var last = document.createElement('td');
+      var ci = document.createElement('input');
+      ci.type = 'text';
+      ci.placeholder = many ? ((base || '货号') + '-' + pad2(idx + 1)) : (base || '同上');
+      ci.value = r.code || '';
+      ci.oninput = function () { r.code = this.value; };
+      last.appendChild(ci);
+      tr.appendChild(last);
+      var del = document.createElement('td');
+      var db = document.createElement('button');
+      db.type = 'button'; db.className = 'btn sm ghost';
+      db.innerHTML = '<i class="bi bi-x"></i>';
+      db.onclick = function () { srows.splice(idx, 1); renderSpecTable(); };
+      del.appendChild(db);
+      tr.appendChild(del);
+      body.appendChild(tr);
+    });
+    refreshSum();
+  }
+
+  function refreshSum() {
+    var total = 0;
+    srows.forEach(function (r) { total += parseInt(r.qty || val(BATCH_IDS.qty) || '1', 10) || 1; });
+    var sum = document.getElementById('specSum');
+    if (sum && srows.length) {
+      sum.innerHTML = '共 <b>' + srows.length + '</b> 个规格 · 合计 <b>' + total +
+        '</b> 台（入库库存）—— 每个规格一个条码，价格与库存记在各自那条货上';
+    }
+  }
+
+  // 批量设置（照渔枢）：填了的才覆盖，空的不动（保留逐行微调的结果）
+  function batchFill() {
+    if (!srows.length) { alert('先添加规格并点「按照规则生成 SKU」出组合表，再批量设置'); return; }
+    var b = batchDefaults();
+    var any = Object.keys(BATCH_IDS).filter(function (k) { return b[k]; });
+    if (!any.length) { alert('批量设置里还是空的：先填一个值（比如成本价 / 库存）'); return; }
+    srows.forEach(function (r) {
+      any.forEach(function (k) { r[k] = b[k]; });
+    });
+    renderSpecTable();
+  }
+
+  function toggleMode() {
+    var el = document.getElementById('m-mode');
+    var box = document.getElementById('bulkOnly');
+    if (box && el) { box.style.display = el.value === 'bulk' ? '' : 'none'; }
+  }
+
+  // 提交前把规格行塞进隐藏字段（键名就是服务端字段名 _specs_from_form 认的那几个）；
+  // 没填规格就留空（服务端走老的单条逻辑，值取上面批量设置那几个输入框）
+  function syncSpecs() {
+    var hid = document.getElementById('specsJson');
+    if (hid) {
+      hid.value = srows.length ? JSON.stringify(srows.map(function (r) {
+        return {
+          spec: r.spec,
+          qty: r.qty,
+          purchase_cost: r.cost,
+          selling_price: r.fish,
+          suggest_price: r.suggest,
+          base_price: r.market,
+          sku_code: r.code
+        };
+      })) : '';
+    }
+    return true;
+  }
+
+  renderSpecEditor();
+  renderSpecTable();
+  // 分类一变，「应用类目规格模板」的置灰状态跟着变（2026-10-12 晚 用户要求）
+  var mcat = document.getElementById('m-cat');
+  if (mcat) {
+    mcat.addEventListener('input', refreshTplBtn);
+    mcat.addEventListener('change', refreshTplBtn);
+  }
+  refreshTplBtn();
+</script>
+{% endif %}
+{% endblock %}

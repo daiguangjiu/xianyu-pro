@@ -1,0 +1,1421 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{# 库位选择器：值仍存在隐藏的 <select id="location"> 里，页面照旧 $('location').value #}
+{% from "_warehouse_picker.html" import warehouse_picker with context %}
+{% set SCANNER = 1 %}
+{% block title %}扫码检测工作台{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 标签预览的那套样式（服务端按毫米坐标画出来的那张纸） */
+  {{ label_preview_css | safe }}
+  .bench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+  @media (max-width: 1100px) { .bench { grid-template-columns: minmax(0, 1fr); } }
+  #scanInput { width: 100%; font-size: 16px; padding: 10px 12px; }
+  .scan-hint { display:flex; align-items:center; gap:8px; color: var(--c-text-muted); font-size:12px; margin-top:6px; }
+  .scan-dot { width:8px; height:8px; border-radius:50%; background: var(--c-border); }
+  .scan-dot.on { background: var(--c-ok); box-shadow: 0 0 0 4px rgba(34,197,94,.15); }
+  .item-row { display:grid; grid-template-columns: 34px minmax(0,1fr) 132px minmax(0,240px); gap:10px;
+    align-items:center; padding:8px 0; border-bottom:1px solid var(--c-border); }
+  .item-row .no { color: var(--c-text-muted); font-size:12px; }
+  .item-row .nm { font-weight:600; font-size:14px; }
+  /* 「不影响使用」的降级项（面板 / 显示、配件齐全）打个主色小标，列表一眼分得出来 */
+  .minor-tag { display:inline-block; margin-left:6px; padding:1px 7px; border-radius:999px;
+    font-size:11px; font-weight:500; vertical-align:middle; cursor:help;
+    background: var(--c-primary-soft); color: var(--c-primary-hover);
+    border:1px solid var(--c-primary-border); }
+  .item-row.hit-safety { background: rgba(239,68,68,.06); }
+  .res-btns { display:flex; gap:6px; }
+  .res-btn { border:1px solid var(--c-border); background:#fff; border-radius:6px; padding:4px 10px; cursor:pointer;
+    font-size:12px; color: var(--c-text-muted); }
+  .res-btn.pass.active { background: rgba(34,197,94,.12); border-color: var(--c-ok); color: var(--c-ok); font-weight:700; }
+  .res-btn.fail.active { background: rgba(239,68,68,.12); border-color: var(--c-danger); color: var(--c-danger); font-weight:700; }
+  .res-btn.na.active { background: var(--c-bg); color: var(--c-text); }
+  /* 不合格原因：整行输入框（2026-10-13 用户拍板）—— 判 × 就摊在检查项正下方一整行，
+     写清坏在哪；**必填**，空着提交红框提示。
+     高度 / 字号 / 边框 / focus 光环全部交给 base.html 的全局输入样式（38px / 14px），
+     不再单独缩一号 —— 用户截图里那圈黑粗边就是缩放覆盖出来的别扭样子 */
+  .item-row .fail-desc { grid-column: 1 / -1; width:100%; }
+  .fail-desc.err { border-color: var(--c-danger); background: rgba(239,68,68,.05);
+    box-shadow: 0 0 0 3px rgba(239,68,68,.12); }
+  /* 建议 C 报修时：检修判定区整块高亮，提醒必须选一个维修方式（2026-10-13 用户拍板）*/
+  .zone-fix.urge { border-color: var(--c-danger); background: rgba(239,68,68,.05);
+    box-shadow: 0 0 0 3px rgba(239,68,68,.08); }
+  .zone-fix .repair-hint { display:none; margin: 0 0 10px; padding: 8px 12px; border-radius:8px;
+    font-size:13px; background: rgba(239,68,68,.10); border:1px solid var(--c-danger);
+    color: var(--c-danger); font-weight:600; }
+  .zone-fix.urge .repair-hint { display:block; }
+  /* 检测台分区（2026-10-10）：全新判定 / 检查项目 / 检修判定 三块分开、各有标题，
+     勾选框做大到 22px、整块 label 都能点 —— 现场一眼看出「先勾哪个」，戴手套也点得准 */
+  .zone { border:1px solid var(--c-border); border-radius:10px; padding:12px 14px;
+    margin:10px 0 14px; background: var(--c-bg); }
+  .zone-new { border-color: var(--c-primary); background: rgba(13,127,116,.06); }
+  .zone-hd { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; margin-bottom:10px; }
+  .zone-hd b { font-size:14.5px; }
+  .zone-hd .bi { color: var(--c-primary); }
+  .zone-tip { color: var(--c-text-muted); font-size:12.5px; }
+  .checks { display:grid; gap:10px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .big-check { display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer;
+    border:1.5px solid var(--c-border); border-radius:10px; background:#fff; }
+  .big-check:hover { border-color: var(--c-primary); }
+  .big-check input { width:22px; height:22px; flex:0 0 22px; margin:0; cursor:pointer;
+    accent-color: var(--c-primary); }
+  .big-check .bc-txt { display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .big-check .bc-title { font-weight:600; font-size:14px; }
+  .big-check .bc-sub { color: var(--c-text-muted); font-size:12px; }
+  .big-check:has(input:checked) { border-color: var(--c-primary); background: rgba(13,127,116,.08); }
+  .big-check:has(input:checked) .bc-title { color: var(--c-primary); }
+  /* 判「?」存疑（2026-10-11）：提交前最后一道出口，做成橙色高亮卡片、勾上变实心橙 ——
+     现场反馈「这一条太不显眼，不知道要干什么」 */
+  .ask-check { margin: var(--s-3) 0; width:100%; border:2px dashed var(--c-warning-border, #fde68a);
+    background: linear-gradient(180deg, #fffaf0 0%, #fffdf7 100%); }
+  .ask-check:hover { border-color: var(--c-warning-fg, #b45309); }
+  .ask-check .bc-title { color: var(--c-warning-fg, #b45309); font-size:14.5px; font-weight:700; }
+  .ask-check .bc-sub { line-height:1.6; }
+  .ask-check .ask-ico { margin-left:auto; font-size:22px; color: var(--c-warning, #f59e0b); }
+  .ask-check:has(input:checked) { border-style:solid; border-color: var(--c-warning-fg, #b45309);
+    background:#fff5e0; box-shadow: 0 0 0 3px rgba(245,158,11,.2); }
+  .ask-check:has(input:checked) .bc-title { color:#7c2d12; }
+  .ask-check:has(input:checked) .ask-ico { color:#b45309; }
+  .suggest { position: sticky; top: 112px; }
+  .suggest .grade { font-size:32px; font-weight:800; letter-spacing:1px; }
+  /* ④ 渔货价（2026-10-08）：系统按「分级规则」里的价格系数算出来的默认金额。
+     它是最终定价的落点，所以从标题到数字都做得「亮」一点 —— 别让人当成随便一个只读字段，
+     同时给了改价口子（留空就用系统默认）。 */
+  .price-card { margin-top: var(--s-3); padding: 12px 14px 14px; border-radius: var(--r-input, 10px);
+    border: 1px solid var(--c-primary-soft, #bfe3df); position: relative; overflow: hidden;
+    background: linear-gradient(135deg, #e9faf6 0%, #f6fffd 52%, #ffffff 100%); }
+  .price-card::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px;
+    background: linear-gradient(180deg, var(--c-primary, #0d7f74), #45c3b6); }
+  /* 标题行允许换行：右列面板本来就窄，徽标不能把卡片撑破 */
+  .price-card .pc-head { display:flex; align-items:center; gap:6px; font-size:12.5px;
+    font-weight:700; letter-spacing:.06em; color: var(--c-primary, #0d7f74);
+    flex-wrap:wrap; row-gap:4px; }
+  .price-card .pc-head .bi { font-size:14px; }
+  .price-card .pc-badge { margin-left:auto; font-size:10.5px; font-weight:600; letter-spacing:0;
+    white-space:nowrap; color: var(--c-primary, #0d7f74); background:#ffffffcc;
+    border:1px solid var(--c-primary-soft, #bfe3df); border-radius:999px; padding:1px 8px; }
+  .price-card .pc-num { font-size:34px; font-weight:800; color: var(--c-primary, #0d7f74);
+    line-height:1.25; font-variant-numeric: tabular-nums; letter-spacing:-.5px; }
+  /* 只是参考的档位（B / C / D，检测不写价）：数字压暗，别让人当成将落的价 */
+  .price-card .pc-num.ref { color: var(--c-text-muted); font-size:28px; font-weight:700; }
+  /* 基准价 → 渔货价：红是花的（基准），主色是落的（渔货价），中间写明系数，一眼看出差多少 */
+  .price-card .pc-vs { display:flex; align-items:center; gap:10px; margin-top:8px; padding:8px 10px;
+    background:#fff; border:1px dashed var(--c-primary-soft, #bfe3df); border-radius:8px; }
+  .pc-vs .vs-col { display:flex; flex-direction:column; min-width:0; }
+  .pc-vs .vs-t { font-size:10.5px; color:var(--c-text-muted); letter-spacing:.04em; }
+  .pc-vs .vs-n { font-size:17px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.3; }
+  .pc-vs .vs-n.base { color: var(--c-danger, #d92d20); text-decoration: line-through;
+    text-decoration-color: var(--c-danger, #d92d20); text-decoration-thickness:1px; }
+  .pc-vs .vs-n.final { color: var(--c-primary, #0d7f74); font-size:20px; }
+  .pc-vs .vs-n.na { color: var(--c-text-muted); }
+  .pc-vs .vs-mid { flex:1 1 auto; display:flex; flex-direction:column; align-items:center;
+    gap:2px; color:var(--c-text-muted); font-size:10.5px; white-space:nowrap; }
+  .pc-vs .vs-mid .bi { font-size:13px; }
+  .pc-vs .vs-diff { font-weight:700; }
+  .pc-vs .vs-diff.up { color: var(--c-danger, #d92d20); }
+  .pc-vs .vs-diff.down { color: var(--c-primary, #0d7f74); }
+  @media (max-width: 560px) { .pc-vs .vs-n { font-size:16px } .pc-vs .vs-n.final { font-size:18px } }
+  .price-card .pc-sub { font-size:11.5px; color: var(--c-text-muted); line-height:1.75; }
+  .price-card.flash .pc-num { animation: pcPop .5s ease; }
+  @keyframes pcPop { 0% { transform:scale(.85); opacity:.25 } 60% { transform:scale(1.07) } 100% { transform:scale(1) } }
+  .price-card .pc-field { margin: var(--s-2) 0 0; }
+  .price-card .pc-field label { font-size:11.5px; }
+  .price-card .pc-field input { background:#fff; }
+  .reasons { font-size:12px; color: var(--c-text-muted); line-height:1.7; }
+  .reasons li { margin-left: 16px; }
+  .kbd { display:inline-block; border:1px solid var(--c-border); border-bottom-width:2px; border-radius:4px;
+    padding:1px 6px; font-size:11px; background: var(--c-bg); }
+  /* ② 商品入库信息：一格一个字段，窄屏自动并成一列；产品名太长时跨两格 */
+  .kv-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(258px, 1fr));
+    gap:8px 18px; font-size:13px; }
+  .kv-cell { display:grid; grid-template-columns:92px minmax(0,1fr); gap:6px 10px; align-items:baseline;
+    border-bottom:1px dashed var(--c-border); padding-bottom:6px; }
+  .kv-cell .k { color:var(--c-text-muted); }
+  .kv-cell .v { min-width:0; overflow-wrap:anywhere; font-weight:500; }
+  /* 基准价是出价的基数（渔货价 = 基准价 × 系数），给它红字 + 大一号的待遇 */
+  .kv-cell .v.price-hot { color: var(--c-danger, #d92d20); font-size:18px; font-weight:800;
+    font-variant-numeric: tabular-nums; letter-spacing:-.2px; }
+  .kv-cell .v.price-hot .unit { font-size:11px; font-weight:600; color:var(--c-text-muted);
+    margin-left:4px; letter-spacing:0; }
+  .kv-cell.wide { grid-column:span 2; }
+  .kv-cell.extra .v { color:var(--c-primary-hover); }
+  .kv-sep { grid-column:1 / -1; font-size:12px; color:var(--c-text-muted);
+    border-top:1px solid var(--c-border); padding-top:8px; margin-top:2px; }
+  /* 拍照留档（2026-10-11）：一次可以选多张、也能分几次加；每张右上角一个 × 删掉它。
+     × 默认半透明，鼠标移上去才实心 —— 免得误点。 */
+  .photo-strip { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .photo-item { position:relative; width:64px; height:64px; }
+  .photo-item img { display:block; width:100%; height:100%; object-fit:cover;
+    border-radius:6px; border:1px solid var(--c-border); }
+  .photo-item .ph-del { position:absolute; top:-6px; right:-6px; width:20px; height:20px; padding:0;
+    border:1px solid var(--c-error-border, #fecaca); border-radius:999px; background:#fff;
+    color:var(--c-error, #ef4444); font-size:13px; line-height:1; cursor:pointer; opacity:.85; }
+  .photo-item .ph-del:hover { opacity:1; background:var(--c-error, #ef4444); color:#fff; }
+  .photo-count { font-size:12px; color:var(--c-text-muted); margin-top:6px; display:flex;
+    gap:8px; align-items:center; flex-wrap:wrap; }
+  /* 检修后条码 + 打标签：现场是「填码 → 打标 → 贴标 → 提交」，一个格子里做完 */
+  .own-row { display:flex; gap:8px; align-items:center; }
+  .own-row input { flex:1 1 auto; min-width:0; }
+  .own-row .btn { white-space:nowrap; }
+  .label-state { color: var(--c-primary); font-weight:600; }
+  .label-box { margin-top:8px; border:1px solid var(--c-border); border-radius:8px; padding:6px 10px 10px; }
+  .label-box summary { cursor:pointer; font-size:12.5px; }
+  .lbl-preview { margin-top:8px; display:flex; justify-content:center; flex-wrap:wrap; }
+  .own-state { display:block; font-size:12px; margin-top:6px; }
+  .own-state.ok { color: var(--c-ok); }
+  .own-state.warn { color: var(--c-warn); }
+  /* ---------------------------------------------- 条码不一致的确认弹窗（贴错标必须停下来看一眼） */
+  .mask { position:fixed; inset:0; background:rgba(15,23,42,.45); z-index:60;
+    display:flex; align-items:center; justify-content:center; padding:16px; }
+  .dialog { background:#fff; border-radius:12px; padding:18px 20px; width:min(460px, 100%);
+    box-shadow:0 18px 48px rgba(0,0,0,.22); }
+  .dialog h3 { margin:0 0 10px; font-size:16px; }
+  .cd-cmp { display:grid; gap:6px; background:var(--c-bg); border:1px solid var(--c-border);
+    border-radius:8px; padding:10px 12px; }
+  .cd-cmp > div { display:flex; gap:10px; align-items:baseline; justify-content:space-between; }
+  .cd-cmp span { color:var(--c-text-muted); font-size:12.5px; flex:0 0 auto; }
+  .cd-cmp b { font-size:14px; word-break:break-all; text-align:right; }
+  .cd-acts { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
+  /* 复检提示条（扫到检测过的货）：跟着提交按钮上面，看一眼就知道现在是回看还是覆盖 */
+  #recheckBar { margin:10px 0 0; font-size:12.5px; line-height:1.65; }
+  #recheckBar .btn { margin-top:8px; }
+  .photo-strip img { width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--c-border); }
+  #banner { border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:14px; }
+  #banner.ok { background: rgba(34,197,94,.12); border:1px solid var(--c-ok); }
+  #banner.warn { background: rgba(245,158,11,.12); border:1px solid var(--c-warn); }
+  #banner.err { background: rgba(239,68,68,.12); border:1px solid var(--c-danger); }
+  .pool { max-height: 320px; overflow-y: auto; }
+  /* ---------------------------------------------------------- 手机竖排 */
+  /* 检测台的 rows 是 JS 生成的四列栅格：窄屏改成「名称 / 按钮 / 描述」三行堆叠，
+     并把通过 / 不合格 / 不可用三个按钮撑到 40px 触控区（戴手套也好按） */
+  @media (max-width: 900px) {
+    .suggest { position: static; }
+    .item-row { grid-template-columns: 34px minmax(0,1fr); gap: 8px 10px; padding: 10px 0; }
+    .item-row > .res-btns { grid-column: 2; }
+    /* 原因框保持整行（v1.0.33 口径），不跟按钮挤进第二列 */
+    .item-row > .fail-desc { grid-column: 1 / -1; }
+    .res-btn { padding: 6px 14px; }
+  }
+  @media (max-width: 560px) {
+    .kv-grid { grid-template-columns: minmax(0,1fr); }
+    .kv-cell.wide { grid-column:auto; }
+    .item-row { grid-template-columns: minmax(0,1fr); gap: 8px; }
+    .item-row > .res-btns { grid-column: 1; }
+    .res-btns { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 6px; width: 100%; }
+    .res-btn { min-height: 42px; padding: 8px 0; font-size: 13px; }
+    .big-check { padding: 12px; }
+    .big-check input { width: 24px; height: 24px; flex: 0 0 24px; }
+    .photo-strip img { width: 76px; height: 76px; }
+    .suggest .grade { font-size: 28px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>① 扫码（键盘仿真 / 摄像头均可）</h2>
+  <input id="scanInput" type="text" placeholder="扫系统条码（W 占位码）或供应商货号；摄像头扫码工具（扫码王等）也是键盘仿真，同样可用"
+         autocomplete="off" autofocus>
+  <div class="scan-hint"><span class="scan-dot" id="scanDot"></span>
+    <span id="scanState">等待扫码…</span>
+    <span class="muted">·</span>
+    <span class="muted">货号就是供应商清单（Excel 导入）里那个编号，扫它一样认货</span>
+    <span class="muted">·</span>
+    <span class="muted">热键：<span class="kbd">空格</span> 通过 / <span class="kbd">F</span> 不合格 /
+      <span class="kbd">Enter</span> 提交并跳下一台</span>
+  </div>
+  <div id="banner" style="display:none"></div>
+</div>
+
+<div class="bench">
+  <div>
+    {# ② 商品入库信息：扫出来的这一台，按货号从建档档案里带出来的入库资料（2026-10-08） #}
+    <div class="card" id="panel" style="display:none">
+      <h2>② 商品入库信息</h2>
+      <p class="d">扫码枪扫出条码 / 货号后，按<b>货号</b>从建档的商品档案里带出这一台的全部入库信息 ——
+        品牌 / 型号 / 规格 / 序列号 / 成本与基准价 / 批次与供应商 / 入库时间，以及导入时
+        <b>沉淀下来的商品字段</b>（顺序与显示名跟「商品字段」页保持一致）。</p>
+      <div id="itemHead" class="kv-grid" style="margin-bottom:var(--s-3)"></div>
+    </div>
+
+    {# ③ 检测信息：检测员真正要动手判的那一块 #}
+    <div class="card" id="panelInspect" style="display:none">
+      <h2>③ 检测信息</h2>
+      <p class="d">逐项判：<b>√ 可用</b> / <b>× 不可用</b>（原因选填）/ <b>不适用</b>（这台货没有这项，不参与评级）；
+        右边 ④ 引擎建议会实时跟着变。热键：空格 通过、F 不合格、Enter 提交。</p>
+
+      {# 全新判定区（2026-10-10 二次调整）：从检查项下面提到上面、单独划一个区、勾选框做大。
+         勾上「原封未拆 / 拆封未使用」就把下面的检查项默认全部通过 —— 全新机不该让人再点 14 下。 #}
+      <div class="zone zone-new" id="zoneNew">
+        <div class="zone-hd"><b><i class="bi bi-stars"></i> 全新判定（先看这里）</b>
+          <span class="zone-tip">整机没拆封、或拆了没用过：勾上判「N 全新」直接上架，
+            <b>下面检查项会自动全部通过</b>（有不对的再单独改）</span></div>
+        <div class="checks">
+          {# label 里包 input（不写 for）：整块都能点，勾选框也做大到 22px —— 戴手套也点得准 #}
+          <label class="big-check">
+            <input id="sealed" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">原封未拆</span>
+              <span class="bc-sub">封条 / 塑封完好，没开过封</span></span>
+          </label>
+          <label class="big-check">
+            <input id="opened" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">拆封未使用</span>
+              <span class="bc-sub">开过封但没用过：无使用痕迹、配件齐全</span></span>
+          </label>
+        </div>
+      </div>
+
+      {# 2026-10-13 用户拍板：独立的「外观瑕疵描述（A 档发布必填）」输入框撤掉 ——
+         判 A 需要的「差在哪」直接取外观两项（外观成色 / 内腔成色）判 × 时填的
+         不合格原因，不再让人写两遍。 #}
+
+      <h3>检查项目（勾了「全新」自动全部通过；有不对的单独点「×」，× 了必须写原因）</h3>
+      <div id="items"></div>
+      <div class="note" id="autoPassNote" style="display:none"></div>
+
+      {# 检修判定区（2026-10-10 二次调整）：跟「全新」分开单独一个区，语义就是「有故障才勾」。
+         2026-10-13 用户拍板：建议 C 报修时整块高亮 + 必须选一个维修方式（自修 / 官方二选一）；
+         人工勾「缺件严重 / 无维修价值」= 人工判 D 报废。 #}
+      <div class="zone zone-fix" id="zoneFix">
+        <div class="zone-hd"><b><i class="bi bi-tools"></i> 检修判定</b>
+          <span class="zone-tip">有故障才勾，只影响这台货的处置去向（维修仓 / 报修仓 / 拆机件）；
+            没故障就都不勾 ——
+            <b>只缺说明书 / 遥控器这类非关键配件、或面板显示有毛病的，一个都别勾</b>：
+            那属于「不影响使用」，检测项里判 × 会自行落到 B 档照常卖</span></div>
+        <div class="repair-hint" id="repairHint"></div>
+        <div class="checks">
+          <label class="big-check sm">
+            <input id="inhouse" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">故障在「厂内可修清单」</span>
+              <span class="bc-sub">厂内自己能修 → 进维修仓</span></span>
+          </label>
+          <label class="big-check sm">
+            <input id="official" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">故障在「必须官方修清单」</span>
+              <span class="bc-sub">只能官方修 → 进报修仓</span></span>
+          </label>
+          <label class="big-check sm">
+            <input id="missing" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">缺件严重 / 无维修价值</span>
+              <span class="bc-sub">人工判定，勾了就判 <b>D 报废</b>（不具备价值、不可售）；
+                <b>只缺说明书 / 遥控器别勾这里</b>，那是「不影响使用」，自己去判 B 照常卖</span></span>
+          </label>
+        </div>
+      </div>
+      <div class="field-row auto">
+        <div class="field"><label for="location">货架位置（检完顺手上架）</label>
+          {# 库位只能从「仓库与货架」维护的表里选（2026-10-08）；
+             2026-10-11 起换成搜索联想（短码 / 名称 / 拼音首字母 + 常用置顶），
+             全路径太长，几十条一屏挑不过来。值仍是隐藏的 <select id="location"> #}
+          {{ warehouse_picker('location') }}</div>
+        <div class="field"><label for="ownBarcode">检修后条码（规整完贴自己的码）</label>
+          <div class="own-row">
+            <input id="ownBarcode" type="text" placeholder="贴完扫进来；没贴就留空">
+            <button type="button" class="btn sm" id="btnPrintLabel" disabled
+                    title="按当前建议档打一张标签：打完贴到机器上">打印标签</button>
+          </div>
+          <span class="own-state" id="ownCodeState"></span>
+          <div class="hint">打完贴到机器上；
+            <b>在这里打过的，提交检测后自动算「已打印 + 已贴标」</b>，
+            不用再跑去「标签打印与贴标复核」扫一遍
+            <span id="labelPrintState" class="label-state"></span></div>
+          <details class="label-box" id="labelBox">
+            <summary>标签长什么样（点开看）</summary>
+            <div class="lbl-preview" id="labelPreview">扫完货这里自动出预览</div>
+            <div class="muted" id="labelPreviewMeta"></div>
+          </details>
+        </div>
+        <div class="field"><label for="note">备注</label><input id="note" type="text" placeholder="选填"></div>
+      </div>
+      {# 拍照留档（2026-10-11 用户：要「多图上传 + 能删图」）：
+         去掉 capture —— 手机上带 capture 只会开相机、一次一张；不带的话系统弹「拍照 / 相册」，
+         相册里可以一次勾多张，也能分几次接着加。 #}
+      <h3>拍照留档（选填，争议时是唯一凭证）</h3>
+      <input id="photoInput" type="file" accept="image/*" multiple>
+      <div class="photo-strip" id="photos"></div>
+      <div class="photo-count" id="photoCount"></div>
+    </div>
+  </div>
+
+  <div class="suggest">
+    <div class="card">
+      <h2>④ 引擎建议</h2>
+      <div class="grade" id="suggestGrade">—</div>
+      <div class="muted" id="ruleTitle" class="hint" style="margin-bottom:var(--s-2)"></div>
+      <ul class="reasons" id="reasons"></ul>
+      {# 渔货价：系统按分级规则的价格系数算出的默认金额，可改（2026-10-08） #}
+      <div class="price-card" id="priceCard">
+        <div class="pc-head"><i class="bi bi-cash-coin"></i> 渔货价
+          <span class="pc-badge" title="按「分级规则」里该档位的价格系数算出来的默认金额，可改">系统默认</span></div>
+        {# 基准价 → 渔货价：红的是花的（基准价），主色是落的（渔货价），中间写系数与差额 #}
+        <div class="pc-vs" id="priceVs" style="display:none">
+          <div class="vs-col"><span class="vs-t">基准价</span>
+            <span class="vs-n base" id="vsBase">—</span></div>
+          <div class="vs-mid"><i class="bi bi-arrow-right"></i>
+            <span id="vsFactor">×—</span>
+            <span class="vs-diff" id="vsDiff"></span></div>
+          <div class="vs-col"><span class="vs-t">渔货价</span>
+            <span class="vs-n final" id="vsFinal">—</span></div>
+        </div>
+        <div class="pc-num" id="priceNum">—</div>
+        <div class="pc-sub" id="priceSub">扫完条码、勾完检项，这里自动按「等级 × 价格系数」出价</div>
+        {# 改价（2026-10-11）：N/S/A 留空 = 用系统按系数算的默认价；B/C/D 留空 = 这档不写价，
+           填了就按人工定价落库（会记审计）。标签写通用的，具体口径由页面按档位刷新。 #}
+        <div class="field pc-field"><label for="manualPrice">改价（人工定价；留空 = 按该档默认）</label>
+          <input id="manualPrice" type="number" step="0.01" min="0" placeholder="系统默认"
+                 inputmode="decimal" disabled>
+          <div class="hint" id="floorHint">扫完条码、勾完检项后，这里写清最低能填多少</div></div>
+      </div>
+      <div class="note warn" id="blockedNote" style="display:none">
+        没有规则完全命中，保守判 B —— 请人工确认后再提交。
+      </div>
+      <div class="field" style="margin-top:var(--s-3)"><label for="finalGrade">最终档位（覆盖引擎建议需填理由）</label>
+        <select id="finalGrade">
+          <option value="">跟随引擎建议</option>
+          {% for v, t in grades %}<option value="{{ v }}">{{ t }}</option>{% endfor %}
+        </select></div>
+      <div class="field" id="overrideBox" style="display:none"><label for="override">覆盖理由（必填）</label>
+        <input id="override" type="text" placeholder="如：外观太差，按 B 处理"></div>
+      {# 扫到检测过的货：这里是「回看历史 / 复检中」的提示条（2026-10-10） #}
+      <div class="note warn" id="recheckBar" style="display:none">
+        <span id="recheckText"></span>
+        <button type="button" class="btn sm" id="rcSwitch" style="display:none">我要重新检测（覆盖上一轮）</button>
+      </div>
+      {# 判「?」存疑（2026-10-11 用户：这一条要重点强调，否则没人知道要干什么）：
+         它是提交前最后一道「拿不准怎么办」的出口 —— 做成橙色高亮卡片，勾上整块变实心橙。
+         放在提交按钮正上方，视线不用来回找。 #}
+      <label class="big-check ask-check" id="uncertainBox">
+        <input id="uncertain" type="checkbox">
+        <span class="bc-txt">
+          <span class="bc-title">判「?」存疑 —— 进复检池，不硬判</span>
+          <span class="bc-sub">拿不准就勾这里：<b>不写等级、不进可售仓</b>，这台进复检池等人复核。
+            硬判错档要退货退款，存疑只是多一道复核</span>
+        </span>
+        <i class="bi bi-question-circle ask-ico"></i>
+      </label>
+      <button class="btn primary" id="submitBtn" style="width:100%">提交检测（Enter）</button>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card flush">
+    <h2>待检池（{{ pending | length }}）</h2>
+    <div class="pool">
+      {% if pending %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>显示编码</th><th>品牌型号</th><th>入库</th></tr></thead>
+        <tbody>{% for it in pending %}
+          <tr><td class="nowrap"><a href="/wms/inspect?code={{ it.barcode }}">{{ it.display_code }}</a></td>
+            <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td><td class="nowrap muted">{{ it.created_at | dt }}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+      {% else %}{{ bits.empty('待检池空了') }}{% endif %}
+    </div>
+  </div>
+  <div class="card flush">
+    <h2>复检池（{{ recheck | length }}，不隔夜）</h2>
+    <div class="pool">
+      {% if recheck %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>显示编码</th><th>品牌型号</th><th>标记时间</th></tr></thead>
+        <tbody>{% for it in recheck %}
+          <tr><td class="nowrap"><a href="/wms/inspect?code={{ it.barcode }}">{{ it.display_code }}</a></td>
+            <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td><td class="nowrap muted">{{ it.updated_at | dt }}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+      {% else %}{{ bits.empty('没有存疑待复检的货') }}{% endif %}
+    </div>
+  </div>
+</div>
+
+{# 扫到「已经检测过的货」的确认弹窗（2026-10-10）：再提交一次就是复检，会覆盖上一轮记录，得先问一句 #}
+<div class="mask" id="recheckMask" style="display:none">
+  <div class="dialog">
+    <h3>这台货已经检测过</h3>
+    <p class="d" style="margin:0 0 10px" id="rcHead"></p>
+    <div class="cd-cmp">
+      <div><span>上一轮</span><b id="rcRound"></b></div>
+      <div><span>上一轮结论</span><b id="rcGrade"></b></div>
+      <div><span>检测员 / 时间</span><b id="rcWho"></b></div>
+    </div>
+    <p class="d" style="margin:10px 0 0" id="rcTip"></p>
+    <div class="cd-acts">
+      <button type="button" class="btn" id="rcCancel">算了，先看历史</button>
+      <button type="button" class="btn primary" id="rcOk">重新检测（覆盖上一轮）</button>
+    </div>
+  </div>
+</div>
+
+{# 扫检修后条码时「跟标签上印的对不上」的确认弹窗（2026-10-10）：贴错标是最贵的错，必须停下来让人看一眼 #}
+<div class="mask" id="codeMask" style="display:none">
+  <div class="dialog">
+    <h3 id="cdTitle">这个码跟标签上的对不上</h3>
+    <div class="cd-cmp">
+      <div><span>刚扫进来的</span><b class="mono" id="cdScanned"></b></div>
+      <div><span>标签上印的</span><b class="mono" id="cdLabel"></b></div>
+    </div>
+    <p class="d" id="cdMsg" style="margin:10px 0 0"></p>
+    <p class="d" id="cdHint" style="margin:8px 0 0"></p>
+    <div class="cd-acts">
+      <button type="button" class="btn" id="cdCancel">重新扫</button>
+      <button type="button" class="btn primary" id="cdOk">就用这个码</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---------------------------------------------------------------- 扫码枪检测器
+// 键盘仿真扫码枪（含「扫码王」这类摄像头工具）的特征：连续 5 个字符间隔 < 35ms + 回车结尾。
+// 手打和扫码必须分流，否则手输条码会被识别成扫码。
+const ScannerDetector = (() => {
+  const cfg = { minLength: 5, timeout: 50, endChar: 13 };
+  let buffer = '', lastTs = 0, gap = 999, listeners = [];
+  function reset() { buffer = ''; lastTs = 0; gap = 999; }
+  function emit(text) {
+    const payload = buffer.trim();
+    reset();
+    if (payload.length >= cfg.minLength) listeners.forEach(fn => fn(payload));
+  }
+  function onKey(e) {
+    const ts = performance.now();
+    gap = ts - lastTs;
+    lastTs = ts;
+    if (e.keyCode === cfg.endChar) { emit(buffer); return; }
+    if (e.key && e.key.length === 1) {
+      if (gap > cfg.timeout) buffer = '';
+      buffer += e.key;
+      if (buffer.length >= cfg.minLength) setTimeout(() => { if (buffer.length >= cfg.minLength) emit(buffer); }, cfg.timeout);
+    }
+  }
+  document.addEventListener('keydown', onKey, true);
+  return { onScan: fn => listeners.push(fn), reset };
+})();
+
+let CUR = null;                 // 当前货品
+let RESULTS = {};               // 检测项结果
+let DESCS = {};                 // 不合格描述
+let PHOTOS = [];                // 照片地址
+let SAFETY = [];                // 安全红线项 key
+let PENDING_OWN = false;        // 打过标签 → 下一枪扫的是「检修后条码」，不是下一台货
+let LABEL_CODE = '';            // 刚打出来那张标签上印的码（扫进来要跟它比对）
+let RECHECK = null;             // 扫到检测过的货：{round, last} —— 没进复检模式就锁着提交按钮
+const $ = id => document.getElementById(id);
+
+function banner(text, kind) {
+  const el = $('banner');
+  el.textContent = text;
+  el.className = kind || 'ok';
+  el.style.display = 'block';
+}
+
+// 打过标签后，这一枪扫的是「检修后条码」（贴到机器上再扫一次标签上的码），不是下一台货
+function handleScan(code) {
+  $('scanDot').classList.add('on');
+  $('scanState').textContent = '识别到扫码输入：' + code;
+  setTimeout(() => $('scanDot').classList.remove('on'), 400);
+  if (CUR && CUR.item && PENDING_OWN) { applyOwnCode(code); return; }
+  load(code);
+}
+
+ScannerDetector.onScan(code => handleScan(code));
+
+$('scanInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const v = $('scanInput').value.trim();
+    if (v) { $('scanInput').value = ''; handleScan(v); }
+  }
+});
+
+// ---------------------------------------------------------------- 扫检修后条码：跟标签比对
+// （2026-10-10）扫进来的码要跟**刚打出来那张**对得上：
+//   一样 → 直接填；是库里另一台货的码 → 贴错标了，只给「重新扫」；
+//   库里没有 → 可能是他自己的内部码，弹出来确认才填。
+async function applyOwnCode(code) {
+  $('scanState').textContent = '扫到检修后条码：' + code + '（正在跟标签比对…）';
+  try {
+    const res = await fetch('/wms/api/label/check-code?item_id=' + CUR.item.id
+      + '&code=' + encodeURIComponent(code));
+    const d = await res.json();
+    if (!d.ok) { banner(d.message || '没认出这个码', 'warn'); return; }
+    if (d.same) {
+      $('ownBarcode').value = code;
+      $('ownCodeState').className = 'own-state ok';
+      $('ownCodeState').textContent = '✓ ' + (d.message || '');
+      banner((d.message || '就是这个码') + ' —— 已填进「检修后条码」', 'ok');
+      return;
+    }
+    openCodeDialog(d);
+  } catch (err) {
+    banner('比对没走通：' + err, 'warn');
+  }
+}
+
+let CD_CODE = '';
+function openCodeDialog(d) {
+  CD_CODE = d.code || '';
+  $('cdScanned').textContent = d.code || '—';
+  $('cdLabel').textContent = d.label_barcode || '—';
+  $('cdMsg').textContent = d.message || '';
+  // 扫到的是库里另一台货的码 → 不给「就用它」（一码一台，填了也存不进去）
+  const blocked = !!d.other_item;
+  $('cdTitle').textContent = blocked ? '扫到别的货的码了' : '这个码跟标签上的对不上';
+  $('cdOk').style.display = blocked ? 'none' : '';
+  $('cdHint').style.display = blocked ? '' : 'none';
+  if (blocked) {
+    const o = d.other_item;
+    $('cdHint').textContent = '这是 ' + (o.display_code || o.barcode)
+      + (o.status_label ? '（' + o.status_label + '）' : '') + ' 的码 —— 贴错标了。'
+      + '重新扫这台自己的标签；要是已经贴上去了，去货品页把它改回来。';
+  }
+  $('codeMask').style.display = '';
+  $('cdCancel').focus();
+}
+
+function closeCodeDialog() { $('codeMask').style.display = 'none'; }
+
+$('cdCancel').addEventListener('click', () => {
+  closeCodeDialog();
+  $('scanInput').focus();
+});
+
+$('cdOk').addEventListener('click', () => {
+  $('ownBarcode').value = CD_CODE;
+  $('ownCodeState').className = 'own-state warn';
+  $('ownCodeState').textContent = '⚠ 现场确认过：' + CD_CODE + '（跟标签上印的不一致）';
+  closeCodeDialog();
+  banner('已按现场确认填进「检修后条码」：' + CD_CODE
+    + '（跟标签上印的不一样，提交时会照原样存 —— 确认没贴错再提交）', 'warn');
+});
+
+$('codeMask').addEventListener('click', e => {
+  if (e.target === $('codeMask')) { closeCodeDialog(); $('scanInput').focus(); }
+});
+
+// 手填的也给一句提醒（不打断）：跟标签上印的不一样就黄字标出来
+$('ownBarcode').addEventListener('change', () => {
+  const v = $('ownBarcode').value.trim();
+  if (!v || !CUR || !CUR.item || !PENDING_OWN) { return; }
+  if (v !== (LABEL_CODE || CUR.item.barcode)) {
+    $('ownCodeState').className = 'own-state warn';
+    $('ownCodeState').textContent = '⚠ 手填的跟标签上印的（'
+      + (LABEL_CODE || CUR.item.barcode) + '）不一样，提交前确认一下';
+  } else {
+    $('ownCodeState').className = 'own-state ok';
+    $('ownCodeState').textContent = '✓ 跟标签上印的一致';
+  }
+});
+
+async function load(code) {
+  const res = await fetch('/wms/api/item.json?code=' + encodeURIComponent(code));
+  const data = await res.json();
+  if (!data.ok) { banner(data.message, 'err'); return; }
+  CUR = data;
+  RESULTS = {}; DESCS = {}; PHOTOS = [];
+  renderPhotos();                       // 图墙清空（上一台货的照片不带到这一台）
+  SAFETY = data.safety_keys || [];
+  $('panel').style.display = '';
+  $('panelInspect').style.display = '';
+  // ② 商品入库信息：扫货号带出来的就是这一台的全部入库档案
+  renderHead(data.item, data.item.extra_rows || []);
+  // 全新判定两个勾、自动全过提示、改价框都归零 —— 上一台货的勾不能带到下一台（2026-10-10）
+  $('sealed').checked = false; $('opened').checked = false;
+  // 「缺件严重」的手动标记也清掉 —— 下一台判 D 时照旧自动勾（2026-10-13）
+  $('missing').checked = false; delete $('missing').dataset.user;
+  $('inhouse').checked = false; $('official').checked = false;
+  $('zoneFix').classList.remove('urge'); $('repairHint').innerHTML = '';
+  $('autoPassNote').style.display = 'none';
+  $('manualPrice').value = '';
+  $('manualPrice').dataset.below = '';
+  $('manualPrice').dataset.above = '';
+  $('manualPrice').max = '';
+  $('floorHint').textContent = '扫完条码、勾完检项后，这里写清最低能填多少';
+  // 库位回填：值写进隐藏的 select，联想框的文字由选择器自己同步（含历史手填值兜底）
+  wmsLocSet('location', data.item.location_code);
+  $('ownBarcode').value = data.item.own_barcode || '';
+  renderItems(data.template);
+  const twins = data.item.twins || [];
+  banner('已载入 ' + data.item.display_code + '（' + data.template.length + ' 项待检）'
+    + (twins.length ? ' · 这个货号还有 ' + twins.length + ' 台同号货品（' +
+        twins.map(t => t.display_code).join(' / ') + '），扫的是第一台' : ''), 'ok');
+  $('scanInput').value = '';
+  $('btnPrintLabel').disabled = false;
+  $('labelPrintState').textContent = '';
+  PENDING_OWN = false; LABEL_CODE = '';
+  $('ownCodeState').textContent = ''; $('ownCodeState').className = 'own-state';
+  // 检测过的货：先问一句是不是要重新提交（复检 = 新增一轮，覆盖上一轮结论）
+  if (data.tested) { askRecheck(data); } else { resetRecheck(); }
+  refresh();
+  loadLabelPreview();
+}
+
+// ---------------------------------------------------------------- 扫到「检测过的货」
+// 再提交一次就是复检：新增一轮记录、等级与售价按这一轮重算（上一轮留档不删）。
+// 这是覆盖，不能闷头干 —— 弹出来让现场自己选「重新检测」还是「先看历史」。
+function askRecheck(data) {
+  const recs = data.records || [];
+  const last = data.last_record || recs[recs.length - 1] || {};
+  const round = parseInt(last.round, 10) || recs.length || 1;
+  RECHECK = { round: round, last: last };
+  $('rcHead').textContent = (data.item.display_code || data.item.barcode)
+    + '（' + (data.item.title || '这台货') + '）已经提交过 ' + recs.length + ' 次检测了。';
+  $('rcRound').textContent = '第 ' + round + ' 轮';
+  $('rcGrade').textContent = (last.final || '未定级')
+    + (last.reasons && last.reasons.length ? '（' + last.reasons.join('、') + '）' : '');
+  $('rcWho').textContent = (last.tester || '—') + ' / ' + (last.at || '—');
+  $('rcTip').textContent = '现在再提交一次就是「复检」：会新增第 ' + (round + 1)
+    + ' 轮记录，货品的等级与渔货价按这一轮重算 —— 上一轮记录留档不删，但不再作数。';
+  $('recheckMask').style.display = '';
+  $('rcCancel').focus();
+}
+
+function enterRecheck() {
+  const r = RECHECK || {};
+  $('recheckMask').style.display = 'none';
+  $('recheckBar').style.display = '';
+  $('rcSwitch').style.display = 'none';
+  $('recheckText').innerHTML = '<b>复检中（第 ' + ((r.round || 1) + 1) + ' 轮）</b> · 提交后覆盖上一轮（第 '
+    + (r.round || 1) + ' 轮 · ' + ((r.last || {}).final || '未定级') + '）的结论'
+    + ' —— 上一轮记录留档不删，货品等级与渔货价按这一轮重算。';
+  $('submitBtn').textContent = '重新提交检测（覆盖第 ' + (r.round || 1) + ' 轮）';
+  $('submitBtn').disabled = false;
+  banner('已进复检模式：提交后写第 ' + ((r.round || 1) + 1) + ' 轮记录', 'warn');
+  $('submitBtn').focus();
+}
+
+function viewHistory() {
+  const r = RECHECK || {};
+  $('recheckMask').style.display = 'none';
+  $('recheckBar').style.display = '';
+  $('rcSwitch').style.display = '';
+  $('recheckText').innerHTML = '<b>正在回看历史（第 ' + (r.round || 1) + ' 轮 · '
+    + ((r.last || {}).final || '未定级') + '）</b> · 提交按钮锁着，不会覆盖上一轮。';
+  $('submitBtn').textContent = '这台已检测，先点「我要重新检测」';
+  $('submitBtn').disabled = true;
+  $('scanInput').focus();
+}
+
+function resetRecheck() {
+  RECHECK = null;
+  $('recheckMask').style.display = 'none';
+  $('recheckBar').style.display = 'none';
+  $('rcSwitch').style.display = 'none';
+  $('submitBtn').textContent = '提交检测（Enter）';
+  $('submitBtn').disabled = false;
+}
+
+$('rcOk').addEventListener('click', enterRecheck);
+$('rcSwitch').addEventListener('click', enterRecheck);
+$('rcCancel').addEventListener('click', viewHistory);
+$('recheckMask').addEventListener('click', e => {
+  if (e.target === $('recheckMask')) { viewHistory(); }
+});
+
+// ---------------------------------------------------------------- 标签预览与即时打标签
+// （2026-10-10）现场是「填检修后码 → 打标签 → 贴到机器上 → 提交」：
+// 打过的那台提交检测时会自动完成贴标复核，标签打印页直接显示已打印 + 已贴标。
+function suggestGradeNow() {
+  const g = ($('suggestGrade').textContent || '').trim();
+  return (g && g !== '—') ? g : '';
+}
+
+async function loadLabelPreview() {
+  if (!CUR || !CUR.item) return;
+  const grade = suggestGradeNow();
+  try {
+    const res = await fetch('/wms/api/label/preview?item_id=' + CUR.item.id
+      + '&grade=' + encodeURIComponent(grade));
+    const d = await res.json();
+    if (!d.ok) {
+      $('labelPreview').innerHTML = '<span class="muted">（预览不出来：'
+        + (d.message || '未知原因') + '）</span>';
+      return;
+    }
+    $('labelPreview').innerHTML = d.html || '（这张标签没内容）';
+    $('labelPreviewMeta').textContent = (d.footer || '')
+      + ' · 等级按' + (grade ? '当前建议档 ' + grade : '这台现在的档 ' + (CUR.item.grade || 'W'));
+  } catch (err) {
+    $('labelPreview').innerHTML = '<span class="muted">（预览加载失败）</span>';
+  }
+}
+
+$('btnPrintLabel').addEventListener('click', async () => {
+  if (!CUR || !CUR.item) { banner('先扫一台货再打标签', 'warn'); return; }
+  const btn = $('btnPrintLabel');
+  btn.disabled = true;
+  btn.textContent = '打印中…';
+  try {
+    const res = await fetch('/wms/api/label/print', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        item_id: CUR.item.id,
+        grade: suggestGradeNow(),
+        own_barcode: $('ownBarcode').value,
+      }),
+    });
+    const d = await res.json();
+    if (d.html) {
+      $('labelPreview').innerHTML = d.html;
+      $('labelPreviewMeta').textContent = d.footer || '';
+      $('labelBox').open = true;
+    }
+    if (d.ok) {
+      // 打出来了 → 下一枪扫的是「检修后条码」（贴到机器上再扫一次标签上的码）
+      LABEL_CODE = d.barcode || (CUR.item ? CUR.item.barcode : '');
+      PENDING_OWN = true;
+      $('ownCodeState').className = 'own-state ok';
+      $('ownCodeState').textContent = '贴到机器上后，用扫码枪再扫一次标签上的码 → 自动填进上面的框';
+      $('labelPrintState').textContent = '已' + (d.status === 'printed' ? '打印' : '下发到云打印机')
+        + '（' + (d.grade || '') + ' 档）· 贴完提交检测就自动算已贴标';
+      banner('标签已' + (d.status === 'printed' ? '打印' : '下发到云打印机') + '（'
+        + (d.status_label || '') + '）：' + (d.message || ''), 'ok');
+    } else {
+      $('labelPrintState').textContent = '';
+      banner('标签没打成：' + (d.message || '未知原因')
+        + '（已在「标签打印与贴标复核」排队，可在那儿重发）', 'warn');
+    }
+  } catch (err) {
+    banner('标签没打成：网络不通（' + err + '）', 'warn');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '打印标签';
+  }
+});
+
+// 库位回填的兜底（历史手填值补选项 + 联想框同步文字）已收进选择器组件：
+// 见 wms/templates/_warehouse_picker.html 的 window.wmsLocSet(id, value)
+
+function esc(text) {
+  return String(text === null || text === undefined ? '' : text)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+const money = v => (v === null || v === undefined || v === '' || isNaN(Number(v)))
+  ? '—' : '¥' + Number(v).toFixed(2);
+
+// ② 商品入库信息：一格一个字段（窄屏自动并成一列），产品名太长时跨两格；
+// 导入沉淀下来的商品字段单独分一段 —— 跟建档字段分开看，顺序与显示名跟「商品字段」页一致
+function renderHead(item, extraRows) {
+  const qty = Number(item.qty || 1);
+  const cells = [
+    ['货号', item.sku_code || '—'],
+    // 数量（2026-10-10）：同一个条码底下有几台 —— 台数错了整批都错，做成胶囊重点摆出来
+    ['数量', '<span class="qty-pill' + (qty > 1 ? ' many' : '') + '">' + qty +
+      '</span> 台（同一个条码）', '', 'qty-hot'],
+    ['显示编码', item.display_code],
+    ['条码', item.barcode],
+    ['产品 / 商品名称', item.product_name || item.title || '—', 'wide'],
+    ['品牌', item.brand || '—'],
+    ['型号', item.model || '—'],
+    ['规格', item.spec || '—'],
+    ['序列号', item.serial_no || '—'],
+    ['品类', item.category_label || item.category || '—'],
+    ['批次', item.batch_no || '—'],
+    ['供应商', item.supplier_name || '—'],
+    ['入库时间', item.inbound_at || '—'],
+    ['采购成本', money(item.purchase_cost)],
+    // 基准价是出价的基数（渔货价 = 基准价 × 系数）：红字 + 大一号，扫进来第一眼就该看见
+    ['基准价', money(item.base_price), '', 'price-hot'],
+    ['检修后码', item.own_barcode || '—（还没贴自己的码）'],
+    ['当前等级 / 状态', (item.grade || '—') + ' / ' + (item.status_label || '—')],
+    ['货架位置', item.location_label || item.location_code || '—（检完填）'],
+  ];
+  let html = cells.map(([k, v, cls, vcls]) =>
+    '<div class="kv-cell' + (cls ? ' ' + cls : '') + '"><span class="k">' + esc(k) +
+    '</span><span class="v' + (vcls ? ' ' + vcls : '') + '"' +
+    (vcls === 'price-hot'
+      ? ' title="渔货价 = 基准价 × 该档价格系数（在「分级规则 → 价格系数」里配）"' : '') +
+    // 数量格带胶囊徽标（HTML），其余一律转义后再进 DOM
+    '>' + (vcls === 'qty-hot' ? v : esc(v)) + '</span></div>').join('');
+  const rows = (extraRows || []).filter(r => String(r.value || '').trim());
+  if (rows.length) {
+    html += '<div class="kv-sep">导入沉淀的商品字段（' + rows.length +
+      '）· 顺序与显示名跟「商品字段」页一致</div>'
+      + rows.map(r => '<div class="kv-cell extra"><span class="k">' + esc(r.label) +
+        '</span><span class="v">' + esc(r.value) + '</span></div>').join('');
+  }
+  $('itemHead').innerHTML = html;
+}
+
+function renderItems(template) {
+  const box = $('items');
+  box.innerHTML = '';
+  template.forEach((it, idx) => {
+    const isSafety = SAFETY.indexOf(it.key) >= 0;
+    const row = document.createElement('div');
+    row.className = 'item-row' + (isSafety ? ' hit-safety' : '');
+    row.innerHTML =
+      '<div class="no">' + (idx + 1) + '</div>' +
+      '<div><div class="nm">' + it.label +
+      // 降级项（面板 / 显示、配件齐全）：判 × 也只是降价值、照常卖（B 档），
+      // 不给这句现场就会误以为要报修 / 报废
+      (it.minor ? ' <span class="minor-tag" title="这项判 × 不影响使用：照常售卖，判 B 缺/瑕疵/可卖">不影响使用</span>' : '') +
+      '</div>' +
+      (isSafety ? '<div class="muted" style="font-size:12px">安全红线：不合格直接危废</div>' : '') +
+      (it.minor ? '<div class="muted" style="font-size:12px">判 × 也只是降价值：这台照常上架卖（B 档）</div>' : '') +
+      (it.cosmetic ? '<div class="muted" style="font-size:12px">判 × 记「A 微瑕」：只降成色，功能照常</div>' : '') +
+      // 每项怎么判（2026-10-13 统一检测项：一套 10 项，带电池款 / 插电款看同一行说明）
+      (it.hint ? '<div class="muted" style="font-size:12px">' + esc(it.hint) + '</div>' : '') + '</div>' +
+      '<div class="res-btns">' +
+      '<button class="res-btn pass" data-k="' + it.key + '" data-v="pass">√</button>' +
+      '<button class="res-btn fail" data-k="' + it.key + '" data-v="fail">×</button>' +
+      // 三态：可用 / 不可用 / 不适用（2026-10-13 用户口径）。「不适用」= 这台货
+      // 没有这项（插电款没有开机电池那一说），**不参与评级判定**，别当成不合格。
+      '<button class="res-btn na" data-k="' + it.key + '" data-v="na" title="这台货没有这一项，不参与评级">不适用</button>' +
+      '</div>' +
+      // 不合格原因整行输入框（2026-10-13 用户拍板）：判 × 就摊在检查项下面一整行，
+      // **必填** —— 空着提交红框提示，别让人说不清这台货到底坏在哪。
+      // type="text" 必须写：全局输入样式挂在 input[type=text] 上，不写 type
+      // 就命中不了 → 浏览器默认黑粗边框裸奔（2026-10-14 用户截图红框那圈）
+      '<input type="text" class="fail-desc" data-d="' + it.key + '" placeholder="不合格原因（必填，写清具体情况，如：外壳划痕 2 处 / 上电无反应）" style="display:none">';
+    box.appendChild(row);
+  });
+  box.querySelectorAll('.res-btn').forEach(btn => {
+    btn.onclick = () => setResult(btn.dataset.k, btn.dataset.v);
+  });
+  box.querySelectorAll('.fail-desc').forEach(inp => {
+    inp.oninput = () => { DESCS[inp.dataset.d] = inp.value; inp.classList.remove('err'); };
+  });
+  // 显隐以「这项判没判 ×」为准统一收口（2026-10-14 用户截图：判 √ 的行也挂着框）——
+  // 不管框是哪条路渲染出来的，这里兜底刷一遍
+  box.querySelectorAll('.fail-desc').forEach(inp => {
+    inp.style.display = RESULTS[inp.dataset.d] === 'fail' ? '' : 'none';
+  });
+}
+
+function setResult(key, value) {
+  if (!CUR) return;
+  RESULTS[key] = value;
+  const row = $('items').querySelector('[data-k="' + key + '"]').closest('.item-row');
+  row.querySelectorAll('.res-btn').forEach(b => b.classList.toggle('active', b.dataset.v === value));
+  const desc = row.querySelector('.fail-desc');
+  desc.style.display = value === 'fail' ? '' : 'none';
+  desc.classList.remove('err');
+  if (value !== 'fail') { desc.value = ''; delete DESCS[key]; }
+  else { desc.focus(); }
+  refresh();
+}
+
+// 维修方式二选一（2026-10-13 用户拍板）：厂内自修 / 官方报修互斥 ——
+// C 报修的货必须二选一，两个都勾没有意义
+function bindRepairExclusive() {
+  const a = $('inhouse'), b = $('official');
+  a.addEventListener('change', () => { if (a.checked) b.checked = false; refresh(); });
+  b.addEventListener('change', () => { if (b.checked) a.checked = false; refresh(); });
+}
+bindRepairExclusive();
+
+// 勾了「全新」：检查项默认全部通过（2026-10-10 二次调整）——
+// 全新机逐项点 14 下没意义，勾一个勾就替人全判通过；要改的单点那一项「×」即可。
+// on=true 全判通过；on=false（两个全新勾都取消）清回未判，让人自己逐项判。
+function setAllPass(on) {
+  const box = $('items');
+  if (box) {
+    box.querySelectorAll('.item-row').forEach(row => {
+      const passBtn = row.querySelector('.res-btn.pass');
+      if (!passBtn) return;
+      const key = passBtn.dataset.k;
+      const desc = row.querySelector('.fail-desc');
+      if (on) {
+        RESULTS[key] = 'pass';
+        row.querySelectorAll('.res-btn').forEach(b => b.classList.toggle('active', b.dataset.v === 'pass'));
+      } else {
+        delete RESULTS[key];
+        row.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+      }
+      if (desc) { desc.style.display = 'none'; desc.value = ''; }
+      delete DESCS[key];
+    });
+  }
+  const note = $('autoPassNote');
+  if (!note) return;
+  note.style.display = on ? '' : 'none';
+  if (on) {
+    const n = box ? box.querySelectorAll('.item-row').length : 0;
+    note.innerHTML = '已按「全新」把 ' + n + ' 项检查<b>默认判为通过</b> —— '
+      + '有不对的（比如有划痕、开不了机）直接点那一项的「×」改掉，以你改的为准。';
+  }
+}
+
+// 热键：空格=通过当前项 / F=不合格当前项（作用于第一个未判项）
+document.addEventListener('keydown', e => {
+  if (!CUR) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const rows = [...$('items').querySelectorAll('.res-btn.pass')].map(b => b.dataset.k);
+  const nextKey = rows.find(k => !RESULTS[k]);
+  if (e.code === 'Space' && nextKey) { e.preventDefault(); setResult(nextKey, 'pass'); }
+  if ((e.key === 'f' || e.key === 'F') && nextKey) { e.preventDefault(); setResult(nextKey, 'fail'); }
+  if (e.key === 'Enter') { e.preventDefault(); submit(); }
+});
+
+// 基准价 → 渔货价 的对比条：红的是花的（基准价，划掉表示它不是卖价），
+// 主色是落的（渔货价），中间写明系数与差了多少（2026-10-10 用户要「一眼看出区别」）
+function fillVs(base, finalPrice, factor) {
+  const vs = $('priceVs');
+  if (!vs) return;
+  if (!base && !finalPrice) { vs.style.display = 'none'; return; }
+  vs.style.display = '';
+  // 记住基准价与系数：人工改价回退到系统默认时要原样还原（JS 里不另存一份全局状态）
+  $('vsBase').dataset.base = String(Number(base) || 0);
+  $('vsFactor').dataset.factor = String(factor === null || factor === undefined ? '—' : factor);
+  $('vsBase').textContent = '¥' + (Number(base) || 0).toFixed(2);
+  $('vsFinal').textContent = finalPrice ? '¥' + Number(finalPrice).toFixed(2) : '—';
+  $('vsFinal').className = 'vs-n ' + (finalPrice ? 'final' : 'na');
+  $('vsFactor').textContent = '×' + (factor === null || factor === undefined ? '—' : factor);
+  const diffEl = $('vsDiff');
+  if (base > 0 && finalPrice) {
+    const diff = Number(finalPrice) - Number(base);
+    const pct = diff / Number(base) * 100;
+    diffEl.className = 'vs-diff ' + (diff >= 0 ? 'up' : 'down');
+    diffEl.textContent = (diff >= 0 ? '+' : '-') + '¥' + Math.abs(diff).toFixed(2)
+      + ' · ' + (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%';
+  } else {
+    diffEl.className = 'vs-diff';
+    diffEl.textContent = finalPrice ? '' : '该档不出价';
+  }
+}
+
+async function refresh() {
+  if (!CUR) return;
+  const payload = {
+    item_id: CUR.item.id, results: RESULTS,
+    inhouse_fixable: $('inhouse').checked, must_official: $('official').checked,
+    missing_parts: $('missing').checked,
+    sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
+  };
+  const res = await fetch('/wms/api/inspect/preview', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const d = await res.json();
+  if (!d.ok) return;
+  $('suggestGrade').textContent = d.suggest_grade || '—';
+  $('ruleTitle').textContent = d.rule_title || '';
+  $('reasons').innerHTML = (d.reasons || []).map(x => '<li>' + x + '</li>').join('');
+  $('blockedNote').style.display = d.blocked ? '' : 'none';
+  // 建议 C 报修：检修判定区整块高亮 + 提示必须选维修方式（2026-10-13 用户拍板）；
+  // 人工勾「缺件严重」判 D 后建议档变 D，高亮自动撤掉
+  const zone = $('zoneFix');
+  if (zone) {
+    const isC = (d.suggest_grade || '') === 'C';
+    zone.classList.toggle('urge', isC);
+    if (isC) {
+      $('repairHint').innerHTML = '这台建议 <b>C 报修</b>：必须在上面选一个维修方式'
+        + '（「厂内可修」= 自修 / 「必须官方修」= 官方报修）。'
+        + '确实修不了就勾「缺件严重 / 无维修价值」，人工判 D 报废。';
+    }
+    // 建议 D 报废：自动勾上「缺件严重 / 无维修价值」（2026-10-13 用户拍板）——
+    // 判了 D 的货就该按报废处置，别让人再回想勾不勾。
+    // 只自动勾一次：用户手动动过这个勾（change 事件打了标记）就尊重人的选择。
+    const missing = $('missing');
+    if ((d.suggest_grade || '') === 'D' && !missing.checked && !missing.dataset.user) {
+      missing.checked = true;
+    }
+  }
+  const p = d.price || {};
+  // 渔货价：系统默认 = 基准价 × 该档价格系数（「分级规则」页维护）。
+  // 三件事必须在这儿说清楚（2026-10-09）：
+  //   ① 只有 S / A 会把价写进货品（与 submit 一致），其余档位屏幕上的数字只是参考；
+  //   ② 该档价格系数被停用 / 没配时，price_of 按 1.0 兜底 —— 毛利会算成 100%，得点破；
+  //   ③ 系数 / 毛利 / 审批线一起摊开，别让人只能看到一个结果数。
+  const priced = p.priced !== false;
+  const base = Number(p.base_price || 0);
+  const coeff = '按建议档「' + (d.suggest_grade || '—') + '」系数 ' + p.factor
+    + ' × 基准价 ¥' + base.toFixed(2);
+  const missNote = p.rule_missing
+    ? '<br><b style="color:var(--c-warn)">这一档没有启用中的价格系数</b>，系统按系数 1.0 兜底'
+      + '（所以毛利显示 ' + (p.margin * 100).toFixed(1) + '%）—— 去「分级规则 → 价格系数」把它启用'
+    : '';
+  const card = $('priceCard');
+  card.dataset.noprice = '';        // 每次刷新先归零，再由下面各自的分支打标
+  fillVs(base, p.price || 0, p.factor);
+  if (p.price && priced) {
+    $('priceCard').querySelector('.pc-badge').textContent = p.rule_missing
+      ? '未配系数 · 按 1.0 兜底' : '系统按分级规则默认';
+    card.dataset.sys = String(p.price);
+    $('priceNum').textContent = '¥' + p.price.toFixed(2);
+    $('priceNum').classList.remove('ref');
+    // 改价只许往上调（2026-10-10）：审批线 = 基准价 × 「低于基准价此比例需审批」，
+    // 低于这条线提交会被后端拦下 —— 这里先把底线写清楚，别让人填完才知道不行
+    const floor = Number(p.floor || 0);
+    card.dataset.floor = floor > 0 ? String(floor) : '';
+    $('manualPrice').min = floor > 0 ? floor.toFixed(2) : '0';
+    // 改价框底下把「最低能填多少」写死（用户口径：价格不能低于这个等级的下限价格）
+    $('floorHint').innerHTML = floor > 0
+      ? '最低可填 <b>¥' + floor.toFixed(2) + '</b>（基准价 ¥' + base.toFixed(2) + ' × '
+        + (Number(p.approve_below || 0) * 100).toFixed(0) + '% 审批线）—— 比它低提交会被拦下'
+      : '这一档没配「低于基准价此比例需审批」，填多少都行';
+    const floorNote = floor > 0
+      ? '<br>改价<b>只许往上调</b>：最低 ¥' + floor.toFixed(2)
+        + '（基准价的 ' + (Number(p.approve_below || 0) * 100).toFixed(0)
+        + '% = 该档审批线），更低就得走审批'
+      : '';
+    // 建议售价（2026-10-10）：= 基准价 × 建议售价系数，渔枢 / 渔货栈建档时的建议售价就用它。
+    // 硬规矩：渔货价不能高于建议售价 —— 所以改价的上限就是它。
+    const ceil = Number(p.suggest_price || 0);
+    card.dataset.ceil = ceil > 0 ? String(ceil) : '';
+    $('manualPrice').max = ceil > 0 ? ceil.toFixed(2) : '';
+    const ceilNote = ceil > 0
+      ? '<br><b>建议售价 ¥' + ceil.toFixed(2) + '</b>（基准价 × 建议售价系数 '
+        + Number(p.suggest_factor || 0) + '，渔枢 / 渔货栈建档带的就是这个价）'
+        + ' —— 渔货价不能高于它'
+        + (p.clamped_by_suggest
+          ? '<br><b style="color:var(--c-warn)">按系数算出来比建议售价还高，已压到建议售价</b>' : '')
+      : '';
+    $('priceSub').innerHTML = coeff
+      + ' · 毛利 ' + (p.margin * 100).toFixed(1) + '%'
+      + (p.need_approval ? ' · <b style="color:var(--c-warn)">低于底价，需审批</b>' : '')
+      + ceilNote
+      + '<br>' + (p.rule_missing ? '系数没启用，先按兜底价提交' : '直接提交就按这个价')
+      + '；要改就填下面那格' + floorNote + missNote;
+    $('manualPrice').placeholder = ceil > 0
+      ? '系统默认 ¥' + p.price.toFixed(2) + '（≤ ' + ceil.toFixed(2) + '）'
+      : '系统默认 ¥' + p.price.toFixed(2);
+    $('manualPrice').disabled = false;
+    card.classList.remove('flash');
+    void card.offsetWidth;              // 强制重排，让动画每次都能重放
+    card.classList.add('flash');
+  } else if (p.price) {
+    // B / C / D：按系数算出来的只是「修完之后大概值多少」的参考，**系统默认不写价**。
+    // 但现场要人工定价就得能填（2026-10-11 用户：「价格支持修改」）—— 这一档也把改价框
+    // 放开：填了 = 人工定价（提交落库 + 记审计），留空 = 按「不写价」提交。
+    $('priceCard').querySelector('.pc-badge').textContent = '该档不写价 · 可人工定价';
+    card.dataset.noprice = '1';
+    card.dataset.sys = String(p.price);
+    $('priceNum').textContent = '¥' + p.price.toFixed(2);
+    $('priceNum').classList.add('ref');
+    $('priceSub').innerHTML = coeff + '，只是<b>参考</b>'
+      + '<br><b>这档系统默认不写渔货价</b>：' + (d.suggest_grade === 'B'
+        ? '货进维修仓，修完重新检测定级才出价' : '按报修 / 拆机件估值走')
+      + '；<b>要现在就定个价，就填下面那格</b>（人工定价会记审计），留空则按「不写价」提交';
+    const floorNp = Number(p.floor || 0);
+    card.dataset.floor = floorNp > 0 ? String(floorNp) : '';
+    $('manualPrice').min = floorNp > 0 ? floorNp.toFixed(2) : '0';
+    const ceilNp = Number(p.suggest_price || 0);
+    card.dataset.ceil = ceilNp > 0 ? String(ceilNp) : '';
+    $('manualPrice').max = ceilNp > 0 ? ceilNp.toFixed(2) : '';
+    $('manualPrice').disabled = false;
+    $('manualPrice').placeholder = '留空 = 这档不写价';
+    // 已经填过的价不清（与 N/S/A 一个规矩）：勾检项触发 refresh 时不能把刚填的数抹掉
+    $('manualPrice').dataset.below = '';
+    $('floorHint').innerHTML = '这一档系统默认不出价（' + (d.suggest_grade === 'B'
+      ? '进维修仓，修完重判定级' : (d.suggest_grade === 'C' ? '走报修' : '走拆机件估值'))
+      + '）。<b>要人工定价就填这里</b>：提交后按这个价写进货品，并记一条审计；留空 = 这档不写价。'
+      + (ceilNp > 0 ? '<br>上限 <b>建议售价 ¥' + ceilNp.toFixed(2) + '</b>（渔货价不能高于建议零售价）' : '')
+      + (floorNp > 0 ? '；下限 <b>¥' + floorNp.toFixed(2) + '</b>（基准价 × '
+        + (Number(p.approve_below || 0) * 100).toFixed(0) + '% 审批线），更低要走审批' : '');
+    card.classList.remove('flash');
+  } else {
+    // C / D 系数为 0（2026-10-13 用户拍板：报修 / 报废不具备价值、不可售）或基准价是 0：
+    // 不出参考价，C 修完重新检测评级后才按新档出价；一样允许人工定价（记审计）
+    const g = d.suggest_grade || '';
+    $('priceCard').querySelector('.pc-badge').textContent = g === 'C'
+      ? '不具备价值 · 维修后重新评级' : (g === 'D' ? '不具备价值 · 走拆机件估值' : '没有参考价 · 可人工定价');
+    card.dataset.noprice = '1';
+    card.dataset.sys = '0';
+    card.dataset.floor = '';
+    card.dataset.ceil = '';
+    $('priceNum').textContent = '—';
+    $('priceNum').classList.remove('ref');
+    $('priceSub').textContent = '这台货没有基准价 / 这档没配价格系数，算不出参考价 —— 要定价就在下面手填。';
+    $('manualPrice').disabled = false;
+    $('manualPrice').placeholder = '要定价就填这里';
+    $('manualPrice').dataset.below = '';
+    $('floorHint').textContent = '系统算不出参考价（基准价是 0 或这档没配系数）：'
+      + '填了就是人工定价（会记审计），留空则不写价。';
+    card.classList.remove('flash');
+  }
+  // 人填过改价：refresh（勾检项 / 改瑕疵 / 勾全新 / 换档位）不能把人填的价抹掉 ——
+  // 以前每次刷新都覆盖，现场看着就是「改价填了不生效」（2026-10-10 修）；
+  // 2026-10-11 B/C/D 也能人工定价后，这里不再按档位清空填过的价（每档的上下限由各自分支设好），
+  // 只把「会不会低于审批线 / 高于建议售价」跟着重算一遍。
+  if ($('manualPrice').value) { reflectPrice(); }
+  loadLabelPreview();          // 建议档可能变了，纸上那张也跟着变
+}
+
+// 改价实时回显（2026-10-10）：填了就以人填的为准（提交也按它走），清空回到系统默认。
+// 抽成函数是因为 refresh() 末尾也要调它 —— 否则勾一下检项就把人填的价盖回系统默认，
+// 现场看着就是「改价填了不生效」。
+function reflectPrice() {
+  const el = $('manualPrice');
+  const v = parseFloat(el.value);
+  const sys = parseFloat($('priceCard').dataset.sys || '0');
+  const baseNow = parseFloat($('vsBase').dataset.base || '0') || 0;
+  const floor = parseFloat($('priceCard').dataset.floor || '0') || 0;
+  // 该档系统默认不写价（B / C / D / 算不出参考价）：措辞要跟着换，别再说「覆盖系统默认价」
+  const noprice = $('priceCard').dataset.noprice === '1';
+  if (!isNaN(v) && v > 0 && floor > 0 && v < floor) {
+    // 低于该档下限价（基准价 × 审批比例）：当场说清楚，提交也会被拦下
+    el.dataset.below = '1';
+    $('priceNum').textContent = '¥' + v.toFixed(2);
+    $('priceSub').innerHTML = '<b style="color:var(--c-danger)">低于下限价，提交会被拦下</b>：'
+      + '¥' + v.toFixed(2) + ' &lt; 最低 ¥' + floor.toFixed(2)
+      + '（基准价 × ' + (floor / (baseNow || 1) * 100).toFixed(0) + '% 审批线）—— 只能往上调';
+    $('vsFinal').textContent = '¥' + v.toFixed(2);
+    $('vsFinal').className = 'vs-n na';
+    $('vsFactor').textContent = '低于下限';
+    // 对比条的差额也跟着这次填的数刷（不然还挂着上一次的差额）
+    const dl = $('vsDiff');
+    if (dl && baseNow > 0) {
+      const diffLow = v - baseNow;
+      dl.className = 'vs-diff ' + (diffLow >= 0 ? 'up' : 'down');
+      dl.textContent = (diffLow >= 0 ? '+' : '-') + '¥' + Math.abs(diffLow).toFixed(2)
+        + ' · ' + (diffLow / baseNow * 100).toFixed(0) + '%';
+    }
+    return;
+  }
+  el.dataset.below = '';
+  // 上限：渔货价不能高于建议售价（2026-10-10）—— 填超了当场说清楚，提交也会被拦下
+  const ceil = parseFloat($('priceCard').dataset.ceil || '0') || 0;
+  if (!isNaN(v) && v > 0 && ceil > 0 && v > ceil) {
+    el.dataset.above = '1';
+    $('priceNum').textContent = '¥' + v.toFixed(2);
+    $('priceSub').innerHTML = '<b style="color:var(--c-danger)">高于建议售价，提交会被拦下</b>：'
+      + '¥' + v.toFixed(2) + ' &gt; 建议售价 ¥' + ceil.toFixed(2)
+      + ' —— 供货价（渔货价）不能比建议零售价还高';
+    if ($('vsFinal')) {
+      $('vsFinal').textContent = '¥' + v.toFixed(2);
+      $('vsFinal').className = 'vs-n na';
+      $('vsFactor').textContent = '高于建议售价';
+    }
+    return;
+  }
+  el.dataset.above = '';
+  if (!isNaN(v) && v > 0) {
+    $('priceNum').textContent = '¥' + v.toFixed(2);
+    $('priceNum').classList.remove('ref');
+    $('priceSub').innerHTML = noprice
+      ? '<b>人工定价</b>：这档系统默认不写价，提交后按 ¥' + v.toFixed(2)
+        + ' 写进货品（会记一条审计）'
+      : '<b>手动改价</b>：提交后按这个价写入（系统默认 ¥'
+        + (sys || 0).toFixed(2) + '，改动会记进审计）';
+    // 对比条跟着人填的价走：一眼看出比基准价高了多少 / 低了多少
+    if ($('vsFinal')) {
+      $('vsFinal').textContent = '¥' + v.toFixed(2);
+      $('vsFinal').className = 'vs-n final';
+      $('vsFactor').textContent = '人工改价';
+      const diff = v - baseNow;
+      const el2 = $('vsDiff');
+      if (baseNow > 0) {
+        const pct = diff / baseNow * 100;
+        el2.className = 'vs-diff ' + (diff >= 0 ? 'up' : 'down');
+        el2.textContent = (diff >= 0 ? '+' : '-') + '¥' + Math.abs(diff).toFixed(2)
+          + ' · ' + (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%';
+      } else { el2.className = 'vs-diff'; el2.textContent = ''; }
+    }
+  } else if (sys > 0) {
+    $('priceNum').textContent = '¥' + sys.toFixed(2);
+    if (noprice) {
+      $('priceNum').classList.add('ref');
+      $('priceSub').textContent = '已清空：这档按「不写价」提交（上面的数字只是参考）';
+    } else {
+      $('priceNum').classList.remove('ref');
+      $('priceSub').textContent = '已回到系统默认（等级 × 价格系数）';
+    }
+    fillVs(baseNow, sys, $('vsFactor').dataset.factor || '—');
+  } else {
+    $('priceNum').textContent = '—';
+    $('priceNum').classList.remove('ref');
+    $('priceSub').textContent = '不填就不写价（这档算不出参考价）';
+  }
+}
+$('manualPrice').oninput = reflectPrice;
+['missing'].forEach(id => $(id).addEventListener('change', function () {
+  // 人手动动过「缺件严重」这个勾 → 打标记，判 D 自动勾就不再抢（尊重人的判断）
+  if (id === 'missing') this.dataset.user = '1';
+  refresh();
+}));
+// 全新两个勾互斥（原封未拆 / 拆封未使用只能占一种）；勾上 = 检查项默认全部通过，
+// 两个都取消 = 清回未判让人自己逐项判；一改就重算建议档 —— 可能直接判 N
+['sealed', 'opened'].forEach(id => {
+  $(id).addEventListener('change', () => {
+    if ($(id).checked) $(id === 'sealed' ? 'opened' : 'sealed').checked = false;
+    setAllPass($('sealed').checked || $('opened').checked);
+    refresh();
+  });
+});
+$('finalGrade').addEventListener('change', () => {
+  const v = $('finalGrade').value;
+  $('overrideBox').style.display = (v && v !== $('suggestGrade').textContent) ? '' : 'none';
+});
+
+// ---------------------------------------------------------------- 拍照留档（多张 + 可删）
+// 2026-10-11（用户：「这里支持多图上传，也要支持图片删除」）：
+//   · 一次选多张、也能分几次接着加（输入框每次选完就清空，同一张还能再选一次）；
+//   · 每张图右上角一个 × —— 删掉它（只从这一轮提交里去掉，服务器上的图不动）；
+//   · PHOTOS 是唯一事实来源，删/加都重画一遍，序号与提交内容永远一致。
+function renderPhotos(extra) {
+  const box = $('photos');
+  box.innerHTML = '';
+  PHOTOS.forEach((url, i) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'photo-item';
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = '留档照 ' + (i + 1);
+    img.title = '第 ' + (i + 1) + ' 张 · 点右上角 × 删掉';
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'ph-del';
+    del.title = '删掉这张（提交前都能删）';
+    del.textContent = '×';
+    del.addEventListener('click', () => {
+      PHOTOS.splice(i, 1);
+      renderPhotos();
+      banner('已从这一轮里删掉第 ' + (i + 1) + ' 张照片（还没提交，服务器上的原图不动）', 'warn');
+    });
+    wrap.appendChild(img);
+    wrap.appendChild(del);
+    box.appendChild(wrap);
+  });
+  const bar = $('photoCount');
+  if (extra) {
+    bar.innerHTML = esc(extra);
+  } else if (PHOTOS.length) {
+    bar.innerHTML = '已加 <b>' + PHOTOS.length + '</b> 张（提交时一起存），每张点右上角 × 可删'
+      + ' <button type="button" class="btn sm" id="photoClear">全部清空</button>';
+    const clr = $('photoClear');
+    if (clr) {
+      clr.addEventListener('click', () => {
+        PHOTOS = [];
+        renderPhotos();
+        banner('照片已全部清空（还没提交，服务器上的原图不动）', 'warn');
+      });
+    }
+  } else {
+    bar.textContent = '还没加照片：可一次选多张，也能分几次加；选错了点图右上角 × 删掉';
+  }
+}
+
+$('photoInput').addEventListener('change', async e => {
+  const files = [...e.target.files];
+  e.target.value = '';                 // 清空：同一张图还能再选一次（不清就不会再触发 change）
+  if (!files.length) { return; }
+  const started = PHOTOS.length;
+  const failed = [];
+  for (let i = 0; i < files.length; i++) {
+    renderPhotos('正在上传第 ' + (i + 1) + ' / ' + files.length + ' 张…（传完自动进下面的图墙）');
+    const fd = new FormData();
+    fd.append('file', files[i]);
+    try {
+      const r = await fetch('/wms/api/upload', { method: 'POST', body: fd });
+      const d = await r.json();
+      if (d.ok) { PHOTOS.push(d.url); } else { failed.push(d.message || '上传失败'); }
+    } catch (err) {
+      failed.push('网络断了');
+    }
+  }
+  renderPhotos();
+  banner(failed.length
+    ? ('照片上传完成：成功 ' + (PHOTOS.length - started) + ' 张，失败 ' + failed.length
+       + ' 张（' + failed.slice(0, 2).join('；') + '）')
+    : ('已加 ' + files.length + ' 张照片，共 ' + PHOTOS.length + ' 张'), failed.length ? 'warn' : 'ok');
+});
+
+async function submit() {
+  if (!CUR) { banner('先扫一个条码', 'err'); return; }
+  // 检测过的货没确认进复检就锁着：别把上一轮记录闷头覆盖了
+  if ($('submitBtn').disabled) {
+    banner('这台货已经检测过 —— 要重新检测就点上面的「我要重新检测（覆盖上一轮）」', 'warn');
+    return;
+  }
+  // 改价低于审批线：不必等后端打回来，这里就拦（改价只许往上调）
+  if ($('manualPrice').dataset.below === '1') {
+    banner('改价只能往上调：低于审批线的价提交不了 —— 把下面那格改高，或留空用系统默认', 'err');
+    return;
+  }
+  // 改价高于建议售价：渔货价不能比建议零售价还高（2026-10-10）
+  if ($('manualPrice').dataset.above === '1') {
+    banner('渔货价不能高于建议售价 —— 把下面那格改到 ¥'
+      + $('priceCard').dataset.ceil + ' 以内，或留空用系统默认', 'err');
+    return;
+  }
+  // ① 不合格项必须写原因（2026-10-13 用户拍板：必填 + 红框提示）——
+  //    判了 × 却说不清坏在哪，这台货后面没人知道该怎么修、怎么卖
+  const missingDescs = [];
+  $('items').querySelectorAll('.fail-desc').forEach(inp => {
+    const k = inp.dataset.d;
+    if (RESULTS[k] === 'fail' && !(DESCS[k] || '').trim()) {
+      inp.classList.add('err');
+      missingDescs.push((CUR.template || []).find(t => t.key === k)?.label || k);
+    } else {
+      inp.classList.remove('err');
+    }
+  });
+  if (missingDescs.length) {
+    banner('还有 ' + missingDescs.length + ' 个不合格项没填原因（红框标出）：'
+      + missingDescs.slice(0, 4).join('、') + (missingDescs.length > 4 ? '…' : ''), 'err');
+    const firstErr = $('items').querySelector('.fail-desc.err');
+    if (firstErr) firstErr.focus();
+    return;
+  }
+  // ② 建议 C 报修：必须选一个维修方式（自修 / 官方二选一），
+  //    确实修不了就勾「缺件严重」人工判 D（2026-10-13 用户拍板）
+  if (suggestGradeNow() === 'C' && !$('missing').checked
+      && !$('inhouse').checked && !$('official').checked) {
+    banner('这台建议 C 报修 —— 请先在「检修判定」里选一个维修方式（厂内自修 / 官方报修），'
+      + '确实修不了就勾「缺件严重 / 无维修价值」判 D 报废', 'err');
+    $('zoneFix').classList.add('urge');
+    return;
+  }
+  const finalGrade = $('finalGrade').value;
+  const payload = {
+    item_id: CUR.item.id, results: RESULTS, fail_descs: DESCS,
+    final_grade: finalGrade, override_reason: $('override').value,
+    uncertain: $('uncertain').checked,
+    inhouse_fixable: $('inhouse').checked, must_official: $('official').checked,
+    missing_parts: $('missing').checked, note: $('note').value, photos: PHOTOS,
+    sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
+    location_code: $('location').value,
+    own_barcode: $('ownBarcode').value,
+    manual_price: $('manualPrice').value,   // 留空 = 用系统按价格系数算的默认价
+  };
+  const res = await fetch('/wms/api/inspect/submit', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const d = await res.json();
+  if (!d.ok) { banner(d.message, 'err'); return; }
+  banner(d.message + (d.safety ? ' —— 已按安全红线处置，禁止充电（先修不先废，修完重新评级）' : ''),
+    d.safety ? 'warn' : 'ok');
+  RESULTS = {}; DESCS = {}; PHOTOS = []; renderPhotos();
+  $('finalGrade').value = ''; $('override').value = ''; $('uncertain').checked = false;
+  wmsLocSet('location', '');
+  $('ownBarcode').value = '';
+  $('labelPrintState').textContent = '';
+  $('labelPreview').innerHTML = '扫完货这里自动出预览';
+  $('labelPreviewMeta').textContent = '';
+  $('btnPrintLabel').disabled = true;
+  PENDING_OWN = false; LABEL_CODE = '';
+  $('ownCodeState').textContent = ''; $('ownCodeState').className = 'own-state';
+  resetRecheck();
+  // 价格卡也归零，下一台重新按系数出价
+  $('manualPrice').value = '';
+  $('manualPrice').dataset.below = '';
+  $('sealed').checked = false; $('opened').checked = false;   // 全新两个勾也归零
+  $('autoPassNote').style.display = 'none';
+  $('floorHint').textContent = '扫完条码、勾完检项后，这里写清最低能填多少';
+  $('manualPrice').disabled = true;
+  $('priceNum').textContent = '—';
+  $('priceNum').classList.remove('ref');
+  $('priceVs').style.display = 'none';      // 对比条也归零，下一台重新算
+  $('priceSub').textContent = '扫完条码、勾完检项，这里自动按「等级 × 价格系数」出价';
+  $('manualPrice').placeholder = '系统默认';
+  $('priceCard').querySelector('.pc-badge').textContent = '系统默认';
+  // 自动跳下一台：从待检池里取第一个不是当前货品的
+  const next = [...document.querySelectorAll('.pool a')].find(a => !a.textContent.includes(CUR.item.display_code));
+  setTimeout(() => { if (next) location.href = next.getAttribute('href'); else location.reload(); }, 700);
+}
+
+$('submitBtn').onclick = submit;
+renderPhotos();                       // 一进来就把「怎么加照片 / 怎么删」写在图墙下面
+
+{% if code %}
+// 带 code 进来（从详情页 / 待检池点进来）：自动载入
+load({{ code | tojson }});
+{% endif %}
+</script>
+{% endblock %}

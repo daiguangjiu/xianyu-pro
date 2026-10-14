@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{# 2026-10-11：「店铺商品池」改名「我的店铺商品」，并支持列表 / 卡片两种看法 #}
+{% block title %}我的店铺商品 · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 采购买家侧主色：与 1688 一致的品牌橙（和商品详情页 --pdp-brand 同值） */
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .btn-primary { background: var(--pdp-brand); border-color: var(--pdp-brand); }
+  .btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark);
+  }
+  .btn-outline-primary { color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .btn-outline-primary:hover { background: var(--pdp-brand); border-color: var(--pdp-brand); color: #fff; }
+  .pool-card {
+    background: var(--c-surface); border: 1px solid var(--c-border); border-radius: 8px;
+    overflow: hidden; height: 100%; display: flex; flex-direction: column;
+  }
+  .pool-card:hover { border-color: var(--pdp-brand); box-shadow: 0 2px 10px rgba(15, 23, 42, .07); }
+  /* 2026-10-12：图片以前是 4:3 按卡片宽度撑（400px 的卡片 = 300px 高），
+     一屏看不到价格与按钮。改成固定高度 + cover，卡片之间也齐整。 */
+  .pool-img { width: 100%; height: 176px; object-fit: cover; background: var(--c-surface-2); display: block; }
+  .pool-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1 1 auto; }
+  .pool-title {
+    font-size: 13px; line-height: 1.45; height: 38px; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  /* 价格行：渔货价在左、建议售价贴右，两边都不许折行挤出卡片 */
+  .pool-prices { display: flex; align-items: baseline; gap: 6px 8px; flex-wrap: wrap; }
+  .pool-prices .p1 { color: var(--pdp-brand); font-weight: 700; font-size: 16px; white-space: nowrap; }
+  .pool-prices .p2 { color: var(--c-text-muted); font-size: 12px; white-space: nowrap; }
+  .pool-meta { font-size: 11px; color: var(--c-text-subtle); }
+  /* 主操作（下载素材 / 下单）一行两个，等宽 */
+  .pool-foot { display: flex; gap: 8px; margin-top: auto; }
+  .pool-foot > .btn { flex: 1 1 0; min-width: 0; }
+  /* 次要操作（详情 / 移出）单独一行：卡片窄了以后四个按钮挤一行会挤成一坨 */
+  .pool-foot2 {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--c-border);
+  }
+  .pool-mini {
+    border: 0; background: none; padding: 2px 4px; font-size: 12px;
+    color: var(--c-text-muted); text-decoration: none; cursor: pointer; line-height: 1.4;
+  }
+  .pool-mini:hover { color: var(--pdp-brand-dark); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>我的店铺商品</h1>
+    <span class="page-subtitle">
+      共 {{ summary.pooled }} 件 · 累计下载素材 {{ summary.downloads }} 次 ·
+      选品进来的货都在这儿，<strong>下载素材</strong>去手机端发布
+    </span>
+  </div>
+  <div class="page-actions">
+    <a href="{{ self_url('/harbor') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-plus-lg"></i> 继续选货
+    </a>
+    <a href="{{ self_url('/shops') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-bag-heart"></i> 店铺管理
+    </a>
+  </div>
+</div>
+
+{% if shops %}
+  <div class="mb-3 d-flex gap-2 flex-wrap align-items-center justify-content-between">
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+    <span class="text-secondary small">按店铺看：</span>
+    <a href="{{ self_url('/shop-goods') }}"
+       class="badge text-decoration-none {{ 'bg-primary' if not current_shop else 'bg-light text-dark' }}">全部</a>
+    {% for s in shops %}
+      <a href="{{ self_url('/shop-goods?shop_id=' ~ s.id) }}"
+         class="badge text-decoration-none {{ 'bg-primary' if current_shop == s.id else 'bg-light text-dark' }}">
+        {{ s.name or ('店铺 ' ~ s.id) }}
+      </a>
+    {% endfor %}
+    </div>
+    {# 列表 / 卡片：切换链接带着当前的店铺筛选，JS 还会记住上次的喜好 #}
+    <div class="btn-group btn-group-sm" role="group" aria-label="展示方式">
+      <a href="{{ view_urls.grid }}"
+         class="btn btn-sm {{ 'btn-primary' if view != 'list' else 'btn-outline-secondary' }}">
+        <i class="bi bi-grid-3x3-gap"></i> 卡片
+      </a>
+      <a href="{{ view_urls.list }}"
+         class="btn btn-sm {{ 'btn-primary' if view == 'list' else 'btn-outline-secondary' }}">
+        <i class="bi bi-list-ul"></i> 列表
+      </a>
+    </div>
+  </div>
+{% else %}
+  <div class="mb-3 d-flex justify-content-end">
+    <div class="btn-group btn-group-sm" role="group" aria-label="展示方式">
+      <a href="{{ view_urls.grid }}"
+         class="btn btn-sm {{ 'btn-primary' if view != 'list' else 'btn-outline-secondary' }}">
+        <i class="bi bi-grid-3x3-gap"></i> 卡片
+      </a>
+      <a href="{{ view_urls.list }}"
+         class="btn btn-sm {{ 'btn-primary' if view == 'list' else 'btn-outline-secondary' }}">
+        <i class="bi bi-list-ul"></i> 列表
+      </a>
+    </div>
+  </div>
+{% endif %}
+
+{% if not rows %}
+  <div class="card">
+    <div class="card-body text-center py-5 text-secondary">
+      还没有选品。去
+      <a href="{{ self_url('/harbor') }}" style="color: var(--c-primary);">货源广场</a>
+      挑几款货，点「店铺铺货」就加到这儿了，然后可以下载素材去发布。
+    </div>
+  </div>
+{% else %}
+  {% if view == 'list' %}
+  {# —— 列表：一眼扫价格与选品时间 —— #}
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>商品</th><th>渔货价</th><th>建议售价</th><th>店铺</th>
+            <th>选品时间</th><th>素材</th><th class="text-end">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                {% if r.image %}
+                  <img src="{{ r.image }}" alt=""
+                       style="width:44px;height:44px;object-fit:cover;border-radius:6px;">
+                {% endif %}
+                <span class="small">{{ r.title }}</span>
+              </div>
+            </td>
+            <td class="mono">{{ money(r.price) }}</td>
+            <td class="mono">{{ money(r.suggested_price) if r.suggested_price else '—' }}</td>
+            <td class="small">{{ r.shop_name or '—' }}</td>
+            <td>
+              <span class="badge bg-light text-dark" title="加进「我的店铺商品」的时间">
+                <i class="bi bi-clock"></i> 选品 {{ r.created_at | dt('%m-%d %H:%M') if r.created_at else '—' }}
+              </span>
+            </td>
+            <td class="small">
+              已下 {{ r.download_count or 0 }} 次
+              {% if r.materials_at %}<br><span class="text-secondary">最近 {{ r.materials_at | dt('%m-%d %H:%M') }}</span>{% endif %}
+            </td>
+            <td class="text-end">
+              <a href="{{ self_url('/shop-goods/' ~ r.id ~ '/materials.zip') }}"
+                 class="btn btn-sm btn-primary" title="打包下载主图 / 详情图 / 文案 / 规格价格表">
+                <i class="bi bi-download"></i> 素材
+              </a>
+              {# 2026-10-11：闲鱼出单后直接从这儿补一笔在线订单 #}
+              <a href="{{ self_url('/orders/new?item_id=' ~ r.item_id) }}"
+                 class="btn btn-sm btn-primary" title="闲鱼出单了？在这儿下单">
+                <i class="bi bi-cart-plus"></i> 下单
+              </a>
+              <a href="{{ self_url('/goods/detail/' ~ r.item_id) }}"
+                 class="btn btn-sm btn-ghost" title="看货源详情">详情</a>
+              <button class="btn btn-sm btn-ghost" onclick="poolRemove({{ r.id }})"
+                      title="移出我的店铺商品"><i class="bi bi-x-lg"></i></button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% else %}
+  {# —— 卡片：看图选货 —— #}
+  <div class="row g-3">
+    {% for r in rows %}
+      <div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+        <div class="pool-card">
+          {% if r.image %}
+            <a href="{{ self_url('/goods/detail/' ~ r.item_id) }}">
+              <img src="{{ r.image }}" alt="" class="pool-img" loading="lazy">
+            </a>
+          {% endif %}
+          <div class="pool-body">
+            <div class="pool-title">{{ r.title }}</div>
+            <div class="pool-prices">
+              <span class="p1 mono">{{ money(r.price) }}</span>
+              <span class="p2">渔货价</span>
+              {% if r.suggested_price %}
+                <span class="p2 ms-auto">建议售价 {{ money(r.suggested_price) }}</span>
+              {% endif %}
+            </div>
+            <div class="pool-meta">
+              {% if r.shop_name %}店铺：{{ r.shop_name }} · {% endif %}可售 {{ r.stock }} 件
+            </div>
+            <div class="pool-meta">
+              {# 选品时间：什么时候把它选进「我的店铺商品」的 #}
+              <span class="sg-time" title="加进「我的店铺商品」的时间">
+                <i class="bi bi-clock"></i> 选品 {{ r.created_at | dt('%m-%d %H:%M') if r.created_at else '—' }}
+              </span>
+              · 已下载 {{ r.download_count or 0 }} 次
+              {% if r.materials_at %}· 最近 {{ r.materials_at | dt('%m-%d %H:%M') }}{% endif %}
+            </div>
+            <div class="pool-foot">
+              <a href="{{ self_url('/shop-goods/' ~ r.id ~ '/materials.zip') }}"
+                 class="btn btn-sm btn-primary" title="打包下载主图 / 详情图 / 文案 / 规格价格表">
+                <i class="bi bi-download"></i> 下载素材
+              </a>
+              {# 2026-10-11：闲鱼出单后直接从这儿补一笔在线订单 #}
+              <a href="{{ self_url('/orders/new?item_id=' ~ r.item_id) }}"
+                 class="btn btn-sm btn-primary" title="闲鱼出单了？在这儿下单">
+                <i class="bi bi-cart-plus"></i> 下单
+              </a>
+            </div>
+            <div class="pool-foot2">
+              <a class="pool-mini" href="{{ self_url('/goods/detail/' ~ r.item_id) }}" title="看货源详情">
+                <i class="bi bi-box-arrow-up-right"></i> 查看货源详情
+              </a>
+              <button class="pool-mini" onclick="poolRemove({{ r.id }})" title="移出我的店铺商品">
+                <i class="bi bi-trash3"></i> 移出
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var POOL_REMOVE_URL = {{ self_url('/shop-goods/__ID__/remove') | tojson }};
+
+  /* 列表 / 卡片：记住上次的看法（没带 view 参数时自动切一次） */
+  (function () {
+    var KEY = 'shopGoodsView';
+    var params = new URLSearchParams(location.search);
+    var links = document.querySelectorAll('a[href*="view=grid"], a[href*="view=list"]');
+    Array.prototype.forEach.call(links, function (a) {
+      a.addEventListener('click', function () {
+        try { localStorage.setItem(KEY, a.href.indexOf('view=list') > -1 ? 'list' : 'grid'); } catch (e) {}
+      });
+    });
+    if (!params.get('view')) {
+      try {
+        if (localStorage.getItem(KEY) === 'list') {
+          var url = new URL(location.href);
+          url.searchParams.set('view', 'list');
+          location.replace(url.toString());
+        }
+      } catch (e) { /* 隐私模式拿不到 localStorage 就用默认卡片 */ }
+    }
+  })();
+
+  function poolRemove(id) {
+    if (!confirm('把这件货从商品池移出？（货源不会删，随时可以再铺）')) return;
+    fetch(POOL_REMOVE_URL.replace('__ID__', id), { method: 'POST' })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { alert(res.data.detail || '移出失败'); return; }
+        location.reload();
+      });
+  }
+</script>
+{% endblock %}

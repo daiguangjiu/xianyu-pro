@@ -1,0 +1,178 @@
+{# 角色权限：一个角色能进哪些菜单（粒度到菜单；数据级范围先留位不生效） #}
+{% extends "base.html" %}
+{% block title %}角色权限{% endblock %}
+{% block heading %}角色权限{% endblock %}
+{% block sub %}角色勾选能进哪些菜单；账号在「用户管理」里挂角色（不挂 = 默认菜单）{% endblock %}
+{% block actions %}
+  <a class="btn" href="/users">用户管理</a>
+{% endblock %}
+
+{# 三套子系统的菜单级权限一次勾完：渔枢 / 渔集 / 渔货栈（2026-10-11）。
+   sel = 这个角色已经勾上的 key（带前缀，如 hub:orders / wms:item.manage / self:cart） #}
+{% macro system_checks(tree, sel, locked=False, block_tree=None, blocks=None) %}
+<div class="menu-grid">
+  {% for sys in tree %}
+    <fieldset class="menu-group">
+      <legend>{{ sys.title }} <span class="badge">{{ sys.prefix }}</span></legend>
+      <p class="muted" style="margin:0 0 6px">{{ sys.note }}</p>
+      {% for group in sys.groups %}
+        <div class="perm-sub-group">
+          <div class="scope-note">{{ group.title }}</div>
+          {% for item in group.menus %}
+            <label class="check">
+              <input type="checkbox" name="menus" value="{{ sys.prefix }}{{ item.key }}"
+                     {% if (sys.prefix + item.key) in sel %}checked{% endif %}
+                     {% if locked %}disabled{% endif %}>
+              {{ item.label }}
+              {% if item.admin_only %}<span class="badge">管理员专属</span>{% endif %}
+            </label>
+          {% endfor %}
+        </div>
+      {% endfor %}
+      {% if sys.key == 'hub' and block_tree %}
+        {# 页面内区块：细到「同一页面里能看哪些内容」（推单信息 / 合并订单）。
+           blocks 传 None = 沿用默认（全勾）；传列表 = 按存的配置回显 #}
+        <div class="perm-sub-group">
+          <div class="scope-note">页面内区块（订单详情）</div>
+          <p class="muted" style="margin:0 0 6px">
+            比菜单更细一层：<b>不勾的区块</b>，账号进订单详情只会看到一句「没有权限」的提示。
+            没建过配置的老角色默认<b>全部勾选</b>（与加这套权限之前一样都能看）。
+          </p>
+          {% for item in block_tree %}
+            <label class="check">
+              <input type="checkbox" name="blocks" value="{{ item.key }}"
+                     {% if blocks is none or item.key in blocks %}checked{% endif %} {% if locked %}disabled{% endif %}>
+              {{ item.label }}<span class="muted"> — {{ item.hint }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </fieldset>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 三套子系统分块：每块下面再按业务分组（渔集的权限有 30 多条，不分组挑不过来） */
+  .perm-sub-group { margin-bottom: var(--s-3); }
+  .perm-sub-group .scope-note { display: block; font-weight: 600; margin-bottom: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <div class="sec-title"><i class="bi bi-shield-lock"></i> 权限怎么算</div>
+  {# 三行说明：宽屏一排三格，窄屏自动折行（内联，避免动到其他页面的 kv-grid） #}
+  <div class="kv-grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+    <div class="kv"><span class="k">管理员账号</span><span class="v">全部菜单（不受这里影响）</span></div>
+    <div class="kv"><span class="k">挂了角色的子账号</span><span class="v">按角色勾选的菜单</span></div>
+    <div class="kv"><span class="k">没挂角色的子账号</span><span class="v">默认菜单（除解析规则 / 系统设置 / 操作日志 / 账号管理）</span></div>
+  </div>
+  <p class="help" style="margin-top:var(--s-2)">
+    <i class="bi bi-info-circle"></i>
+    <b>三套子系统一次勾完</b>：渔枢系统（后台菜单）、渔集（检测仓权限码）、渔货栈（自营端菜单）。
+    渔集那一栏勾的与检测仓「人员授权」给的权限<b>取并集</b>（两边都能加，不互相覆盖）；
+    渔货栈那一栏没勾的菜单，账号进自营端就看不到那个入口。<br>
+    两个内置角色<b>跟着系统走</b>：以后新增菜单，「管理员」自动就有（不会漏），
+    「普通成员」也自动跟上代码里的默认。只有自己建的角色才需要手动勾。<br>
+    粒度到<b>一级菜单</b>（能进哪些页面）；页面里的详情、接口跟列表页一致。
+    比菜单更细的<b>页面内区块</b>（订单详情的推单信息、合并订单）在下面单独一组里勾 —— 只给需要的人。
+    数据级范围（只看某些供应商 / 闲鱼号）在后台已经留好字段，等要用时再开。
+  </p>
+</div>
+
+{# 新增角色也收起来：首屏直接看得到已有角色列表，要建新的再点开 #}
+{# 默认展开：多数人打开这页就是要建角色，别再多点一次 #}
+<details class="card tight role-card" open>
+  <summary>
+    <span class="caret"><i class="bi bi-chevron-right" aria-hidden="true"></i></span>
+    <span class="role-name">新增角色</span>
+    <span class="scope-note role-count">填名称、勾选能进的菜单，建好后去「用户管理」挂给账号</span>
+  </summary>
+  <form method="post" action="/roles/create">
+    <div class="field-row auto">
+      <div class="field"><label>角色名称</label>
+        <input type="text" name="name" required maxlength="64" placeholder="如：运营（订单 + 商品 + 供应链）">
+      </div>
+      <div class="field span-2"><label>说明（选填）</label>
+        <input type="text" name="description" maxlength="255" placeholder="如：只负责订单跟进与推单">
+      </div>
+    </div>
+    <div style="margin-top: var(--s-3);">
+      <span class="scope-note">能进的菜单（渔枢 / 渔集 / 渔货栈 三套一块儿勾）</span>
+      {{ system_checks(permission_tree, []) }}
+    </div>
+    <div class="form-actions">
+      <button class="btn primary">新增角色</button>
+      <span class="help">建好后去「用户管理」把账号挂到这个角色上。</span>
+    </div>
+  </form>
+</details>
+
+<div class="card">
+  <div class="sec-title"><i class="bi bi-people"></i> 已有角色（{{ rows | length }}）</div>
+  {% for row in rows %}
+    {# 默认折叠成一行摘要 —— 角色一多，页面不会整屏都是勾选框；点一下才展开细节 #}
+    <details class="card tight role-card {% if row.is_all %}is-default{% endif %}">
+      <summary>
+        <span class="caret"><i class="bi bi-chevron-right" aria-hidden="true"></i></span>
+        <span class="role-name">{{ row.role.name }}</span>
+        {% if row.role.is_system %}
+          <span class="badge">内置角色</span>
+        {% else %}
+          <span class="badge muted">自定义</span>
+        {% endif %}
+        <span class="scope-note role-count">
+          {{ row.user_count }} 个账号在用
+          {% if row.missing_labels %} · 有 {{ row.missing_labels | length }} 项菜单已下线{% endif %}
+        </span>
+      </summary>
+      <form method="post" action="/roles/{{ row.role.id }}/edit">
+        <div class="field-row auto">
+          <div class="field"><label>角色名称</label>
+            <input type="text" name="name" value="{{ row.role.name }}" maxlength="64"
+                   required {% if row.role.is_system %}readonly{% endif %}>
+          </div>
+          <div class="field span-2"><label>说明</label>
+            <input type="text" name="description" value="{{ row.role.description }}" maxlength="255"
+                   {% if row.role.is_system %}readonly{% endif %}>
+          </div>
+        </div>
+        <div style="margin-top: var(--s-3);">
+          <span class="scope-note">
+            能进的菜单（渔枢 / 渔集 / 渔货栈 三套一块儿勾）
+            {% if row.is_dynamic %}（内置角色：菜单跟着系统走）{% endif %}
+          </span>
+          {{ system_checks(permission_tree, row.menu_keys + row.wms_keys + row.self_keys,
+                           locked=row.role.is_system, block_tree=block_tree, blocks=row.block_keys) }}
+        </div>
+        <div class="form-actions">
+          {% if row.role.is_system %}
+            <span class="badge">内置角色</span>
+            <span class="scope-note">菜单由系统决定，不能改也不能删</span>
+          {% else %}
+            <button class="btn sm primary">保存</button>
+            <span class="help">改完点保存，正在用的人刷新页面就生效。</span>
+          {% endif %}
+        </div>
+      </form>
+      {% if not row.role.is_system %}
+      <div class="form-actions">
+        <form method="post" action="/roles/{{ row.role.id }}/delete">
+          <button class="btn sm danger"
+                  data-confirm="删除角色「{{ row.role.name }}」？挂它的 {{ row.user_count }} 个账号会回到默认菜单。">
+            删除这个角色
+          </button>
+        </form>
+      </div>
+      {% endif %}
+    </details>
+  {% endfor %}
+  <p class="help" style="margin-top: var(--s-3);">
+    权限改动立刻生效（正在用的人刷新页面即可），不用重启。
+  </p>
+</div>
+
+{% endblock %}

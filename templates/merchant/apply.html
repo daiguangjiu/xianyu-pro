@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}商家入驻申请 · 渔货栈{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>商家入驻申请</h1>
+    <span class="page-subtitle">
+      填写经营主体与结算资料 → 平台审核 → 通过后开通商家端后台
+    </span>
+  </div>
+  {% if merchant and merchant.status == 'approved' %}
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/self/merchant" class="btn btn-primary"><i class="bi bi-speedometer2"></i> 进入商家后台</a>
+  </div>
+  {% endif %}
+</div>
+
+{# ====== 审核状态提示条 ====== #}
+{% if apply %}
+<div class="card" style="margin-bottom: var(--s-4); padding: var(--s-4);">
+  <div style="display:flex; align-items:center; gap: var(--s-3); flex-wrap: wrap;">
+    {% if apply.status == 'pending' %}
+      <span class="badge" style="background:#fff7e6; color:#d46b08;">
+        <i class="bi bi-hourglass-split"></i> 审核中
+      </span>
+      <span style="color: var(--c-text-muted); font-size: 14px;">
+        资料已提交（第 {{ apply.id }} 号申请），平台通常在 1 个工作日内完成审核
+      </span>
+    {% elif apply.status == 'rejected' %}
+      <span class="badge" style="background:#fff1f0; color:#cf1322;">
+        <i class="bi bi-x-circle"></i> 已驳回
+      </span>
+      <span style="color: var(--c-text-muted); font-size: 14px;">
+        驳回原因：<strong style="color:#cf1322;">{{ apply.review_note or '未填写' }}</strong>
+        — 修改下方资料后可重新提交
+      </span>
+    {% elif apply.status == 'approved' %}
+      <span class="badge" style="background:#f6ffed; color:#389e0d;">
+        <i class="bi bi-check-circle"></i> 已通过
+      </span>
+      <span style="color: var(--c-text-muted); font-size: 14px;">
+        商家主体「{{ merchant.name if merchant else apply.name }}」已开通，可发布商品
+      </span>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+{# ====== 入驻资料表单 ====== #}
+<form method="post" action="/self/merchant/apply" autocomplete="off">
+  <div class="publish-layout">
+    <div class="publish-main">
+
+      <section class="form-section">
+        <header><span class="step">1</span> 主体信息</header>
+        <div class="section-body">
+          <div class="field-row">
+            <div class="field">
+              <label>主体类型 <span class="req">*</span></label>
+              <select name="subject_type" required>
+                {% for key, label in subject_types.items() %}
+                  <option value="{{ key }}" {% if (apply and apply.subject_type == key) or (not apply and key == 'enterprise') %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label>商家 / 企业全称 <span class="req">*</span></label>
+              <input type="text" name="name" required placeholder="如：杭州优选服饰有限公司"
+                     value="{{ apply.name if apply else '' }}">
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>对外简称</label>
+              <input type="text" name="short_name" placeholder="如：优选服饰（前台展示用）"
+                     value="{{ apply.short_name if apply else '' }}">
+            </div>
+            <div class="field">
+              <label>营业执照号 / 身份证号 <span class="req">*</span></label>
+              <input type="text" name="license_no" required placeholder="统一社会信用代码"
+                     value="{{ apply.license_no if apply else '' }}">
+            </div>
+          </div>
+
+          <div class="field">
+            <label>法人 / 经营者姓名 <span class="req">*</span></label>
+            <input type="text" name="legal_person" required
+                   value="{{ apply.legal_person if apply else '' }}">
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <header><span class="step">2</span> 联系与经营信息</header>
+        <div class="section-body">
+          <div class="field-row">
+            <div class="field">
+              <label>联系人 <span class="req">*</span></label>
+              <input type="text" name="contact_name" required
+                     value="{{ apply.contact_name if apply else '' }}">
+            </div>
+            <div class="field">
+              <label>联系电话 <span class="req">*</span></label>
+              <input type="text" name="contact_phone" required
+                     value="{{ apply.contact_phone if apply else '' }}">
+            </div>
+          </div>
+
+          <div class="field">
+            <label>联系邮箱</label>
+            <input type="email" name="contact_email" placeholder="用于接收结算对账单"
+                   value="{{ apply.contact_email if apply else '' }}">
+          </div>
+
+          <div class="field">
+            <label>经营类目 <span class="req">*</span>（可多选，按住 Ctrl / Cmd 多选）</label>
+            <select name="categories" multiple size="6" required>
+              {% for c in categories %}
+                <option value="{{ c.value }}" {% if apply and c.value in apply.categories %}selected{% endif %}>{{ c.label }}</option>
+              {% endfor %}
+            </select>
+            <p class="help">决定你能发布哪些类目的商品，也用于货源广场的类目归类</p>
+          </div>
+
+          <div class="field-row three">
+            <div class="field">
+              <label>省份</label>
+              <input type="text" name="province" value="{{ apply.province if apply else '' }}">
+            </div>
+            <div class="field">
+              <label>城市</label>
+              <input type="text" name="city" value="{{ apply.city if apply else '' }}">
+            </div>
+            <div class="field">
+              <label>详细地址</label>
+              <input type="text" name="address" value="{{ apply.address if apply else '' }}">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <header><span class="step">3</span> 结算账户（平台代收代付，货款结算到此账户）</header>
+        <div class="section-body">
+          <div class="field-row">
+            <div class="field">
+              <label>开户银行</label>
+              <input type="text" name="settle_bank_name" placeholder="如：招商银行杭州分行"
+                     value="{{ apply.settle_bank_name if apply else '' }}">
+            </div>
+            <div class="field">
+              <label>账户名称</label>
+              <input type="text" name="settle_account_name" placeholder="需与主体名称一致"
+                     value="{{ apply.settle_account_name if apply else '' }}">
+            </div>
+          </div>
+          <div class="field">
+            <label>银行账号</label>
+            <input type="text" name="settle_bank_account"
+                   value="{{ apply.settle_bank_account if apply else '' }}">
+          </div>
+          <p class="help">
+            平台按账期将「货款 - 平台佣金 - 退款」结算至该账户，可在商家后台「资金结算」查看账单
+          </p>
+        </div>
+      </section>
+
+      <div style="margin-top: var(--s-4);">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-send"></i>
+          {% if apply and apply.status == 'rejected' %}修改后重新提交{% elif apply %}更新入驻资料{% else %}提交入驻申请{% endif %}
+        </button>
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}

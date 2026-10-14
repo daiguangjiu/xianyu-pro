@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}发送人对照表{% endblock %}
+{% block heading %}发送人对照表{% endblock %}
+{% block sub %}open_id 与真实姓名的对应关系{% endblock %}
+{% block actions %}
+  <form method="post" action="/settings/fill-sender-names" style="display:inline">
+    <button class="btn" data-confirm="将按这份名单补齐缺失的姓名，继续？">一键补全缺失姓名</button>
+  </form>
+  <a class="btn" href="/settings">返回系统设置</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="chips">
+    <span class="chip">发送人 <span class="n">{{ people|length }}</span></span>
+    <span class="chip">未识别 <span class="n">{{ missing_count }}</span></span>
+    <span class="chip">当前群成员 <span class="n">{{ members_count }}</span></span>
+  </div>
+  <div class="note muted" style="margin-top:10px">
+    <span>姓名来源依次是：<b>历史记录 → 飞书通讯录 → 群成员名单</b>（通讯录偶尔会限频或没权限，
+      后两层就是它的兜底，尽量不把空名字写进库）。
+      状态显示「未识别」的，点右上角「一键补全缺失姓名」补齐；
+      显示「已不在群」的是退群 / 离职的同事，历史订单不受影响。</span>
+  </div>
+  {% if not feishu_ready %}
+    <div class="note warn" style="margin-top:10px">未配置飞书凭证，无法与飞书名单核对。</div>
+  {% endif %}
+  {% if error %}
+    <div class="note warn" style="margin-top:10px">读取群成员名单失败：{{ error }}</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+    <table class="list-nowrap">
+      <thead>
+        <tr>
+          <th>姓名</th>
+          <th>open_id</th>
+          <th class="num">消息数</th>
+          <th class="num">订单数</th>
+          <th>最近发言</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in people %}
+        <tr>
+          <td>
+            {% if p.name %}<b>{{ p.name }}</b>
+            {% else %}<span class="muted">未拿到姓名</span>{% endif %}
+          </td>
+          <td class="mono" title="{{ p.id }}">{{ p.id[:18] }}{% if p.id|length > 18 %}…{% endif %}</td>
+          <td class="num">{{ p.msgs }}</td>
+          <td class="num">{{ p.orders }}</td>
+          <td>{{ p.last or '—' }}</td>
+          <td>
+            {% if p.missing %}
+              <span class="badge pending">未识别</span>
+            {% elif p.id.startswith('cli_') or p.id.startswith('app_') %}
+              <span class="badge done">机器人</span>
+            {% elif not p.in_group %}
+              <span class="badge">已不在群</span>
+            {% else %}
+              <span class="badge done">正常</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if not people %}
+    <p class="muted" style="margin-top:10px">还没有任何发送人记录。</p>
+  {% endif %}
+</div>
+
+{% endblock %}

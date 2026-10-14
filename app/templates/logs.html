@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}操作日志{% endblock %}
+{% block heading %}操作日志{% endblock %}
+{% block sub %}共 {{ total }} 条记录 · 记录后台账号的关键操作，便于事后追查{% endblock %}
+{% block content %}
+
+<div class="card">
+  <form class="filters" method="get" action="/logs">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="动作 / 目标 / 明细 / 账号">
+    </div>
+    <div class="field"><label>账号</label>
+      <select name="username">
+        <option value="">全部</option>
+        {% for n in usernames %}<option value="{{ n }}" {{ 'selected' if filters.username == n }}>{{ n }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>动作</label>
+      <select name="action">
+        <option value="">全部</option>
+        {% for a in actions %}<option value="{{ a }}" {{ 'selected' if filters.action == a }}>{{ a }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if logs %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th class="num">序号</th><th>时间</th><th>账号</th><th>角色</th><th>动作</th><th>目标</th><th>明细</th><th>来源 IP</th></tr></thead>
+      <tbody>
+      {% for log in logs %}
+        <tr>
+          <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+          <td class="nowrap mono">{{ human_time(log.created_at) }}</td>
+          <td class="mono">{{ log.username or '-' }}</td>
+          <td>
+            {% if log.role == 'admin' %}<span class="badge template">管理员</span>
+            {% elif log.role %}<span class="badge muted">子账号</span>
+            {% else %}<span class="badge ignored">未登录</span>{% endif %}
+          </td>
+          <td class="nowrap">{{ log.action }}</td>
+          <td class="nowrap">{{ log.target or '-' }}</td>
+          <td class="muted">{{ log.detail or '-' }}</td>
+          <td class="nowrap muted mono">{{ log.ip or '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有操作记录。后台的编辑、删除、推送、配置变更等写操作会自动记录到这里。</div>
+  {% endif %}
+</div>
+
+{{ pager(page, pages, '/logs', filters, total) }}
+{% endblock %}

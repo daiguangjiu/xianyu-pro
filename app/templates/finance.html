@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% from "_pager.html" import pager %}
+{% block title %}资金结算{% endblock %}
+{% block heading %}资金结算{% endblock %}
+{% block sub %}公司自营应收 / 应付、上游供应商结算台账{% endblock %}
+{% block actions %}
+  <a class="btn" href="/orders">查看订单管理</a>
+  <a class="btn primary" href="/finance?granularity=order&status=pending">待结算明细</a>
+{% endblock %}
+{% block content %}
+
+{% if stat.zero_cost %}
+<div class="note warn" role="alert">
+  <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+  <span><b>有 {{ stat.zero_cost }} 单成本未维护（成本 ¥0）</b>：这些单的「公司自营应付」会偏低、
+    净额与毛利会虚高，请到<a href="/orders?state=new">订单管理</a>里补全成本（补完流水金额自动同步）。</span>
+</div>
+{% endif %}
+
+<div class="note muted">
+  <span>
+    <b>结算口径</b>：<b>公司自营应收</b> = 销售金额（买家实付，有成交价取成交价，否则取售价）
+    − 平台技术服务费 <b>0.6%</b>（平台结算给公司时直接扣除，明细里单独列出）；
+    <b>公司自营应付</b> = 采购成本 + 运费，需结算给上游供应商；
+    应收 − 应付 再扣平台技术服务费就是这一单的<b>预计毛利</b>。
+    <b>已转账 = 已付给供应商</b>：订单标记「已转账」后，这笔的应付流水自动核销为已结算（结算人标注
+    <b>转账自动结算</b>）；改回未转账会退回待结算，人工核销的不受影响。
+    <b>撤单 / 已受理的退单不再结算</b>，对应流水自动作废（「已发货无法拦截」的退单未受理，照常结算）。
+    <b>退款（退买家）</b>：退单受理后要退给买家的钱，按订单上的退款金额单独记一类流水、结算对象是买家
+    （不跟付给供应商的钱混在一起）；订单记了退款时间就自动核销为「已结算」，否则挂在「待结算」等线下退完再点核销。
+    页面上的<b>净额 = 应收已收 − 应付已付 − 退款已退</b>。
+  </span>
+</div>
+
+<div class="grid grid-5">
+  {# 1 待结算 · 公司自营应收：还没从平台收回来的钱 #}
+  <div class="stat kpi kpi-indigo">
+    <div class="label"><i class="bi bi-arrow-down-left-circle" aria-hidden="true"></i>待结算 · 公司自营应收</div>
+    <div class="value">¥{{ money(stat.pending_in) }}</div>
+    <div class="hint">{{ stat.pending_count_in }} 笔待收（已扣 0.6% 技术服务费）</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 2 公司自营应收已收：已经到公司账上的钱（平台结算给公司） #}
+  <div class="stat kpi kpi-sky">
+    <div class="label"><i class="bi bi-cash-coin" aria-hidden="true"></i>公司自营应收已收</div>
+    <div class="value">¥{{ money(stat.settled_in) }}</div>
+    <div class="hint">{{ stat.settled_count_in }} 笔已收 · 本月 ¥{{ money(stat.month_settled_in) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 3 待结算 · 公司自营应付：还没付给上游供应商的钱 #}
+  <div class="stat kpi kpi-amber">
+    <div class="label"><i class="bi bi-arrow-up-right-circle" aria-hidden="true"></i>待结算 · 公司自营应付</div>
+    <div class="value">¥{{ money(stat.pending_out) }}</div>
+    <div class="hint">{{ stat.pending_count_out }} 笔待付（上游供应商）</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 4 公司自营应付已付：已经付给供应商的钱（订单标「已转账」会自动核销进这里） #}
+  <div class="stat kpi kpi-violet">
+    <div class="label"><i class="bi bi-patch-check" aria-hidden="true"></i>公司自营应付已付</div>
+    <div class="value">¥{{ money(stat.settled_out) }}</div>
+    <div class="hint">{{ stat.settled_count_out }} 笔已付 · 本月 ¥{{ money(stat.month_settled_out) }}</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 4.5 退款（退给买家的钱）：退单受理后产生，方向与应付一样是流出 #}
+  <div class="stat kpi kpi-rose">
+    <div class="label"><i class="bi bi-arrow-return-left" aria-hidden="true"></i>退款 · 退买家</div>
+    <div class="value">¥{{ money(stat.settled_refund) }}</div>
+    <div class="hint">
+      已退 {{ stat.settled_count_refund }} 笔 · 本月 ¥{{ money(stat.month_settled_refund) }}
+      {%- if stat.pending_refund or stat.pending_count_refund %} · 待退 ¥{{ money(stat.pending_refund) }}（{{ stat.pending_count_refund }} 笔）{% endif %}
+    </div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+  {# 5 公司自营净额：已收 − 已付 − 已退（实际落到公司口袋的钱；负数说明付出去的比收回来多） #}
+  <div class="stat kpi {{ 'kpi-rose' if stat.settled_net < 0 else 'kpi-emerald' }}">
+    <div class="label"><i class="bi bi-calculator" aria-hidden="true"></i>公司自营净额</div>
+    <div class="value">{{ '-' if stat.settled_net < 0 }}¥{{ money(stat.settled_net | abs) }}</div>
+    <div class="hint">应收已收 − 应付已付 − 退款已退</div>
+    <span class="kpi-glow" aria-hidden="true"></span>
+  </div>
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/finance">
+    <div class="field"><label>结算类型</label>
+      <select name="kind">
+        <option value="">全部</option>
+        {% for k in kinds %}
+        <option value="{{ k }}" {{ 'selected' if filters.kind == k }}>{{ kind_labels[k] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>结算对象</label>
+      <select name="counterparty">
+        <option value="">全部</option>
+        {% for c in counterparties %}<option value="{{ c }}" {{ 'selected' if filters.counterparty == c }}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>结算状态</label>
+      <select name="status">
+        <option value="">全部（不含作废）</option>
+        {% for s in statuses %}
+        <option value="{{ s }}" {{ 'selected' if filters.status == s }}>{{ status_labels[s] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>开始日期</label><input type="date" name="day_from" value="{{ filters.day_from }}"></div>
+    <div class="field"><label>结束日期</label><input type="date" name="day_to" value="{{ filters.day_to }}"></div>
+    <div class="field"><label>订单号</label><input type="search" name="q" value="{{ filters.q }}" placeholder="模糊匹配"></div>
+    <div class="field"><label>聚合方式</label>
+      <select name="granularity">
+        {% for g in ['order','day','month'] %}
+        <option value="{{ g }}" {{ 'selected' if granularity == g }}>{{ granularity_labels[g] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">查询</button></div>
+    <div class="field"><label>&nbsp;</label>
+      <a class="btn" href="/finance?granularity={{ granularity }}&day_from={{ month }}-01&day_to={{ today }}">本月</a>
+    </div>
+  </form>
+</div>
+
+<div class="card flush">
+  <div class="row-between">
+    <h2>{{ granularity_labels[granularity] }}明细</h2>
+    {# 合计按当前筛选结果统计。应收（+）与应付（-）方向相反，不能混在一起加：
+       按方向分开统计，再看净额；另给平台技术服务费合计 #}
+    <div class="chips">
+      <span class="chip">当前筛选 <span class="n">{{ totals.count }}</span> 笔</span>
+      <span class="chip chip-in" title="公司自营应收：销售金额扣掉 0.6% 平台技术服务费后应该收回来的钱">
+        应收 +¥{{ money(totals.amount_in) }}
+        <span class="muted">（待结算 ¥{{ money(totals.pending_in) }} · 已结算 ¥{{ money(totals.settled_in) }}）</span>
+      </span>
+      <span class="chip chip-out" title="公司自营应付：采购成本 + 运费，要付给上游供应商的钱">
+        应付 -¥{{ money(totals.amount_out) }}
+        <span class="muted">（待结算 ¥{{ money(totals.pending_out) }} · 已结算 ¥{{ money(totals.settled_out) }}）</span>
+      </span>
+      {% if totals.count_refund %}
+      {# 退款：方向与应付一样是流出，但对象是买家 —— 单独一列，别和付给供应商的钱混在一起 #}
+      <span class="chip chip-out" title="退款：退单受理后退给买家的钱（不是付给供应商的）">
+        退款 -¥{{ money(totals.amount_refund) }}
+        <span class="muted">（待退 ¥{{ money(totals.pending_refund) }} · 已退 ¥{{ money(totals.settled_refund) }}）</span>
+      </span>
+      {% endif %}
+      <span class="chip" title="应收 − 应付 − 退款：正数说明收回来的比付出去的多">
+        净额 {{ '-' if totals.net < 0 }}¥{{ money(totals.net | abs) }}
+      </span>
+      <span class="chip" title="平台技术服务费 = 销售金额 × 0.6%，平台结算给公司时扣除，已从应收里减掉">
+        技术服务费 ¥{{ money(totals.tech_fee) }}
+      </span>
+      {% if stat.void_count %}<span class="chip" title="撤单 / 退单不再结算的流水">{{ stat.void_count }} 笔已作废</span>{% endif %}
+    </div>
+  </div>
+
+  {% if rows %}
+  {% if granularity == 'order' %}
+  <form method="post" action="/finance/settle">
+    <div class="table-wrap">
+      <table class="list-nowrap">
+        <thead>
+          <tr>
+            <th class="num">序号</th>
+            <th><input type="checkbox" onclick="for (const b of document.querySelectorAll('input[name=ids]')) b.checked = this.checked" aria-label="全选"></th>
+            <th>操作</th>
+            <th>业务日</th><th>类型</th><th>结算对象</th><th>订单号</th><th>产品</th><th>收货人</th>
+            <th class="num">金额</th>
+            {# 退款金额：这一单退给买家的钱（退款流水就是按它记的），对账时不用去别处翻；净额里已扣掉 #}
+            <th class="num">退款金额</th>
+            {# 平台技术服务费 0.6%：平台结算给公司时先扣掉，所以应收金额已经不含它 #}
+            <th class="num">平台技术服务费</th>
+            {# 结算时机：已发货没签收 = 在途（建议先别结），已完成（签收/超时自动确认）= 可结 #}
+            <th>结算时机</th>
+            <th>状态</th><th>结算时间</th>
+            {# 订单创建（归档）时间：后续查订单问题时用它定位是哪一单、什么时候进的系统 #}
+            <th>订单创建时间</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for r in rows %}
+          <tr class="{{ 'row-recalled' if r.status == 'void' }}">
+            <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+            <td><input type="checkbox" name="ids" value="{{ r.ids[0] }}"></td>
+            {# 操作按钮放最前面：结算 / 撤销是这个页面最常用的动作。
+               按钮要包一层 div：把 .row-actions 直接挂在 <td> 上会让 td 变成 flex 容器，
+               不再是表格单元格 —— 行高和下边框就会跟同一行的其它格错位（按钮看着没垂直居中）。 #}
+            <td class="nowrap">
+              <div class="row-actions">
+                {% if r.status == 'pending' %}
+                <button class="btn sm primary" name="ids" value="{{ r.ids[0] }}">标记已结算</button>
+                {% elif r.status == 'settled' %}
+                <button class="btn sm" formaction="/finance/unsettle" name="ids" value="{{ r.ids[0] }}">撤销结算</button>
+                {% else %}<span class="muted">已作废</span>{% endif %}
+              </div>
+            </td>
+            <td class="mono nowrap">{{ r.period }}</td>
+            <td>
+              {# 三类不同色：应收（绿）/ 应付（黄）/ 退款（红，逆向） #}
+              <span class="badge {{ {'initiator': 'state-shipped', 'supplier': 'state-pushed'}.get(r.kind, 'state-canceled') }}">{{ r.kind_label }}</span>
+            </td>
+            <td>{{ r.counterparty }}</td>
+            <td class="mono">{% if r.order_id %}<a href="/orders/{{ r.order_id }}">{{ r.order_no }}</a>{% else %}{{ r.order_no or '-' }}{% endif %}</td>
+            <td>{{ r.product or '-' }}</td>
+            <td>{{ r.receiver or '-' }}</td>
+            <td class="num" title="{% if r.kind == 'initiator' %}公司自营应收：销售金额已扣 0.6% 平台技术服务费{% elif r.kind == 'refund' %}退款：退单受理后退给买家的钱{% else %}公司自营应付：需结算给上游供应商{% endif %}">
+              {{ '+' if r.direction == 'in' else '-' }}¥{{ money(r.amount) }}
+            </td>
+            <td class="num" title="退款金额：该订单退给买家的钱（已单独记一笔退款流水，净额里已扣掉）">
+              {% if r.refund_amount %}¥{{ money(r.refund_amount | abs) }}{% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td class="num muted" title="平台技术服务费 = 销售金额 × 0.6%，由平台结算时扣除，已从应收里减掉">
+              {% if r.kind == 'initiator' %}¥{{ money(r.tech_fee) }}{% else %}—{% endif %}
+            </td>
+            <td title="{% if r.settle_state == 'transit' %}已发货、买家还没签收：货还在路上，建议先不结给发起人{% elif r.settle_state == 'ready' %}已完成（签收 / 超时自动确认收货）：可以结算{% else %}还没发货（谈不上结），或已撤单 / 退单{% endif %}">
+              {% if r.settle_state == 'transit' %}<span class="badge state-pushed">在途</span>
+              {% elif r.settle_state == 'ready' %}<span class="badge state-shipped">可结</span>
+              {% else %}<span class="muted">—</span>{% endif %}
+            </td>
+            <td>
+              <span class="badge {{ 'state-new' if r.status == 'pending' else ('state-shipped' if r.status == 'settled' else 'state-canceled') }}">{{ r.status_label }}</span>
+              {% if r.settled_by %}<div class="muted nowrap">{{ r.settled_by }}</div>{% endif %}
+            </td>
+            <td class="nowrap">{{ human_time(r.settled_at) if r.settled_at else '-' }}</td>
+            <td class="nowrap muted">{{ human_time(r.created_at) if r.created_at else '-' }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="row-between" style="padding:12px 18px">
+      <span class="muted">勾选多笔后点「结算选中」整批核销；行内按钮只结算这一笔</span>
+      <div class="chips">
+        <button class="btn primary">结算选中</button>
+        <button class="btn" formaction="/finance/unsettle">撤销选中</button>
+      </div>
+    </div>
+  </form>
+  {% else %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        {# 收 / 付 / 退分开列：这三类金额不能混着加（以前一个「合计金额」把要付出去的钱、
+           退给买家的钱都算成收入了）。净额 = 应收 − 应付 − 退款，跟页面顶部口径一致 #}
+        <tr><th>期间</th><th class="num">笔数</th><th class="num">结算对象</th>
+          <th class="num" title="公司自营应收：销售金额扣掉 0.6% 平台技术服务费后应该收回来的钱">应收</th>
+          <th class="num" title="公司自营应付：采购成本 + 运费，要付给上游供应商的钱">应付</th>
+          <th class="num" title="退款：退单受理后退给买家的钱（不是付给供应商的）">退款</th>
+          <th class="num" title="净额 = 应收 − 应付 − 退款">净额</th>
+          <th class="num" title="待结算净额 = 应收待收 − 应付待付 − 退款待退">待结算</th>
+          <th class="num" title="已结算净额 = 应收已收 − 应付已付 − 退款已退">已结算</th>
+          <th>操作</th></tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td class="mono nowrap">{{ r.period }}</td>
+          <td class="num">{{ r.count }}</td>
+          <td class="num">{{ r.parties }}</td>
+          <td class="num">¥{{ money(r.amount_in) }}</td>
+          <td class="num">¥{{ money(r.amount_out) }}</td>
+          <td class="num">{% if r.amount_refund %}¥{{ money(r.amount_refund) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num">{{ '-' if r.net < 0 }}¥{{ money(r.net | abs) }}</td>
+          <td class="num">{{ '-' if r.pending_net < 0 }}¥{{ money(r.pending_net | abs) }}</td>
+          <td class="num">{{ '-' if r.settled_net < 0 }}¥{{ money(r.settled_net | abs) }}</td>
+          <td class="nowrap">
+            {% if r.pending %}
+            <form method="post" action="/finance/settle" style="display:inline">
+              <input type="hidden" name="kind" value="{{ filters.kind }}">
+              <input type="hidden" name="counterparty" value="{{ filters.counterparty }}">
+              {% if granularity == 'day' %}
+              <input type="hidden" name="day" value="{{ r.period }}">
+              {% else %}
+              <input type="hidden" name="month" value="{{ r.period }}">
+              {% endif %}
+              {# 这里的金额是三类待结算流水的合计（核销的是流水本身），不是净额 #}
+              <button class="btn sm primary"
+                      title="把本期所有待结算流水（应收 / 应付 / 退款）一次性标记为已结算">
+                整期结算（{{ r.count_pending }} 笔 · ¥{{ money(r.pending) }}）
+              </button>
+            </form>
+            {% else %}
+            <span class="muted">已结清</span>
+            {% endif %}
+            <a class="btn sm"
+               href="/finance?granularity=order&kind={{ filters.kind }}&counterparty={{ filters.counterparty }}{% if granularity == 'day' %}&day_from={{ r.period }}&day_to={{ r.period }}{% else %}&day_from={{ r.period }}-01&day_to={{ r.period }}-31{% endif %}">看明细</a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% else %}
+  <div class="empty">
+    <p>还没有结算流水：订单归档后会自动生成「公司自营应收」与「公司自营应付」两条流水。</p>
+  </div>
+  {% endif %}
+</div>
+
+{% if granularity == 'order' %}{{ pager(page, page_count, '/finance', filters, total_rows) }}{% endif %}
+
+{% endblock %}

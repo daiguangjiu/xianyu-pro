@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}供应商管理{% endblock %}
+{% block heading %}供应商管理{% endblock %}
+{% block sub %}共 {{ total }} 家供应商 · 已维护编码 {{ suppliers|selectattr('code')|list|length }} 家 · 关联订单销售额 ¥{{ money(total_sale) }}{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/orders?supplier_status=pending">去订单页给供应商推单</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>新增供应商</h2>
+  <form class="filters" method="post" action="/suppliers">
+    <div class="field grow"><label for="new-name">供应商名称</label>
+      <input id="new-name" type="text" name="name" required placeholder="如：华强北数码（系统会显示成「华强北数码（GYS001）」）">
+    </div>
+    <div class="field"><label for="new-code">供应商编码</label>
+      <input id="new-code" type="text" name="code" placeholder="如：GYS001（订单里填编码也能关联）">
+    </div>
+    <div class="field"><label for="new-city">城市</label>
+      <input id="new-city" type="text" name="city" placeholder="如：深圳">
+    </div>
+    <div class="field"><label for="new-category">主营类目</label>
+      <input id="new-category" type="text" name="category" placeholder="如：数码配件">
+    </div>
+    <div class="field"><label for="new-contact">联系人</label>
+      <input id="new-contact" type="text" name="contact_name" placeholder="如：王经理">
+    </div>
+    <div class="field"><label for="new-info">联系方式</label>
+      <input id="new-info" type="text" name="contact_info" placeholder="手机号 / 微信号">
+    </div>
+    <div class="field"><label for="new-group">是否有对接微信群</label>
+      <span class="check"><input id="new-group" type="checkbox" name="has_group" value="1"><span>已建群</span></span>
+    </div>
+    <div class="field"><label for="new-group-name">微信群名称</label>
+      <input id="new-group-name" type="text" name="group_name" placeholder="有群时填写">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">添加供应商</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/suppliers">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="名称 / 编码 / 类目 / 联系人 / 群名">
+    </div>
+    <div class="field"><label>城市</label>
+      <select name="city">
+        <option value="">全部</option>
+        {% for c in cities %}<option value="{{ c }}" {{ 'selected' if filters.city == c }}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>主营类目</label>
+      <select name="category">
+        <option value="">全部</option>
+        {% for c in categories %}<option value="{{ c }}" {{ 'selected' if filters.category == c }}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>对接微信群</label>
+      <select name="group">
+        <option value="">全部</option>
+        <option value="1" {{ 'selected' if filters.group == '1' }}>已建群</option>
+        <option value="0" {{ 'selected' if filters.group == '0' }}>未建群</option>
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if suppliers %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">序号</th><th>供应商</th><th>城市</th><th>主营类目</th><th>联系人</th><th>联系方式</th>
+          <th>对接微信群</th><th class="num">关联订单</th><th class="num">销售额</th>
+          <th>更新时间</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in suppliers %}
+        {% set st = stats.get(sup_label(s), {'orders': 0, 'sale': 0.0, 'pending': 0}) %}
+        <tr>
+          <td class="num muted">{{ loop.index }}</td>
+          <td class="nowrap"><a href="/suppliers/{{ s.id }}">{{ s.name }}</a>{% if s.code %} <span class="mono muted">（{{ s.code }}）</span>{% endif %}</td>
+          <td>{{ s.city or '-' }}</td>
+          <td>{{ s.category or '-' }}</td>
+          <td>{{ s.contact_name or '-' }}</td>
+          <td class="mono">{{ s.contact_info or '-' }}</td>
+          <td>
+            {% if s.has_group %}
+              <span class="badge done">已建群</span> {{ s.group_name or '未填群名' }}
+            {% else %}
+              <span class="badge muted">未建群</span>
+            {% endif %}
+          </td>
+          <td class="num">{{ st.orders }}</td>
+          <td class="num">¥{{ money(st.sale) }}</td>
+          <td class="nowrap muted">{{ human_time(s.updated_at) }}</td>
+          <td class="nowrap">
+            <a class="btn sm" href="/suppliers/{{ s.id }}">编辑</a>
+            <form method="post" action="/suppliers/{{ s.id }}/delete" style="display:inline"
+                  data-confirm="删除供应商「{{ sup_label(s) }}」？仅删除档案，订单数据不受影响。">
+              <button class="btn sm danger">删除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有供应商档案。用上方表单添加（建议同时维护编码，如 GYS001）：订单里的「所属供应链」填编码或名称都会自动关联订单、统计销售额。</div>
+  {% endif %}
+</div>
+{% endblock %}

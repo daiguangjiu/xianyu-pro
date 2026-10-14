@@ -1,0 +1,216 @@
+{# 地址管理：退货地址（买家寄回）/ 发货地址（我们寄出）—— 同一套规则，只有用途不同 #}
+{% extends "base.html" %}
+{% block title %}地址管理{% endblock %}
+{% block heading %}{{ heading }}{% endblock %}
+{% block sub %}{{ sub }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/shipping-rules?kind=freight">运费模板</a>
+  <a class="btn" href="/products/categories">类目管理</a>
+{% endblock %}
+{% block content %}
+
+{# 用途切换：两种用途字段与命中规则完全一样，但「全局默认」各自独立 #}
+<div class="kind-tabs" style="margin-bottom: var(--s-3);">
+  <a class="btn {{ 'primary' if kind == 'return' else '' }}" href="/return-addresses?kind=return">退货地址</a>
+  <a class="btn {{ 'primary' if kind == 'ship' else '' }}" href="/return-addresses?kind=ship">发货地址</a>
+</div>
+
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>命中顺序</b>
+      <div class="scope-note">
+        当前{{ kind_label }}全局默认：{% if default_address %}{{ default_address.name }}（{{ default_address.contact }} {{ default_address.phone }}）{% else %}<span class="badge">还没设全局默认</span>{% endif %}
+      </div>
+    </div>
+    <p class="help" style="margin:0;max-width:660px;">
+      命中顺序：<b>指定商品 &gt; 供应商 + 一级类目 &gt; 一级类目 &gt; 供应商 &gt; 全局默认</b>。
+      关联了商品的地址只对那些商品生效（最具体，压过其它规则）；
+      只关联供应商的对所有类目生效，只关联类目的对所有供应商生效。
+      类目口径与运费模板一致 —— <b>只到一级类目</b>。
+      退货地址与发货地址的「全局默认」各自独立，互不影响。
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="sec-title"><i class="bi bi-plus-circle"></i> 新增{{ kind_label }}</div>
+  <form method="post" action="/return-addresses/create">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <div class="field-row auto">
+      <div class="field"><label>地址名称</label>
+        <input type="text" name="name" required maxlength="64" placeholder="{{ '如：广州白云退货仓' if kind == 'return' else '如：广州白云发货仓' }}">
+      </div>
+      <div class="field"><label>收件人</label>
+        <input type="text" name="contact" maxlength="64" placeholder="如：张师傅">
+      </div>
+      <div class="field"><label>联系电话</label>
+        <input type="text" name="phone" maxlength="64" placeholder="如：13800138000">
+      </div>
+      <div class="field"><label>所在地区</label>
+        <input type="text" name="region" maxlength="128" placeholder="如：广东省 广州市 白云区">
+      </div>
+      <div class="field span-all"><label>详细地址</label>
+        <input type="text" name="address" maxlength="255" placeholder="如：石井街道 xx 工业园 3 号仓">
+      </div>
+      <div class="field"><label>关联供应商</label>
+        <select name="supplier_id">
+          <option value="">不限（所有供应商）</option>
+          {% for s in suppliers %}<option value="{{ s.id }}">{{ s.name }}{% if s.code %}（{{ s.code }}）{% endif %}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>关联类目（一级）</label>
+        <select name="category_id">
+          <option value="">不限（所有类目）</option>
+          {% for c in category_options %}<option value="{{ c.id }}">{{ c.label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>优先级</label>
+        <input type="number" name="priority" value="100">
+        <p class="help">数字小的优先</p>
+      </div>
+      <div class="field"><label>全局默认</label>
+        <label class="check"><input type="checkbox" name="is_default" value="1"> 设为默认</label>
+      </div>
+      <div class="field"><label>备注</label>
+        <input type="text" name="note" maxlength="200" placeholder="如：只收顺丰，到付拒收">
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn primary">新增{{ kind_label }}</button>
+      <span class="help">新增后想指定商品生效：在下面这条地址的「关联商品」里勾选即可。</span>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="sec-title">
+    <i class="bi bi-geo-alt"></i> 已有{{ kind_label }}（{{ rows|length }} 条）
+  </div>
+  {% if not rows %}
+    <p class="help">还没有{{ kind_label }}。先加一条全局默认，之后按供应商 / 类目 / 商品细分。</p>
+  {% else %}
+  {% for row in rows %}
+    {% set addr = row.address %}
+    <div class="card tight {% if addr.is_default %}is-default{% endif %}">
+      <form method="post" action="/return-addresses/edit">
+        <input type="hidden" name="id" value="{{ addr.id }}">
+        <input type="hidden" name="kind" value="{{ kind }}">
+        <div class="field-row auto">
+          <div class="field"><label>地址名称</label>
+            <input type="text" name="name" value="{{ addr.name }}" maxlength="64" required>
+          </div>
+          <div class="field"><label>收件人</label>
+            <input type="text" name="contact" value="{{ addr.contact }}" maxlength="64">
+          </div>
+          <div class="field"><label>联系电话</label>
+            <input type="text" name="phone" value="{{ addr.phone }}" maxlength="64">
+          </div>
+          <div class="field"><label>所在地区</label>
+            <input type="text" name="region" value="{{ addr.region }}" maxlength="128">
+          </div>
+          <div class="field span-all"><label>详细地址</label>
+            <input type="text" name="address" value="{{ addr.address }}" maxlength="255">
+          </div>
+          <div class="field"><label>关联供应商</label>
+            <select name="supplier_id">
+              <option value="">不限（所有供应商）</option>
+              {% for s in suppliers %}
+                <option value="{{ s.id }}" {% if addr.supplier_id and addr.supplier_id == s.id %}selected{% endif %}>{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field"><label>关联类目（一级）</label>
+            <select name="category_id">
+              <option value="">不限（所有类目）</option>
+              {% for c in category_options %}
+                <option value="{{ c.id }}" {% if addr.category_id and addr.category_id == c.id %}selected{% endif %}>{{ c.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field"><label>优先级</label>
+            <input type="number" name="priority" value="{{ addr.priority }}">
+          </div>
+          <div class="field"><label>备注</label>
+            <input type="text" name="note" value="{{ addr.note }}" maxlength="200">
+          </div>
+          <div class="field"><label>状态</label>
+            <div class="row-form-actions" style="height:38px;">
+              <label class="check"><input type="checkbox" name="is_default" value="1" {% if addr.is_default %}checked{% endif %}> 全局默认</label>
+              <label class="check"><input type="checkbox" name="enabled" value="1" {% if addr.enabled %}checked{% endif %}> 启用</label>
+            </div>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button class="btn sm primary">保存</button>
+          <span class="scope-note">适用范围：{{ row.scope }}</span>
+          {% if row.text %}<span class="scope-note">· {{ row.text }}</span>{% endif %}
+        </div>
+      </form>
+
+      <div class="form-actions" style="margin-top: var(--s-2);">
+        <form method="post" action="/return-addresses/delete" style="margin-left:auto;">
+          <input type="hidden" name="id" value="{{ addr.id }}">
+          <input type="hidden" name="kind" value="{{ kind }}">
+          <button class="btn sm danger" data-confirm="删除「{{ addr.name }}」？已经发出去的{{ kind_label }}不受影响。">删除</button>
+        </form>
+      </div>
+
+      <details class="addr-pick" {% if row.product_ids %}open{% endif %}>
+        <summary>
+          <i class="bi bi-box-seam"></i> 关联商品
+          {% if row.product_count %}<span class="badge">已指定 {{ row.product_count }} 款</span>
+          {% else %}<span class="scope-note">（未指定：按供应商 / 类目 / 全局默认走）</span>{% endif %}
+        </summary>
+        <form method="post" action="/return-addresses/products">
+          <input type="hidden" name="id" value="{{ addr.id }}">
+          <input type="hidden" name="kind" value="{{ kind }}">
+          <div class="pick-wrap">
+            <div class="pick-list">
+              <input type="search" class="pick-search" placeholder="搜商品名 / 编码" aria-label="搜索商品"
+                     style="width:100%;margin-bottom:6px;">
+              <select name="product_ids" multiple size="10" aria-label="关联商品">
+                {% for p in product_options %}
+                  <option value="{{ p.id }}" {% if p.id in row.product_ids %}selected{% endif %}>{{ p.label }}</option>
+                {% endfor %}
+              </select>
+              <p class="help">按住 Ctrl / ⌘ 可多选；不选 = 不指定商品。</p>
+            </div>
+            <div class="pick-tip">
+              {% if row.product_count %}
+                <div>已指定 {{ row.product_count }} 款商品，这些商品的{{ kind_label }}固定走这一条。</div>
+              {% else %}
+                <div>指定后：这些商品的{{ kind_label }}<b>只认这一条</b>（比供应商 / 类目规则更优先）。</div>
+              {% endif %}
+              <button class="btn sm primary" style="margin-top:10px;">保存关联商品</button>
+            </div>
+          </div>
+        </form>
+      </details>
+    </div>
+  {% endfor %}
+  {% endif %}
+  <p class="help" style="margin-top: var(--s-3);">
+    只有<b>启用的</b>地址会参与命中；「全局默认」每种用途各只能有一条，设了新的旧的会自动取消。
+  </p>
+</div>
+
+<script>
+  // 关联商品：搜索框实时过滤下拉里的选项（商品多的时候不用滚半天）
+  (function () {
+    document.querySelectorAll('.addr-pick').forEach(function (box) {
+      var input = box.querySelector('.pick-search');
+      var select = box.querySelector('select[name="product_ids"]');
+      if (!input || !select) { return; }
+      var options = Array.prototype.slice.call(select.options);
+      input.addEventListener('input', function () {
+        var q = (input.value || '').trim().toLowerCase();
+        options.forEach(function (opt) {
+          opt.hidden = !!q && opt.textContent.toLowerCase().indexOf(q) < 0;
+        });
+      });
+    });
+  })();
+</script>
+
+{% endblock %}

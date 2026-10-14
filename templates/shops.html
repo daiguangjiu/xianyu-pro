@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% block title %}店铺管理 · 供应链小鱼{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 店铺自动同步状态条：首登带过来的 + 手动添加的，右边给「立即同步」入口 */
+  .sync-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+    padding:10px 14px;margin-bottom:12px;border:1px solid var(--c-border,#e5e7eb);
+    border-radius:8px;background:#f8fafb;font-size:13px;color:var(--c-text-muted,#6b7280);}
+  .sync-bar .sb-text{display:flex;align-items:center;gap:6px;flex-wrap:wrap;flex:1 1 auto;min-width:0;}
+  .sync-bar .sb-text b{color:var(--c-text,#111827);font-size:14px;}
+  .sync-bar .sb-time{color:#9ca3af;}
+  .sync-bar .sb-new{color:#0d7f74;}
+  @media (max-width:560px){.sync-bar{flex-direction:column;align-items:stretch;}}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>店铺管理</h1>
+    <span class="page-subtitle">我的闲鱼自营账号 · 信息与渔枢系统店铺档案一致，渔枢系统端审核通过后才在渔货栈生效</span>
+  </div>
+  <div class="page-actions">
+    <span class="badge bg-success">生效 {{ stats.approved }}</span>
+    <span class="badge bg-warning">待审核 {{ stats.pending }}</span>
+    <span class="badge bg-danger">已驳回 {{ stats.rejected }}</span>
+    {# 2026-10-03：新建 / 编辑各自独立成页，列表页只做筛选与列表 #}
+    <a href="{{ self_url('/shops/new') }}" class="btn btn-sm btn-primary">
+      <i class="bi bi-plus-lg"></i> 新建店铺
+    </a>
+  </div>
+</div>
+
+{% if msg %}
+<div class="alert alert-{{ 'danger' if kind == 'err' else ('warning' if kind == 'warn' else 'success') }}">{{ msg }}</div>
+{% endif %}
+
+{% if shop_sync and shop_sync.synced %}
+{# 2026-10-13：第一次进渔货栈就按手机号 / 姓名把渔枢系统里的店铺带过来，之后自动增量补 #}
+<div class="sync-bar">
+  <div class="sb-text">
+    <i class="bi bi-arrow-repeat"></i>
+    已与渔枢系统同步：<b>{{ shop_sync.total }}</b> 家
+    （自动带入 {{ shop_sync.auto }} 家 · 手动添加 {{ shop_sync.manual }} 家）
+    {% if shop_sync.new %}<span class="sb-new">本次新增 {{ shop_sync.new }} 家</span>{% endif %}
+    {% if shop_sync.last_at %}
+      <span class="sb-time">最近同步 {{ shop_sync.last_at | dt('%m-%d %H:%M') }}</span>
+    {% endif %}
+  </div>
+  <form method="post" action="{{ self_url('/shops/sync') }}">
+    <button class="btn btn-sm btn-outline-primary" title="平时进渔货栈会自动同步，急的时候点这个">
+      <i class="bi bi-arrow-clockwise"></i> 立即同步
+    </button>
+  </form>
+</div>
+{% endif %}
+
+{% if not hub_available %}
+<div class="alert alert-warning">当前部署没接入渔枢系统（进程里没有店铺库），店铺管理不可用。</div>
+{% elif not linked %}
+<div class="alert alert-warning">没识别到登录账号：两端是同一套账号，请先从渔枢系统登录后再来维护店铺。</div>
+{% endif %}
+
+{# ———— 列表：只看自己提交的店铺（新建 / 编辑都在各自的页面里，见 shop_form.html） ———— #}
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-center">
+      <div class="col-auto">
+        <label class="kpi-label mb-0">关键词</label>
+      </div>
+      <div class="col-auto">
+        <input type="search" name="q" value="{{ q }}" class="form-control form-control-sm"
+               placeholder="账号名称 / 编号 / 运营人 / 类目 / 手机号">
+      </div>
+      <div class="col-auto">
+        <label class="kpi-label mb-0">审核状态</label>
+      </div>
+      <div class="col-auto">
+        <select name="audit" class="form-select form-select-sm" onchange="this.form.submit()">
+          {% for value, label in audit_options %}
+          <option value="{{ value }}" {% if audit == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-sm btn-outline-secondary">筛选</button>
+      </div>
+      {% if q or audit %}
+      <div class="col-auto"><a href="{{ self_url('/shops') }}" class="btn btn-sm btn-outline-secondary">清除筛选</a></div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body" style="padding: 0;">
+    {% if rows %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0" style="font-size:13px;">
+        <thead class="table-light">
+          <tr>
+            <th style="width:48px;">#</th>
+            <th>账号名称</th>
+            <th>会员名</th>
+            <th>编号</th>
+            <th>运营人</th>
+            <th>所属人</th>
+            <th>店铺类型</th>
+            <th class="text-end">平台技术服务费</th>
+            <th>经营类目</th>
+            <th>供应链</th>
+            <th>状态</th>
+            <th>审核</th>
+            <th>提交时间</th>
+            <th style="width:140px;">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td class="text-muted">{{ loop.index }}</td>
+            <td class="fw-semibold">
+              {{ r.name }}
+              {% if r.self_linked_only %}
+                <span class="badge bg-info" title="渔枢系统里已有的档案，已关联到你的账号">渔枢带入</span>
+              {% endif %}
+            </td>
+            <td>{{ r.member_name or '-' }}</td>
+            <td class="text-muted">{{ r.code or '-' }}</td>
+            <td>{{ r.operator or '-' }}</td>
+            <td>{{ r.owner or '-' }}</td>
+            <td>{{ r.shop_type_label }}</td>
+            <td class="text-end mono">{{ r.service_fee_rate_value }}%</td>
+            <td>{{ r.category or '-' }}</td>
+            <td>{{ r.supply or '-' }}</td>
+            <td>{{ r.status or '-' }}</td>
+            <td>
+              {% if r.audit_status == 'approved' %}
+                <span class="badge bg-success">已通过</span>
+              {% elif r.audit_status == 'rejected' %}
+                <span class="badge bg-danger">已驳回</span>
+                {% if r.audit_note %}<div class="text-muted" style="font-size:12px;">{{ r.audit_note }}</div>{% endif %}
+              {% else %}
+                <span class="badge bg-warning">待审核</span>
+              {% endif %}
+            </td>
+            <td class="text-muted">{{ r.created_at | dt('%Y-%m-%d') if r.created_at else '-' }}</td>
+            <td>
+              <a href="{{ self_url('/shops/' ~ r.id ~ '/edit') }}" class="btn btn-sm btn-outline-secondary">编辑</a>
+              <form method="post" action="{{ self_url('/shops/' ~ r.id ~ '/delete') }}" style="display:inline"
+                    onsubmit="return confirm('{% if r.self_linked_only %}解除与店铺「{{ r.name }}」的关联？渔枢系统里的档案会保留。{% else %}删除店铺「{{ r.name }}」？只删档案，订单数据不受影响。{% endif %}');">
+                <button class="btn btn-sm btn-outline-danger">{{ '解除关联' if r.self_linked_only else '删除' }}</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state" style="padding: 40px 20px; text-align:center; color: var(--c-text-muted);">
+      还没有店铺{% if q or audit %}（当前筛选下没有记录）{% endif %}：点右上角「新建店铺」添加第一个，
+      提交后渔枢系统端审核通过即生效。
+      {% if not (q or audit) %}
+      <div class="mt-3"><a href="{{ self_url('/shops/new') }}" class="btn btn-sm btn-primary">
+        <i class="bi bi-plus-lg"></i> 新建店铺</a></div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

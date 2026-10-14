@@ -1,0 +1,944 @@
+{% extends "base.html" %}
+{% block title %}系统设置{% endblock %}
+{% block heading %}系统设置{% endblock %}
+{% block sub %}飞书应用凭证、同步群与运行参数{% endblock %}
+{% block content %}
+
+<div class="card">
+  {# 消息中心已经有自己的菜单入口（消息 · 消息中心），不再占系统设置的 tab #}
+  <div class="btn-row">
+    <a class="btn primary" href="/settings">系统设置</a>
+    <a class="btn" href="/settings/senders">发送人对照表</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>连接状态</h2>
+  <div class="kv">
+    <div class="k">飞书应用</div><div class="v">
+      {% if settings.feishu_enabled %}<span class="badge done">已配置</span> <span class="mono">{{ settings.feishu_app_id }}</span>
+      {% else %}<span class="badge failed">未配置</span> 请在项目根目录创建 .env 并填写 FEISHU_APP_ID / FEISHU_APP_SECRET{% endif %}
+    </div>
+    <div class="k">事件回调</div><div class="v"><span class="mono">POST {{ settings.public_base_url }}/feishu/event</span>
+      {% if settings.feishu_encrypt_key %}<span class="badge done">已启用加密</span>{% else %}<span class="badge ignored">未加密</span>{% endif %}
+    </div>
+    <div class="k">后台轮询</div><div class="v">{% if settings.auto_sync %}<span class="badge done">已开启</span> 每 {{ settings.sync_interval_seconds }} 秒回溯 {{ settings.sync_lookback_minutes }} 分钟{% else %}<span class="badge ignored">未开启</span>（配置 FEISHU_AUTO_SYNC=1 开启）{% endif %}</div>
+    <div class="k">OCR</div><div class="v">{{ settings.ocr_provider }}{% if settings.ocr_provider == 'none' %} <span class="muted">（仅归档截图，不做识别）</span>{% endif %}</div>
+    <div class="k">数据库</div><div class="v"><span class="mono">{{ settings.database_url }}</span></div>
+    <div class="k">附件目录</div><div class="v"><span class="mono">{{ settings.media_path }}</span></div>
+    <div class="k">员工姓名</div><div class="v">
+      {% if sender_missing %}
+        <span class="badge pending">{{ sender_missing }} 条还没拿到真实姓名</span>
+      {% else %}
+        <span class="badge done">已全部识别</span>
+      {% endif %}
+      <span class="muted">（共 {{ sender_total }} 条带发送人的消息）</span>
+    </div>
+  </div>
+  <div class="btn-row" style="margin-top:10px">
+    <form method="post" action="/settings/fill-sender-names" style="display:inline">
+      <button class="btn">一键补全发送人姓名</button>
+    </form>
+    <a class="btn" href="/settings/senders">查看发送人对照表</a>
+    <span class="muted">能读到员工真实姓名：飞书应用需开通 <span class="mono">contact:user.base:readonly</span>（通讯录）
+      或 <span class="mono">im:chat</span>（群成员）权限；拿到后订单列表 / 详情 / 飞书消息直接显示姓名，
+      取不到才退回显示 open_id 短串。机器人自己发的消息（<span class="mono">cli_</span> 开头）固定显示为
+      <b>闲鱼订单Agent</b>，不算未识别、不用补。</span>
+  </div>
+  {% if error %}<div class="note danger" style="margin-top:10px">读取机器人群列表失败：{{ error }}（请确认已开通 im:chat 权限并把机器人拉进群）</div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>菜鸟物流查询</h2>
+  <p class="muted" style="margin:0 0 10px">
+    接菜鸟 LINK 网关（<span class="mono">link.do</span>）：配好之后，订单详情点「查物流」就能看到运单轨迹。
+    签名是 <span class="mono">base64(md5(报文 + APP 秘钥))</span>，由系统算，别改报文格式。
+  </p>
+  <div class="kv" style="margin-bottom:10px">
+    <div class="k">当前状态</div>
+    <div class="v">
+      {% if cainiao_ready %}<span class="badge done">已配置</span> 接口 <span class="mono">{{ settings.cainiao_msg_type }}</span>
+      {% elif settings.cainiao_enabled %}<span class="badge failed">配置不全</span> 网关地址、接口名、APP 秘钥、CPCODE 都要填
+      {% else %}<span class="badge ignored">未启用</span> 启用后才能在订单详情查物流{% endif %}
+    </div>
+  </div>
+  <form class="filters" method="post" action="/settings/logistics">
+    <div class="field grow"><label>启用（勾选后才调菜鸟）</label>
+      <select name="cainiao_enabled">
+        <option value="1" {% if settings.cainiao_enabled %}selected{% endif %}>启用</option>
+        <option value="0" {% if not settings.cainiao_enabled %}selected{% endif %}>停用</option>
+      </select>
+    </div>
+    <div class="field grow"><label>网关地址（正式环境 https://link.cainiao.com/gateway/link.do）</label>
+      <input type="text" name="cainiao_gateway_url" value="{{ settings.cainiao_gateway_url }}" placeholder="https://link.cainiao.com/gateway/link.do" class="mono">
+    </div>
+    <div class="field grow"><label>接口名（msgType，如 CNTECH_LV_LOGISTICS_DETAIL_GET）</label>
+      <input type="text" name="cainiao_msg_type" value="{{ settings.cainiao_msg_type }}" placeholder="CNTECH_LV_LOGISTICS_DETAIL_GET" class="mono">
+    </div>
+    <div class="field grow"><label>CPCODE（调用方编码，即 logistic_provider_id）</label>
+      <input type="text" name="cainiao_cp_code" value="{{ settings.cainiao_cp_code }}" placeholder="菜鸟给的 CPCODE" class="mono">
+    </div>
+    <div class="field grow"><label>APP 秘钥（参与签名）</label>
+      <input type="text" name="cainiao_app_secret" value="{{ cainiao_masked_secret }}" placeholder="保持不变请留原样" class="mono">
+    </div>
+    <div class="field grow"><label>APP Code（菜鸟 LINK 网关一般不需要，留空则不发送）</label>
+      <input type="text" name="cainiao_app_code" value="{{ settings.cainiao_app_code }}" placeholder="可留空" class="mono">
+    </div>
+    <div class="field grow"><label>报文结构（logistics_interface 怎么包）</label>
+      <select name="cainiao_interface_style">
+        <option value="arg0" {% if settings.cainiao_interface_style != 'flat' %}selected{% endif %}>包一层 arg0：{"arg0":{"mailNo":...}}（菜鸟 LINK 网关标准）</option>
+        <option value="flat" {% if settings.cainiao_interface_style == 'flat' %}selected{% endif %}>平铺：{"mailNo":...}</option>
+      </select>
+    </div>
+    <div class="field"><label>超时（秒）</label>
+      <input type="number" name="cainiao_timeout_sec" value="{{ settings.cainiao_timeout_sec }}" min="3" max="60">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存物流配置</button></div>
+  </form>
+  <p class="muted" style="margin:8px 0 0">
+    <b>报文结构不用纠结</b>：系统按上面选的先发一次，没查到轨迹会<b>自动换另一种结构重发</b>（签名按新报文重算），
+    选错只是多花一次请求，不会查不了 —— 测试查询里能看到「实际生效的报文结构」。
+    常见回执（<b>真实凭据实测过的口径</b>）：<b>S02</b> 秘钥与 CPCODE 不匹配；
+    <b>S23</b> logistic_provider_id 不对或没授权（<span class="mono">can't find app through fromCode</span>）；
+    <b>S18</b> 这个应用没订阅该 msg_type 的接口（<span class="mono">can't find plugin subscription</span>）；
+    <b>S13</b> 服务端取请求对象取到 null（<span class="mono">Source must not be null</span>）——
+    两种报文结构都试过还是它，就是菜鸟侧没配好，把「测试查询」里的原文发给菜鸟对接人；
+    <b>500 / SystemError</b> 网关自身异常或报文格式不对。
+  </p>
+
+  <hr style="margin:16px 0; border:none; border-top:1px solid var(--c-border)">
+  <h3 style="margin:0 0 6px">测试查询</h3>
+  <p class="muted" style="margin:0 0 10px">
+    填一个真实运单号，当场把这条链路走一遍：发出的报文、菜鸟回的原文、解析出的轨迹都摆出来 ——
+    配没配对一眼就知道，不用猜 S02 / S18 到底哪儿不对。不动订单、不改状态，纯试。
+  </p>
+  <form class="filters" method="post" action="/settings/logistics/test">
+    <div class="field grow"><label>运单号（必填）</label>
+      <input type="text" name="test_mail_no" value="{{ cainiao_test_result.mail_no if cainiao_test_result else '' }}"
+             placeholder="如 YT1134420815964" class="mono">
+    </div>
+    <div class="field"><label>收件人手机后 4 位（选填）</label>
+      <input type="text" name="test_phone" maxlength="4" placeholder="1234" class="mono" style="width:96px">
+    </div>
+    <div class="field"><label>cpCode（选填，留空按单号识别）</label>
+      <input type="text" name="test_cp_code" value="{{ cainiao_test_result.cp_code if cainiao_test_result else '' }}"
+             placeholder="YTO" class="mono" style="width:110px">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">测试查询</button></div>
+  </form>
+
+  {% if cainiao_test_result %}
+  {% set tr = cainiao_test_result %}
+  <div class="note {{ '' if tr.ok else 'danger' }}" style="margin-top:10px" role="alert">
+    <b>{{ '调用成功' if tr.ok else '调用失败' }}</b>
+    {% if tr.ok %}
+      · 轨迹 {{ tr.nodes | length }} 条{% if tr.status %} · 状态 {{ tr.status }}{% endif %}
+      {% if not tr.nodes %}· {{ tr.msg }}{% endif %}
+    {% else %}· {{ tr.msg }}{% endif %}
+    · HTTP {{ tr.http_status or '—' }} · {{ tr.elapsed_ms }} ms
+    {% if tr.interface_style %}· 报文结构 {{ '包一层 arg0' if tr.interface_style == 'arg0' else '平铺' }}{% endif %}
+  </div>
+
+  <details style="margin-top:8px" open>
+    <summary style="cursor:pointer">请求与响应原文（排查就看这里）</summary>
+    <div class="kv" style="margin-top:8px">
+      <div class="k">网关地址</div><div class="v mono">{{ tr.request_url }}</div>
+      <div class="k">msg_type</div><div class="v mono">{{ tr.request.get('msg_type') or '（未填）' }}</div>
+      <div class="k">logistic_provider_id</div><div class="v mono">{{ tr.request.get('logistic_provider_id') or '（未填）' }}</div>
+      <div class="k">logistics_interface</div><div class="v mono">{{ tr.request.get('logistics_interface') }}</div>
+      <div class="k">data_digest</div><div class="v mono">{{ tr.request.get('data_digest') }}</div>
+      <div class="k">实际生效的报文结构</div>
+      <div class="v mono">{{ '包一层 arg0（{"arg0": {...}}）' if tr.interface_style == 'arg0' else '平铺（{"mailNo": ...}）' }}</div>
+      {% if tr.tried and tr.tried | length > 1 %}
+      <div class="k">两次尝试</div>
+      <div class="v">
+        {% for t in tr.tried %}
+        <div class="mono" style="font-size:12px">
+          第 {{ loop.index }} 次 · {{ t.label }} · HTTP {{ t.http_status or '—' }} · {{ t.elapsed_ms }} ms · {{ t.msg or '（无错误信息）' }}
+        </div>
+        <pre class="mono" style="white-space:pre-wrap; word-break:break-all; margin:2px 0 6px; font-size:12px; color:var(--c-muted)">{{ t.raw or '（空）' }}</pre>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <div class="k">菜鸟返回原文</div>
+      <div class="v"><pre class="mono" style="white-space:pre-wrap; word-break:break-all; margin:0; font-size:12px">{{ tr.raw or '（空：网关没有返回内容）' }}</pre></div>
+    </div>
+  </details>
+
+  {% if tr.nodes %}
+  <div class="table-wrap" style="margin-top:10px">
+    <table>
+      <thead><tr><th style="width:170px">时间</th><th style="width:180px">地点</th><th>说明</th></tr></thead>
+      <tbody>
+      {% for node in tr.nodes %}
+        <tr>
+          <td class="mono">{{ node.time or '-' }}</td>
+          <td>{{ node.station or '-' }}</td>
+          <td>{{ node.desc }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>飞书应用配置</h2>
+  <form class="filters" method="post" action="/settings/save">
+    <div class="field grow"><label>FEISHU_APP_ID</label>
+      <input type="text" name="feishu_app_id" value="{{ settings.feishu_app_id }}" placeholder="cli_xxxxxxxxxxxxxxxx" class="mono">
+    </div>
+    <div class="field grow"><label>FEISHU_APP_SECRET</label>
+      <input type="text" name="feishu_app_secret" value="{{ masked_secret }}" placeholder="保持不变请留原样" class="mono">
+    </div>
+    <div class="field grow"><label>FEISHU_CHAT_IDS（多个用英文逗号分隔）</label>
+      <input type="text" name="feishu_chat_ids" value="{{ settings.feishu_chat_ids | join(',') }}" placeholder="oc_xxxxxxxxxxxxxxxx" class="mono">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存并生效</button></div>
+  </form>
+  <div class="note muted" style="margin-top:10px">
+    保存后写入 <span class="mono">{{ env_path }}</span>，立即生效且重启后保留；App Secret 以掩码显示，原样提交表示不修改。
+    {% if not env_writable %}<span class="badge failed">.env 不可写</span> 当前只能改运行时配置，容器部署需把 .env 挂载进容器。{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>页面自动刷新</h2>
+  <p class="muted" style="margin-top:0">
+    停在<b>「数据总览」</b>（首页）时，每隔一段时间自动拉一次最新数据，不用手动按刷新。
+    <br><b>订单管理页不自动刷新</b>：它是长列表、又常要勾选核对，自动刷新容易卡、也会把没提交的操作打断，需要时按浏览器刷新即可。
+  </p>
+  <form class="filters" method="post" action="/settings/save">
+    <div class="field">
+      <label>刷新频率</label>
+      <select name="auto_refresh_sec">
+        {% for sec, label in [(30, '30 秒'), (60, '60 秒（推荐）'), (120, '2 分钟'), (300, '5 分钟'), (0, '关闭自动刷新')] %}
+          <option value="{{ sec }}" {{ 'selected' if settings.auto_refresh_sec == sec }}>{{ label }}</option>
+        {% endfor %}
+        {% if settings.auto_refresh_sec not in [30, 60, 120, 300, 0] %}
+          <option value="{{ settings.auto_refresh_sec }}" selected>{{ settings.auto_refresh_sec }} 秒（.env 自定义）</option>
+        {% endif %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存</button></div>
+  </form>
+  <h2 style="margin-top:18px">截图重识别（单号没认出来时的兜底）</h2>
+  <p class="muted" style="margin-top:0">
+    订单号一直显示 <span class="mono">TMP-…</span>（临时编号）时，系统会按下面这个间隔把截图<strong>重新识别一遍</strong>：
+    整张图再认一次、并在「订单编号」旁边单独做一次纯数字识别，读出号就自动升级成正式单号。
+  </p>
+  <form class="filters" method="post" action="/settings/save">
+    <div class="field">
+      <label>重识别间隔（分钟，0 = 关闭）</label>
+      <input type="number" name="ocr_reocr_minutes" min="0" max="1440" step="5"
+             value="{{ settings.ocr_reocr_minutes }}" style="max-width:140px">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存</button></div>
+  </form>
+  <div class="note muted" style="margin-top:10px">
+    只重试最近 {{ settings.ocr_reocr_days }} 天、还没配上正式单号的订单，同一张截图最多重试 {{ settings.ocr_max_attempts }} 次；
+    识别结果里读到「疑似订单号」时不会自动写死，而是在订单详情页给出<b>一键采用</b>按钮，避免认错号。
+  </div>
+  <div class="note muted" style="margin-top:10px">
+    <b>频率是按这台机器的实测定的</b>：2 核 1.7G、应用容器 CPU 常年不到 1%，拉一次首页 / 订单页实测 30~120 毫秒；
+    就算同时十几个人盯着这两个页面，加起来也占不到一个核的零头 —— 所以<b>默认 60 秒</b>（既跟得上群里新订单，又不浪费资源），数据涨到几千单也够用。
+    <br>前端还带三道保护，都不会占用服务器：<b>切到别的标签页就暂停</b>（切回来马上恢复）、<b>正在填写 / 勾了行不刷新</b>（比如明细里勾选商品准备合并，15 秒后再看）、
+    <b>上一次加载慢会自动放慢</b>（超过 1.5 秒就把间隔翻倍，最多退到 5 分钟一次）。顶栏右侧能看到倒计时。
+  </div>
+</div>
+
+<div class="card">
+  <h2>回执推送策略</h2>
+  <form class="filters" method="post" action="/settings/notify">
+    <div class="field"><label>下发方式</label>
+      <select name="notify_mode">
+        <option value="reply" {{ 'selected' if settings.notify_mode == 'reply' }}>群内回复（默认）</option>
+        <option value="direct" {{ 'selected' if settings.notify_mode == 'direct' }}>只私信（群里不再下发）</option>
+        <option value="off" {{ 'selected' if settings.notify_mode == 'off' }}>关闭下发（不发任何消息）</option>
+      </select>
+      <span class="muted">默认「群内回复」：通知发在群里并 @ 到发送人和通知同步人，群里的记录照旧完整。
+        选「只私信」则群里完全安静，通知改私聊发给发送人 + 通知同步人（牛磊）。<b>只有每日出单汇总是 @所有人</b>，不受这里影响。</span>
+    </div>
+    <div class="field"><label>私信同步给本人</label>
+      <select name="notify_pm_sync">
+        <option value="1" {{ 'selected' if settings.notify_pm_sync }}>开启（推荐）</option>
+        <option value="0" {{ 'selected' if not settings.notify_pm_sync }}>关闭</option>
+      </select>
+      <span class="muted">群里的通知<b>照发不误</b>，再多私聊同步一条给这条消息的发送人 ——
+        群消息一刷就过去了、@ 也容易被漏掉，本人盯着自己的私信就不会错过。选「只私信」时此项自动不再重复发。</span>
+    </div>
+    <div class="field grow"><label>可发送时段（留空=全天）</label>
+      <input type="text" name="notify_active_hours" value="{{ settings.notify_active_hours }}" placeholder="09:00-22:00">
+    </div>
+    <div class="field"><label>静默时段处理</label>
+      <select name="notify_quiet_action">
+        <option value="hold" {{ 'selected' if settings.notify_quiet_action == 'hold' }}>挂起，恢复后合并补发</option>
+        <option value="drop" {{ 'selected' if settings.notify_quiet_action == 'drop' }}>丢弃不补发</option>
+      </select>
+    </div>
+    <div class="field"><label>同订单最小间隔（分钟）</label>
+      <input type="number" name="notify_min_interval_minutes" value="{{ notify_min_interval_minutes }}" min="0">
+    </div>
+    <div class="field"><label>每小时上限（0=不限）</label>
+      <input type="number" name="notify_max_per_hour" value="{{ settings.notify_max_per_hour }}" min="0">
+    </div>
+    <div class="field"><label>合并补发</label>
+      <select name="notify_digest">
+        <option value="1" {{ 'selected' if settings.notify_digest }}>多条合并为一条</option>
+        <option value="0" {{ 'selected' if not settings.notify_digest }}>逐条补发</option>
+      </select>
+    </div>
+    <div class="field"><label>时区偏移（小时）</label>
+      <input type="number" name="notify_utc_offset" value="{{ settings.notify_utc_offset }}" min="-12" max="14">
+    </div>
+    <div class="field"><label>等截图补单号（秒，0=不等）</label>
+      <input type="number" name="notify_wait_screenshot_seconds" value="{{ settings.notify_wait_screenshot_seconds }}" min="0" max="3600">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存策略</button></div>
+  </form>
+  <div class="note muted" style="margin-top:10px">
+    当前：<b>{{ '关闭下发' if settings.notify_mode == 'off' else ('私信（发送人 + 通知同步人）' if settings.notify_mode == 'direct' else '群内回复') }}</b>
+    · 时段 <b>{{ settings.notify_active_hours or '全天' }}</b>（时区 UTC{{ '%+d' % settings.notify_utc_offset }}）
+    · 此刻 <b>{{ '可发送' if notify_active_now else '静默中' }}</b>
+    · 待补发 <b>{{ notify_held_count }}</b> 条
+    · 等截图补单号 <b>{{ settings.notify_wait_screenshot_seconds }}</b> 秒
+  </div>
+  <div class="btn-row" style="margin-top:10px">
+    <form method="post" action="/settings/notify/flush" style="display:inline">
+      <button class="btn">立即补发挂起的回执</button>
+    </form>
+    <span class="muted">静默期或触发限流的回执会标记「待补发」，恢复后按会话合并成一条发送，不会漏单也不会刷屏。</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2 id="templates">通知消息模板（按场景分类）</h2>
+  <p class="muted" style="margin-top:0">
+    系统下发到飞书群 / 私信的<b>每一类通知文案</b>都能在这里自己改，按场景分成 5 组；
+    <b>留空 = 用系统内置格式</b>，保存后立即生效（写入 <span class="mono">{{ env_path }}</span>）。
+    模板里用 {% raw %}{{ 变量 }}{% endraw %} 占位，拿不准有没有值的行用 {% raw %}{% if 变量 %}…{% endif %}{% endraw %} 包起来；
+    模板写错也不会让通知发不出去，会自动退回内置格式。
+  </p>
+
+  <form method="post" action="/settings/templates">
+
+    <!-- ① 订单管理 -->
+    <details open style="margin-top:6px">
+      <summary style="cursor:pointer"><b>① 订单管理：收到订单 / 缺截图 / 重复订单</b></summary>
+      <div style="padding:10px 0 0 14px">
+        <div class="field grow">
+          <label>收到模板消息 / 订单截图后的回执</label>
+          <textarea id="notify-receipt-template" name="notify_receipt_template" rows="9"
+                    placeholder="留空 = 用系统内置格式（订单号 / 产品 / 金额 / 收货 / 供应商 / 详情）">{{ settings.notify_receipt_template }}</textarea>
+          <span class="muted">
+            可用变量：{% raw %}{{ 订单号 }}、{{ 产品 }}、{{ 产品名称 }}、{{ 规格 }}、{{ 数量 }}、{{ 金额 }}、{{ 售价 }}、{{ 成本 }}、{{ 运费 }}、{{ 手续费 }}、{{ 平台技术服务费 }}、{{ 毛利 }}、{{ 收货 }}、{{ 收货人 }}、{{ 收货电话 }}、{{ 买家 }}、{{ 供应商 }}、{{ 闲鱼号 }}、{{ 归属人 }}、{{ 备注 }}、{{ 物流单号 }}、{{ 详情链接 }}、{{ 发送人姓名 }}{% endraw %}
+          </span>
+          <span class="muted">
+            哪一行不确定有没有值，就用 {% raw %}{% if 订单号 %}订单号：{{ 订单号 }}{% endif %}{% endraw %} 这样包起来；变量没值会自动留空。
+          </span>
+          <button type="button" class="btn sm" data-fill="notify-receipt-template" data-src="tpl-default-receipt">填入当前默认模板再改</button>
+        </div>
+
+        <div class="field">
+          <label>回执 @ 谁（可多选）</label>
+          <label class="muted" style="font-weight:400">
+            <input type="checkbox" name="receipt_at_sender" value="1" {{ 'checked' if 'sender' in settings.notify_receipt_at }}>
+            @ 发这条消息的人
+          </label>
+          <label class="muted" style="font-weight:400">
+            <input type="checkbox" name="receipt_at_names_on" value="1" {{ 'checked' if 'names' in settings.notify_receipt_at }}>
+            @ 下面名单里的这些人（可多个）
+          </label>
+        </div>
+        <div class="field grow">
+          <label>回执额外 @ 的人（每行一个，可多个）</label>
+          <textarea name="notify_receipt_at_names" rows="3" placeholder="牛磊|请确认库存
+小鱼">{{ settings.notify_receipt_at_names|join('\n') }}</textarea>
+          <span class="muted">每行一个人，格式 <span class="mono">姓名</span> 或 <span class="mono">姓名|要给他说的一句话</span>；
+            只写姓名 = 只 @ 人、不带话，写了 <span class="mono">|</span> 后面这句会跟在正文后面单独 @ 他一次。
+            系统按姓名在这个群里查人（查不到就跳过、不影响通知）；<b>同一个人不会被 @ 两遍</b>。</span>
+        </div>
+
+        <div class="field grow">
+          <label>缺订单截图时的提醒</label>
+          <textarea name="notify_missing_image_template" rows="3"
+                    placeholder="留空 = 用系统内置那句（📸 这条订单还没收到订单截图…）">{{ settings.notify_missing_image_template }}</textarea>
+          <span class="muted">可用变量同上面的回执模板；同一笔订单只提醒一次，@ 发订单的人。</span>
+        </div>
+
+        <div class="field grow">
+          <label>重复订单提醒（同一笔订单在群里又发了一遍）</label>
+          <textarea name="notify_duplicate_template" rows="4"
+                    placeholder="留空 = 用系统内置格式（✅ 这笔订单已收到过…）">{{ settings.notify_duplicate_template }}</textarea>
+          <span class="muted">可用变量同上面的回执模板；@ 发这条消息的人。</span>
+        </div>
+      </div>
+    </details>
+
+    <!-- ② 推单与发货 -->
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer"><b>② 推单给供应商 / 发货同步</b></summary>
+      <div style="padding:10px 0 0 14px">
+        <div class="field grow">
+          <label>推单给供应商的文案（订单详情页「一键复制」发给供应商）</label>
+          <textarea name="push_template" rows="10"
+                    placeholder="留空 = 用系统内置格式（产品 / 收货人 / 手机号码 / 地址 / 备注 / 成本价 / 今日第几单）">{{ settings.push_template }}</textarea>
+          <span class="muted">
+            可用变量：{% raw %}{{ 产品 }}、{{ 产品名称 }}、{{ 数量 }}、{{ 收货人 }}、{{ 收货电话 }}、{{ 收货地址 }}、{{ 备注 }}、{{ 成本价 }}、{{ 是否转账 }}、{{ 第几单 }}、{{ 今日日期 }}{% endraw %}
+            <br>这里的 {% raw %}{{ 收货电话 }}{% endraw %} 是<b>完整号码</b>（供应商要能打电话），不是群里那种脱敏号码。
+          </span>
+        </div>
+
+        <div class="field grow">
+          <label>供应商发货后 · 物流单号同步到群里</label>
+          <textarea name="tracking_template" rows="5"
+                    placeholder="留空 = 用系统内置格式（🚚 已发货，物流单号…）">{{ settings.tracking_template }}</textarea>
+          <span class="muted">
+            可用变量：{% raw %}{{ 物流单号 }}、{{ 订单号 }}、{{ 产品 }}、{{ 收货 }}、{{ 收货人 }}、{{ 收货电话 }}、{{ 供应商 }}、{{ 详情链接 }}{% endraw %}；
+            @ 发这条订单的人由系统补在最前面。
+          </span>
+        </div>
+      </div>
+    </details>
+
+    <!-- ③ 退单与撤单 -->
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer"><b>③ 退单 / 撤单</b></summary>
+      <div style="padding:10px 0 0 14px">
+        <div class="field grow">
+          <label>退单通知 · @ 发送人的一句话</label>
+          <input type="text" name="refund_ack_text" value="{{ settings.refund_ack_text }}" placeholder="退单信息已收到！">
+        </div>
+        <div class="field grow">
+          <label>退单通知 · @ 供应链对接人的一句话（处理口径）</label>
+          <input type="text" name="refund_cc_text" value="{{ settings.refund_cc_text }}" placeholder="已识别到本单退单申请，会尽快联系供应链拦截处理！有问题随时沟通。">
+        </div>
+        <div class="field grow">
+          <label>通知同步人（私信 / @ 都要带上，每行一个，可填多个）</label>
+          <textarea name="refund_cc_names" rows="3" placeholder="牛磊|请优先拦截这一单
+小鱼">{{ settings.refund_cc_names|join('\n') }}</textarea>
+          <span class="muted">每行一个人，格式 <span class="mono">姓名</span> 或 <span class="mono">姓名|要给他说的一句话</span>；
+            填几个就带上几个（系统按姓名在群里逐个查人）。这些人会出现在两种地方：<b>① 所有群通知都会 @ 到他们</b>（不再只有退单）；
+            <b>② 下发方式选「私信」时，通知会额外私聊同步一份给他们</b>。没写 <span class="mono">|</span> 的人，用上面「@ 对接人时这句话」当默认文案；
+            名字要和飞书群里的备注一致，查不到的就跳过、不 @，不影响通知下发。</span>
+        </div>
+        <div class="field grow">
+          <label>退单通知 · 订单明细模板</label>
+          <textarea id="notify-refund-detail-template" name="notify_refund_detail_template" rows="6"
+                    placeholder="留空 = 用系统内置格式（订单号 / 产品 / 收货 / 处理 / 详情）">{{ settings.notify_refund_detail_template }}</textarea>
+          <span class="muted">
+            这里可用变量比上面多两个：{% raw %}{{ 处理 }}{% endraw %}（拦截口径，如「已发货，转拦截」）、{% raw %}{{ 退单关键词 }}{% endraw %}（群里写的退单关键词）。
+          </span>
+          <button type="button" class="btn sm" data-fill="notify-refund-detail-template" data-src="tpl-default-refund-detail">填入当前默认模板再改</button>
+        </div>
+
+        <div class="field">
+          <label>退单通知 @ 谁</label>
+          <label class="muted" style="font-weight:400">
+            <input type="checkbox" name="refund_at_sender" value="1" {{ 'checked' if 'sender' in settings.notify_refund_at }}>
+            @ 发这条退单消息的人
+          </label>
+          <label class="muted" style="font-weight:400">
+            <input type="checkbox" name="refund_at_cc" value="1" {{ 'checked' if 'cc' in settings.notify_refund_at }}>
+            @ 供应链对接人（上面填的姓名）
+          </label>
+          <span class="muted">两个都不勾也能发：文案照发，只是不提醒本人。</span>
+        </div>
+
+        <div class="field grow">
+          <label>撤单回执（还没发货就撤掉）</label>
+          <textarea name="notify_cancel_template" rows="5"
+                    placeholder="留空 = 用系统内置格式（🚫 已按撤单处理…）">{{ settings.notify_cancel_template }}</textarea>
+          <span class="muted">
+            可用变量：{% raw %}{{ 撤单关键词 }}{% endraw %} + 回执模板那一套变量；@ 发这条消息的人。
+          </span>
+        </div>
+      </div>
+    </details>
+
+    <!-- ④ 提示类 -->
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer"><b>④ 意图提示 / 静默期合并摘要</b></summary>
+      <div style="padding:10px 0 0 14px">
+        <div class="field grow">
+          <label>识别出退单 / 撤单意图但没落到订单上时的提示</label>
+          <textarea name="notify_intent_template" rows="5"
+                    placeholder="留空 = 用系统内置格式（⚠️ 标题 + 说明 + 空行 + 补充提示）">{{ settings.notify_intent_template }}</textarea>
+          <span class="muted">可用变量：{% raw %}{{ 标题 }}、{{ 说明 }}、{{ 提示 }}、{{ 发送人姓名 }}{% endraw %}</span>
+        </div>
+        <div class="field grow">
+          <label>静默期结束后，多条回执合并成一条的摘要</label>
+          <textarea name="notify_digest_template" rows="5"
+                    placeholder="留空 = 用系统内置格式（📦 已收到并处理 N 条订单…）">{{ settings.notify_digest_template }}</textarea>
+          <span class="muted">
+            可用变量：{% raw %}{{ 条数 }}、{{ 明细 }}{% endraw %}（每行一条、最多 20 行）、{% raw %}{{ 更多 }}{% endraw %}（还有几条没列出，没有时为空）。
+          </span>
+        </div>
+      </div>
+    </details>
+
+    <!-- ⑤ 每日汇总 -->
+    <details style="margin-top:10px">
+      <summary style="cursor:pointer"><b>⑤ 每日出单汇总（默认 24 点发）</b></summary>
+      <div style="padding:10px 0 0 14px">
+        <div class="field grow">
+          <label>汇总文案模板</label>
+          <textarea name="daily_summary_template" rows="7"
+                    placeholder="留空 = 用系统内置格式（📊 今日（日期）出单情况汇总 + 每人一行 + 合计）">{{ settings.daily_summary_template }}</textarea>
+          <span class="muted">
+            可用变量：{% raw %}{{ 日期 }}、{{ 明细 }}{% endraw %}（每人一行）、{% raw %}{{ 合计 }}、{{ 人数 }}、{{ 店铺数 }}、{{ 出单数 }}、{{ 出单金额 }}、{{ 退单数 }}、{{ 退单金额 }}、{{ 无出单 }}{% endraw %}
+            <br>这条是<b>整群日报</b>：开启 @ 时按 <b>@所有人</b> 发送（不是逐个 @），开关在下面「每日出单汇总通知」那里。
+          </span>
+        </div>
+      </div>
+    </details>
+
+    <div class="field" style="margin-top:14px"><label>&nbsp;</label><button class="btn primary">保存通知模板</button></div>
+  </form>
+</div>
+
+{# 默认模板原文：给「填入当前默认模板」按钮用（放在 script 里避免引号 / 换行被转义） #}
+<script type="text/plain" id="tpl-default-receipt">{{ notify_defaults.receipt }}</script>
+<script type="text/plain" id="tpl-default-refund-detail">{{ notify_defaults.refund_detail }}</script>
+
+<div class="card">
+  <h2>每日出单汇总通知</h2>
+  <p class="muted" style="margin-top:0">
+    每天定时把当天的出单情况按<b>「人」</b>维度汇总成一条消息推到群里：<b>出单店铺数、出单数、出单金额、退单数、退单金额</b>；
+    文案可以在上面「通知消息模板 → ⑤ 每日出单汇总」里自定义（留空用内置格式）；
+    这条是整群日报，按 <b>@所有人</b> 提醒。配置写入 <span class="mono">{{ env_path }}</span>，保存后立即生效。
+  </p>
+  <form class="filters" method="post" action="/settings/daily-summary">
+    <div class="field"><label>推送开关</label>
+      <select name="daily_summary_enabled">
+        <option value="1" {{ 'selected' if daily.enabled }}>开启</option>
+        <option value="0" {{ 'selected' if not daily.enabled }}>关闭</option>
+      </select>
+    </div>
+    <div class="field"><label>推送时刻（0~24 点）</label>
+      <input type="number" name="daily_summary_hour" value="{{ daily.hour }}" min="0" max="24">
+    </div>
+    <div class="field grow"><label>推送群 chat_id（留空=回落同步群）</label>
+      <input type="text" name="daily_summary_chat_ids" value="{{ daily.chat_ids | join(',') }}" placeholder="oc_xxxxxxxxxxxxxxxx" class="mono">
+    </div>
+    <div class="field"><label>@ 全体成员</label>
+      <select name="daily_summary_at_users">
+        <option value="1" {{ 'selected' if daily.at_users }}>开启（@所有人）</option>
+        <option value="0" {{ 'selected' if not daily.at_users }}>关闭</option>
+      </select>
+      <span class="muted">这条是整群日报：开启后消息最前面加「@所有人」，提醒全群；文案模板在上面「通知消息模板 → ⑤ 每日出单汇总」里改。</span>
+    </div>
+    <div class="field"><label>无单时</label>
+      <select name="daily_summary_skip_empty">
+        <option value="1" {{ 'selected' if daily.skip_empty }}>不推送</option>
+        <option value="0" {{ 'selected' if not daily.skip_empty }}>仍推送空汇总</option>
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存汇总配置</button></div>
+  </form>
+  <div class="note muted" style="margin-top:10px">
+    当前：<b>{{ '开启' if daily.enabled else '关闭' }}</b>
+    · 推送时刻 <b>{{ daily.hour }}:00</b>{% if daily.hour >= 24 %}（当天 24:00，即次日 00:00 推送当日汇总）{% endif %}
+    · 目标群 <b>{{ daily.chat_ids | join(',') or '回落到同步群' }}</b>
+    · 下次推送 <b>{{ daily.next }}</b>
+    · 上次推送 <b>{{ daily.last.last_date or '尚未推送过' }}</b>{% if daily.last.sent_at %}（{{ daily.last.sent_at }}）{% endif %}{# 后端已是北京时间字符串，别再过 dt #}
+  </div>
+  <div class="btn-row" style="margin-top:10px">
+    <form method="post" action="/settings/daily-summary/send" style="display:inline">
+      {# 行内操作区：日期框按固定宽度，不撑满整行（样式与其它输入框一致） #}
+      <input type="date" name="day" value="{{ daily.today }}" style="width:160px">
+      <button class="btn">推送该日汇总</button>
+    </form>
+    <span class="muted">默认推今天；手动推送会忽略「无单不推送」，用于补推或验证文案。同一天的定时汇总不会重复推送。</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>语音播报</h2>
+  <p class="muted" style="margin-top:0">
+    群里同步到新订单、供应商回单物流更新时，后台页面会语音提醒；
+    <b>开关、音量、语速、音调、语言与播报文案都在下面配置</b>，保存后立即生效（写入 <span class="mono">{{ env_path }}</span>）。
+  </p>
+  <form class="filters" method="post" action="/settings/voice">
+    <div class="field"><label>播报开关</label>
+      <select name="voice_enabled">
+        <option value="1" {{ 'selected' if voice.enabled }}>开启</option>
+        <option value="0" {{ 'selected' if not voice.enabled }}>关闭</option>
+      </select>
+    </div>
+    <div class="field"><label>音量（0~1）</label>
+      <input type="number" name="voice_volume" value="{{ voice.volume }}" min="0" max="1" step="0.1">
+    </div>
+    <div class="field"><label>语速（0.1~2）</label>
+      <input type="number" name="voice_rate" value="{{ voice.rate }}" min="0.1" max="2" step="0.1">
+    </div>
+    <div class="field"><label>音调（0~2）</label>
+      <input type="number" name="voice_pitch" value="{{ voice.pitch }}" min="0" max="2" step="0.1">
+    </div>
+    <div class="field grow"><label>朗读语言</label>
+      <input type="text" name="voice_lang" value="{{ voice.lang }}" placeholder="zh-CN" class="mono">
+    </div>
+    <div class="field grow"><label>音色（发音人）</label>
+      {# 音色列表来自当前电脑的浏览器朗读引擎，由 JS 填充；JS 没加载时保留已保存的值 #}
+      <select name="voice_name" id="voice-name-select" data-current="{{ voice.voice_name }}">
+        {% if voice.voice_name %}
+        <option value="{{ voice.voice_name }}" selected>{{ voice.voice_name }}</option>
+        {% endif %}
+        <option value="">默认（按朗读语言自动挑）</option>
+      </select>
+      <span class="muted" id="voice-picker-hint">正在读取本机可用音色…</span>
+    </div>
+    <div class="field"><label>重复播报次数</label>
+      <input type="number" name="voice_repeat" value="{{ voice.repeat }}" min="1" max="5">
+    </div>
+    <div class="field grow"><label>没录音时用什么声音</label>
+      <select name="voice_default_clip">
+        <option value="1" {{ 'selected' if voice.default_clips_enabled }}>系统默认人声（自带女声）</option>
+        <option value="0" {{ 'selected' if not voice.default_clips_enabled }}>电脑合成音（旧逻辑）</option>
+      </select>
+      <span class="muted">系统自带三段提示音，不依赖电脑；关掉就回到「用本机音色朗读」的旧策略。</span>
+    </div>
+    <div class="field grow"><label>① 新订单播报文案</label>
+      <input type="text" name="voice_order_text" value="{{ voice.templates.order }}" placeholder="你有一笔订单要处理，请实际处理！">
+    </div>
+    <div class="field grow"><label>② 供应商已发货播报文案</label>
+      <input type="text" name="voice_tracking_text" value="{{ voice.templates.tracking }}" placeholder="你有一笔订单供应商已发货，请及时完成店铺发货操作！">
+    </div>
+    <div class="field grow"><label>③ 逆向退单播报文案</label>
+      <input type="text" name="voice_refund_text" value="{{ voice.templates.refund }}" placeholder="有退单订单请及时处理拦截！">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存播报配置</button></div>
+  </form>
+  <div class="btn-row" style="margin-top:10px">
+    <button class="btn" data-voice-speak="{{ voice.templates.order }}" data-voice-kind="order" data-voice-clip="{{ voice.clips.order }}">试听① 新订单</button>
+    <button class="btn" data-voice-speak="{{ voice.templates.tracking }}" data-voice-kind="tracking" data-voice-clip="{{ voice.clips.tracking }}">试听② 供应商已发货</button>
+    <button class="btn" data-voice-speak="{{ voice.templates.refund }}" data-voice-kind="refund" data-voice-clip="{{ voice.clips.refund }}">试听③ 退单拦截</button>
+    <span class="muted">已上传录音的场景<b>直接播你的录音</b>，没上传的才按上面表单里的音色 / 语速 / 音调试听合成音。</span>
+  </div>
+
+  <h3 style="margin:16px 0 6px">用我自己的录音（mp3 / wav）</h3>
+  <p class="muted" style="margin-top:0">
+    三个场景各上传一段<b>自己录的固定提示语</b>（比如「老板，来新单了，请及时处理！」3~5 秒、安静环境下录、手机录音即可）。
+    播报优先级：<b>你的录音 → 系统自带人声 → 本机浏览器合成音</b>；删除录音后回落到下一档，不会哑掉。
+  </p>
+  {% for kind, label in [('order', '① 新订单'), ('tracking', '② 供应商已发货'), ('refund', '③ 退单拦截')] %}
+  <div class="btn-row clip-row" style="margin-top:8px;align-items:center">
+    <span class="clip-label" style="min-width:130px">{{ label }}</span>
+    {% if voice.clips[kind] %}
+      <span class="badge done">已上传录音</span>
+      <button class="btn sm" data-voice-speak="" data-voice-kind="{{ kind }}" data-voice-clip="{{ voice.clips[kind] }}">▶ 听一下</button>
+      <form method="post" action="/settings/voice/clip/delete" style="display:inline">
+        <input type="hidden" name="kind" value="{{ kind }}">
+        <button class="btn sm danger" type="submit">删除</button>
+      </form>
+    {% else %}
+      {% if voice.default_clips[kind] %}
+      <span class="badge ignored" title="播报时播系统自带的中文女声提示音">未上传 · 播系统默认人声</span>
+      {% else %}
+      <span class="badge ignored" title="播报时用本机浏览器合成音朗读文案">未上传 · 播合成音</span>
+      {% endif %}
+    {% endif %}
+    <form method="post" action="/settings/voice/clip" enctype="multipart/form-data" style="display:inline-flex;gap:6px;align-items:center">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      <input type="file" name="clip" accept="audio/*">
+      <button class="btn sm" type="submit">上传替换</button>
+    </form>
+  </div>
+  {% endfor %}
+  <div class="note muted" style="margin-top:10px">
+    录音是<b>固定一段话</b>，所以文案里的 <span class="mono">{订单号}</span> 这类变量在录音里读不出来；需要读出单号的话，别给那段场景传录音（留空），它仍会走上面的合成音。
+    支持 mp3 / wav / m4a / aac / ogg / webm / flac，单个文件不超过 10MB；文件存在服务器的 media/voice 下，重建容器不丢。
+  </div>
+  <div class="note muted" style="margin-top:10px">
+    音色怎么来的：<b>由打开后台的这台电脑 + 浏览器决定</b>（Web Speech），不是服务器决定的。想多几个音色：
+    Windows「设置 → 时间和语言 → 语音」添加中文语音；macOS「系统设置 → 辅助功能 → 朗读内容 → 系统语音 → 管理语音」下载中文语音（如 Ting-Ting 增强版）；
+    Chrome / Edge 联网即可用自带的云端音色。换一台电脑要在那台机器上重新挑一次（找不到该音色时会自动按语言回落，不会哑掉）。
+  </div>
+  <div class="note muted" style="margin-top:10px">
+    文案支持占位符：<span class="mono">{订单号}</span>、<span class="mono">{产品}</span>、<span class="mono">{供应商}</span>、
+    <span class="mono">{收货人}</span>、<span class="mono">{物流单号}</span>，例如「订单 {订单号} 已发货，物流单号 {物流单号}」。
+    当前：<b>{{ '已开启' if voice.enabled else '已关闭' }}</b> · 音量 <b>{{ voice.volume }}</b> · 语速 <b>{{ voice.rate }}</b> · 音调 <b>{{ voice.pitch }}</b> · 语言 <b>{{ voice.lang }}</b> · 音色 <b>{{ voice.voice_name or '默认' }}</b>。
+  </div>
+</div>
+
+<div class="card">
+  <h2>数据备份</h2>
+  <div class="kv">
+    <div class="k">自动备份</div><div class="v">
+      {% if backup_enabled %}<span class="badge done">已开启</span> 每天北京时间 <b>{{ '%02d' % backup_hour }}:00</b> 备份一次订单数据
+      {% else %}<span class="badge ignored">未开启</span>{% endif %}
+    </div>
+    <div class="k">保留策略</div><div class="v">只保留最近 <b>{{ keep_days }}</b> 天，超期自动删除</div>
+    <div class="k">下次备份</div><div class="v">{{ backup_next }}</div>
+    <div class="k">已有备份</div><div class="v">{{ backup_count }} 个
+      {% if backup_latest %} · 最近一次 <b>{{ backup_latest.generated_at }}</b>{# 同上：后端已按北京格式化 #}（{{ backup_latest.order_count }} 单，{{ backup_latest.size_text }}）{% endif %}
+    </div>
+    <div class="k">备份目录</div><div class="v"><span class="mono">{{ backup_dir }}</span></div>
+  </div>
+  <div class="btn-row" style="margin-top:10px">
+    <a class="btn primary" href="/backups">查看 / 下载备份文件</a>
+    <span class="muted">也可以在该页手动立即备份、清理超期文件。</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>上行模板与截图样例</h2>
+  <p class="muted" style="margin-top:0">
+    群里按下面的模板发送订单消息，每条模板消息<strong>配 1 张订单详情截图</strong>；
+    截图里的订单编号会作为订单主键（没有截图时先落临时编号 TMP-…，补到截图后自动换成真实编号）。
+    模板里的字段名小幅调整也能识别（例如写成「产品」而不是「产品名称」）。
+  </p>
+  <div class="grid grid-2">
+    <div class="field">
+      <label>标准模板（群里上行格式）</label>
+      <pre class="raw">{{ template_sample }}</pre>
+    </div>
+    <div class="field">
+      <label>订单截图必须包含的字段</label>
+      <ul class="tick-list">
+        <li>收货人、手机号码、地址信息</li>
+        <li>商品图与商品名称（截图的商品全称会补全/更新模板里的产品名称）</li>
+        <li>售价、成交价、商品总价、运费</li>
+        <li>订单编号（作为订单主键；识别不到时用时间 + 产品信息生成临时编号）</li>
+      </ul>
+      <p class="muted" style="margin:0">
+        模板里留空的字段（成本价、所属供应链、出货闲鱼号、回款支付宝归属人）会保持为空，
+        等后台补录；没有配套截图时系统会回群提醒发送人补发，同一条只提醒一次。
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>已添加的同步群</h2>
+    {% if chats %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>chat_id</th><th>名称</th><th class="num">消息数</th><th>最近同步</th><th></th></tr></thead>
+        <tbody>
+        {% for c in chats %}
+          <tr>
+            <td class="mono">{{ c.chat_id }}</td>
+            <td>{{ c.chat_name or '-' }}</td>
+            <td class="num">{{ c.message_count }}</td>
+            <td class="nowrap muted">{{ human_time(c.last_synced_at) }}</td>
+            <td>
+              <form method="post" action="/settings/chats/{{ c.chat_id }}/delete" style="display:inline">
+                <button class="btn sm danger">移除</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty">尚未添加群</div>{% endif %}
+
+    <h3>手动添加群</h3>
+    <form class="filters" method="post" action="/settings/chats">
+      <div class="field grow"><label>chat_id（oc_ 开头）</label><input type="text" name="chat_id" placeholder="oc_xxxxxxxx"></div>
+      <div class="field"><label>备注名</label><input type="text" name="chat_name" placeholder="如：闲鱼订单群"></div>
+      <div class="field"><label>&nbsp;</label><button class="btn primary">添加</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>机器人所在群（来自飞书）</h2>
+    {% if bot_chats %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>群名称</th><th>chat_id</th><th>类型</th><th></th></tr></thead>
+        <tbody>
+        {% for c in bot_chats %}
+          <tr>
+            <td>{{ c.name }}</td>
+            <td class="mono">{{ c.chat_id }}</td>
+            <td class="muted">{{ '外部群' if c.external else '内部群' }}</td>
+            <td>
+              <form method="post" action="/settings/chats" style="display:inline">
+                <input type="hidden" name="chat_id" value="{{ c.chat_id }}">
+                <input type="hidden" name="chat_name" value="{{ c.name }}">
+                <button class="btn sm">加入同步</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty">配置凭证后即可列出机器人所在群</div>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>接入步骤</h2>
+  <div class="kv" style="grid-template-columns: 28px 1fr">
+    <div class="k">1</div><div class="v">在飞书开放平台创建<b>企业自建应用</b>，开通权限：<span class="mono">im:message</span>、<span class="mono">im:resource</span>、<span class="mono">im:chat</span>、<span class="mono">im:message:send_as_bot</span>（可选）。</div>
+    <div class="k">2</div><div class="v">把机器人<b>拉进订单群</b>，并在后台「事件订阅」中添加事件 <span class="mono">接收消息 im.message.receive_v1</span>。</div>
+    <div class="k">3</div><div class="v">请求方式选择<b>将事件发送至开发者服务器</b>，地址填 <span class="mono">{{ settings.public_base_url }}/feishu/event</span>；若配置了 Encrypt Key，请同步填入 <span class="mono">FEISHU_ENCRYPT_KEY</span>。</div>
+    <div class="k">4</div><div class="v">把 App ID / App Secret 写入 <span class="mono">.env</span>，重启服务；无法公网回调时可设置 <span class="mono">FEISHU_AUTO_SYNC=1</span> 使用轮询拉取。</div>
+    <div class="k">5</div><div class="v">在「解析规则」页粘贴群里的真实订单消息做测试，调整标签直到字段全部命中。</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  // 「填入当前默认模板再改」：把系统内置格式填进输入框，方便在其基础上改
+  document.querySelectorAll('button[data-fill]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = document.getElementById(btn.dataset.fill);
+      var src = document.getElementById(btn.dataset.src);
+      if (!target || !src) return;
+      target.value = (src.textContent || '').trim();
+      target.focus();
+    });
+  });
+})();
+</script>
+<script>
+  // 语音播报：音色列表取自当前电脑的浏览器朗读引擎，试听按表单里「未保存」的值朗读
+  (function () {
+    var form = document.querySelector('form[action="/settings/voice"]');
+    var sel = document.getElementById('voice-name-select');
+    var hint = document.getElementById('voice-picker-hint');
+    var supported = typeof window.speechSynthesis !== 'undefined' &&
+      typeof window.SpeechSynthesisUtterance !== 'undefined';
+
+    function voicesList() {
+      try {
+        return window.speechSynthesis.getVoices() || [];
+      } catch (err) {
+        return [];
+      }
+    }
+
+    function fillVoices() {
+      if (!sel) return;
+      var list = voicesList();
+      if (!list.length) {
+        if (hint) {
+          hint.textContent = '这台电脑 / 浏览器没有读到可用音色：建议用 Chrome / Edge，或在系统里安装中文语音。';
+        }
+        return;
+      }
+      var current = sel.dataset.current || '';
+      sel.innerHTML = '';
+      var def = document.createElement('option');
+      def.value = '';
+      def.textContent = '默认（按朗读语言自动挑）';
+      sel.appendChild(def);
+
+      var zh = [], other = [];
+      list.forEach(function (v) { (/^zh/i.test(v.lang || '') ? zh : other).push(v); });
+
+      function group(title, rows) {
+        if (!rows.length) return;
+        var box = document.createElement('optgroup');
+        box.label = title;
+        rows.sort(function (a, b) { return String(a.name).localeCompare(String(b.name), 'zh-CN'); });
+        rows.forEach(function (v) {
+          var o = document.createElement('option');
+          o.value = v.name;
+          o.textContent = v.name + ' · ' + (v.lang || '') + (v.localService ? ' · 本机' : ' · 云端');
+          box.appendChild(o);
+        });
+        sel.appendChild(box);
+      }
+      group('中文音色（' + zh.length + ' 个）', zh);
+      group('其它语言（' + other.length + ' 个）', other);
+
+      var hit = list.some(function (v) { return v.name === current; });
+      if (current && hit) {
+        sel.value = current;
+      } else if (current) {
+        // 服务器里配了这台机器没有的音色：保留配置值，但提示会回落
+        var o = document.createElement('option');
+        o.value = current;
+        o.textContent = current + ' · 本机没有这个音色（会自动按语言回落）';
+        sel.appendChild(o);
+        sel.value = current;
+      }
+      if (hint) {
+        hint.textContent = '本机共 ' + list.length + ' 个音色（中文 ' + zh.length + ' 个）；选好点下面「试听」，满意再保存。';
+      }
+    }
+
+    function clamp(raw, def, lo, hi) {
+      var n = parseFloat(raw);
+      if (isNaN(n)) n = def;
+      return Math.min(Math.max(n, lo), hi);
+    }
+
+    function formValue(name) {
+      var el = form && form.querySelector('[name="' + name + '"]');
+      return el ? el.value : '';
+    }
+
+    function pickVoice(lang, wanted) {
+      var list = voicesList();
+      var i;
+      if (wanted) {
+        for (i = 0; i < list.length; i++) { if (list[i].name === wanted) return list[i]; }
+      }
+      for (i = 0; i < list.length; i++) {
+        if (String(list[i].lang || '').toLowerCase().indexOf(lang.toLowerCase()) === 0) return list[i];
+      }
+      for (i = 0; i < list.length; i++) { if (/^zh/i.test(list[i].lang || '')) return list[i]; }
+      return null;
+    }
+
+    function preview(text) {
+      if (!text) return;
+      if (!supported) {
+        alert('当前浏览器不支持语音播报，请使用 Chrome / Edge 等新版浏览器。');
+        return;
+      }
+      var lang = String(formValue('voice_lang') || 'zh-CN').trim() || 'zh-CN';
+      var u = new SpeechSynthesisUtterance(text);
+      u.lang = lang;
+      u.volume = clamp(formValue('voice_volume'), 1, 0, 1);
+      u.rate = clamp(formValue('voice_rate'), 1, 0.1, 10);
+      u.pitch = clamp(formValue('voice_pitch'), 1, 0, 2);
+      var v = pickVoice(lang, String(formValue('voice_name') || '').trim());
+      if (v) u.voice = v;
+      try {
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(u);
+        if (window.OrderVoice) window.OrderVoice.toast('🔊 ' + text);
+      } catch (err) {
+        alert('朗读失败：' + err);
+      }
+    }
+
+    document.querySelectorAll('[data-voice-speak]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var clip = btn.dataset.voiceClip || '';
+        var kind = btn.dataset.voiceKind || '';
+        var text = btn.dataset.voiceSpeak || '刚刚上传的录音';
+        if (clip && window.OrderVoice && window.OrderVoice.play) {
+          window.OrderVoice.play(kind, text, clip);  // 有录音：直接听录音
+          return;
+        }
+        if (!supported) {
+          alert('当前浏览器不支持语音播报，请使用 Chrome / Edge 等新版浏览器。');
+          return;
+        }
+        preview(text);  // 没录音：按表单里选好的音色 / 语速 / 音调试听合成音
+      });
+    });
+
+    if (supported) {
+      fillVoices();
+      // 音色列表是异步加载的：变化了再刷一次，并把语言变化同步到下拉提示
+      try { window.speechSynthesis.onvoiceschanged = fillVoices; } catch (err) { /* 忽略 */ }
+    } else if (hint) {
+      hint.textContent = '当前浏览器不支持语音播报，请改用 Chrome / Edge。';
+    }
+  })();
+</script>
+{% endblock %}

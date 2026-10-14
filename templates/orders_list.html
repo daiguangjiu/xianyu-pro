@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}订单 · 供应链小鱼{% endblock %}
+
+{% macro status_badge(s) -%}
+  <span class="badge badge-status-{{ s }}" title="{{ s }}">{{ status_labels.get(s, s) }}</span>
+{%- endmacro %}
+
+{% macro money(v) -%}
+  ¥{{ '%.2f' % (v | float) }}
+{%- endmacro %}
+
+{% macro amount(v) -%}
+  {% if v and (v | float) > 0 %}{{ money(v) }}{% else %}<span class="text-secondary">—</span>{% endif %}
+{%- endmacro %}
+
+{# 2026-10-12：列表不再堆 14 列数字，按「这笔单现在走到哪一步 + 下一步要干嘛」排。
+   金额只留售价与毛利，其余（退款 / 成本 / 运费 / 技术服务费）在详情页看。 #}
+{% macro flow_of(dso) -%}
+  {% set s = dso.status %}
+  {% if s == 'pending' %}待你确认接单
+  {% elif s == 'confirmed' %}已确认，待推给渔枢系统采购
+  {% elif s == 'pushed' %}已推单，渔枢系统采购中
+  {% elif s == 'shipped' %}已发货{% if dso.shipping_no %} · {{ dso.shipping_company or '' }} {{ dso.shipping_no }}{% endif %}
+  {% elif s == 'completed' %}交易完成
+  {% elif s == 'refunding' %}退款中，等平台处理
+  {% elif s == 'refunded' %}已退款
+  {% elif s == 'exception' %}异常单，需要人工处理
+  {% elif s == 'cancelled' %}已取消
+  {% else %}{{ status_labels.get(s, s) }}
+  {% endif %}
+{%- endmacro %}
+
+{% macro next_of(dso) -%}
+  {% set s = dso.status %}
+  {% if s == 'pending' %}去确认接单
+  {% elif s == 'confirmed' %}推给渔枢系统采购
+  {% elif s == 'pushed' %}等平台发货
+  {% elif s == 'shipped' %}确认收货
+  {% elif s == 'refunding' %}登记退款结果
+  {% elif s == 'exception' %}去处理异常
+  {% else %}看详情
+  {% endif %}
+{%- endmacro %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>订单</h1>
+    <span class="page-subtitle">
+      渔货栈出的单先落在这里 · 共 {{ total }} 笔（最近 200）
+      {% if hub_available %}· 其中 {{ hub_count }} 笔已在渔枢系统建档{% endif %}
+    </span>
+  </div>
+</div>
+
+{% if msg %}
+<div class="alert alert-{{ 'danger' if kind == 'err' else ('warning' if kind == 'warn' else 'success') }}">{{ msg }}</div>
+{% endif %}
+
+{# 状态筛选 chips #}
+<div class="d-flex gap-2 flex-wrap mb-4 align-items-center">
+  <a href="{{ self_url('/orders') }}"
+     class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+    全部 <span class="ms-1" style="font-family: var(--font-mono);">{{ total }}</span>
+  </a>
+  {# 状态机里定义过的状态都列出来（含新增的已发货 / 退款中 / 已取消），顺序也按正向流程 #}
+  {% for st in status_order %}
+    {% set cnt = status_counts.get(st, 0) %}
+    <a href="{{ self_url('/orders?status=' ~ st) }}"
+       class="btn btn-sm {% if status_filter == st %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+      {{ status_badge(st) }}
+      <span class="ms-1" style="font-family: var(--font-mono);">{{ cnt }}</span>
+    </a>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          {# 金额列与渔枢系统同一口径：售价 → 退款给客户 → 采购成本 → 供应链退款 → 平台技术服务费 → 毛利 #}
+          <th>订单号</th>
+          <th>商品</th>
+          <th>收货人</th>
+          <th class="text-end" title="买家实付：优先取渔枢系统端成交价，没有就用渔货栈下游单售价">售价</th>
+          <th class="text-end" title="毛利 = 售价 − 采购成本 − 运费 − 平台技术服务费（以渔枢系统为准）">毛利</th>
+          <th>现在走到哪一步</th>
+          <th>下一步</th>
+          <th class="text-end">下单时间</th>
+          <th class="table-actions"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          {% set dso = r.dso %}
+          {% set hub = r.hub %}
+          {% set po_cost = r.pos | sum(attribute='cost_price') %}
+          <tr>
+            <td>
+              <a href="{{ self_url('/orders/' ~ dso.downstream_order_id) }}" class="mono text-decoration-none"
+                 style="color: var(--c-primary);">{{ r.order_no }}</a>
+            </td>
+            <td>
+              {% if hub and hub.product_name %}
+                {{ hub.product_name }}{% if hub.spec %}<span class="text-secondary"> / {{ hub.spec }}</span>{% endif %}
+              {% else %}
+                <code class="k">{{ dso.channel_sku_id }}</code>
+              {% endif %}
+              <div class="mono-sm">
+                {% if hub %}
+                  <a href="{{ hub.url }}" class="text-decoration-none"
+                     title="在渔枢系统打开这笔单：{{ hub.state_text }} / {{ hub.supplier_status_text }}">
+                    渔枢系统已建档 <i class="bi bi-box-arrow-up-right"></i>
+                  </a>
+                {% elif hub_available %}
+                  <span style="color: var(--c-warning);" title="这笔单还没推到渔枢系统：详情页可以补推">渔枢系统未建档</span>
+                {% endif %}
+              </div>
+            </td>
+            <td class="small">
+              {% if hub and hub.receiver_name %}{{ hub.receiver_name }}
+              {% else %}{{ dso.buyer_name or '—' }}{% endif %}
+              <div class="mono-sm text-secondary">{% if hub and hub.quantity %}{{ hub.quantity }}{% else %}{{ dso.qty }}{% endif %} 件</div>
+            </td>
+            <td class="text-end mono">
+              {% if hub and hub.paid %}{{ money(hub.paid) }}{% else %}{{ money(dso.sale_price) }}{% endif %}
+            </td>
+            <td class="text-end mono">
+              {% if hub and hub.cost_amount %}{{ money(hub.net_profit) }}
+              {% else %}<span class="text-secondary">—</span>{% endif %}
+            </td>
+            <td>
+              {{ status_badge(dso.status) }}
+              <div class="mono-sm text-secondary">{{ flow_of(dso) }}</div>
+            </td>
+            <td class="small">
+              <a href="{{ self_url('/orders/' ~ dso.downstream_order_id) }}" class="text-decoration-none">
+                {{ next_of(dso) }} <i class="bi bi-chevron-right"></i>
+              </a>
+            </td>
+            <td class="text-end mono-sm text-secondary">{{ dso.created_at | dt('%m-%d %H:%M') }}</td>
+            <td class="table-actions">
+              <a href="{{ self_url('/orders/' ~ dso.downstream_order_id) }}" class="btn btn-sm btn-ghost" title="订单详情">详情</a>
+            </td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9" class="text-center text-secondary py-5">暂无订单</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

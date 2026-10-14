@@ -1,0 +1,174 @@
+{# 公司资源 · 手机号：新增 / 编辑同一张表单。
+   字段多，按业务分成四块：号码信息 / 归属（实名）/ 套餐 / 平台账号注册 / 其它 #}
+{% extends "base.html" %}
+{% block title %}{{ '编辑手机号' if is_edit else '新增手机号资源' }}{% endblock %}
+{% block heading %}{{ '编辑手机号' if is_edit else '新增手机号资源' }}{% endblock %}
+{% block sub %}{{ '改完点保存：实名、套餐、平台账号的改动都留在台账里（停用不删记录）' if is_edit else '一个号填一条：号码与归属是必填，平台账号开了哪个勾哪个（后面随时能改）' }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/phone-numbers"><i class="bi bi-arrow-left" aria-hidden="true"></i> 返回手机号管理</a>
+{% endblock %}
+{% block content %}
+
+{% set p = phone if is_edit else None %}
+{% set cur_nature = (p.nature if p else 'personal') %}
+{% set cur_card = (p.card_type if p else 'main') %}
+{% set cur_plan = (p.plan if p else 'postpaid') %}
+{% set cur_carrier = (p.carrier if p else '') %}
+
+<form method="post" action="{% if is_edit %}/phone-numbers/{{ p.id }}/edit{% else %}/phone-numbers/create{% endif %}" id="phoneForm">
+
+  {# —— 1. 号码信息 —— #}
+  <div class="card">
+    <h2><i class="bi bi-phone" aria-hidden="true"></i> 号码信息</h2>
+    <div class="field-row auto">
+      <div class="field">
+        <label>手机号 <span class="muted">*</span></label>
+        <input type="text" name="number" required maxlength="20" inputmode="numeric"
+               value="{{ p.number if p else '' }}" placeholder="11 位手机号（138 0000 0000 这种写法也认）">
+        <p class="help">存的时候会去掉空格与 +86，同一个号不能录两遍</p>
+      </div>
+      <div class="field">
+        <label>运营商</label>
+        <select name="carrier">
+          <option value="">未知 / 不填</option>
+          {% for k in carrier_choices %}
+            <option value="{{ k }}" {% if cur_carrier == k %}selected{% endif %}>{{ carrier_text.get(k, k) }}</option>
+          {% endfor %}
+        </select>
+        <p class="help">拿号时不知道可以后面补</p>
+      </div>
+      <div class="field">
+        <label>账号类型 <span class="muted">*</span></label>
+        <select name="card_type" id="cardTypeSel">
+          {% for k in card_choices %}
+            <option value="{{ k }}" {% if cur_card == k %}selected{% endif %}>{{ card_text.get(k, k) }}</option>
+          {% endfor %}
+        </select>
+        <p class="help">副卡要填挂在哪个主卡下</p>
+      </div>
+      <div class="field" id="parentField">
+        <label>主卡号码</label>
+        <input type="text" name="parent_number" maxlength="20" inputmode="numeric"
+               value="{{ p.parent_number if p else '' }}" placeholder="副卡填主卡的号码">
+        <p class="help">只有副卡才填；主卡留空</p>
+      </div>
+    </div>
+  </div>
+
+  {# —— 2. 归属（谁实名）—— #}
+  <div class="card">
+    <h2><i class="bi bi-person-badge" aria-hidden="true"></i> 归属</h2>
+    <div class="field-row auto">
+      <div class="field">
+        <label>账号性质 <span class="muted">*</span></label>
+        <select name="nature">
+          {% for k in nature_choices %}
+            <option value="{{ k }}" {% if cur_nature == k %}selected{% endif %}>{{ nature_text.get(k, k) }}</option>
+          {% endfor %}
+        </select>
+        <p class="help">个人号 = 个人实名；企业主体号 = 公司名下开的号</p>
+      </div>
+      <div class="field">
+        <label>所属人（实名人）<span class="muted">*</span></label>
+        <input type="text" name="owner_name" required maxlength="64"
+               value="{{ p.owner_name if p else '' }}" placeholder="个人号写本人，企业主体号写经办人">
+        <p class="help">资源的归属：出了事找谁、账号能不能过户都看它</p>
+      </div>
+    </div>
+  </div>
+
+  {# —— 3. 套餐 —— #}
+  <div class="card">
+    <h2><i class="bi bi-credit-card" aria-hidden="true"></i> 套餐</h2>
+    <div class="field-row auto">
+      <div class="field">
+        <label>付费方式 <span class="muted">*</span></label>
+        <select name="plan" id="planSel">
+          {% for k in plan_choices %}
+            <option value="{{ k }}" {% if cur_plan == k %}selected{% endif %}>{{ plan_text.get(k, k) }}</option>
+          {% endfor %}
+        </select>
+        <p class="help">按月后付费（先用后出账）/ 预充值（先充钱再扣）</p>
+      </div>
+      <div class="field">
+        <label>月租 / 套餐金额（元）</label>
+        <input type="number" name="monthly_fee" step="0.01" min="0"
+               value="{{ p.monthly_fee if p and p.monthly_fee else '' }}" placeholder="如 19">
+        <p class="help">后付费写每月固定花多少，预充值写充值面额</p>
+      </div>
+      <div class="field" id="balanceField">
+        <label>预充值余额（元）</label>
+        <input type="number" name="balance" step="0.01" min="0"
+               value="{{ p.balance if p and p.balance else '' }}" placeholder="只有预充值的号才填">
+        <p class="help">预充值才填；后付费留空</p>
+      </div>
+    </div>
+  </div>
+
+  {# —— 4. 平台账号注册情况 —— #}
+  <div class="card">
+    <h2><i class="bi bi-shop" aria-hidden="true"></i> 平台账号注册情况</h2>
+    <p class="help" style="margin-top:-4px">
+      这个号开出了哪些平台的账号：勾了就是已注册，后面随时能改（列表页也能直接勾）。
+      <b>只记有没有注册，不存任何登录凭据</b>（密码 / Cookie 一律不入库）。
+    </p>
+    <div class="field-row auto">
+      {% for key, label, icon in platforms %}
+      <div class="field">
+        <label>&nbsp;</label>
+        {# hidden 在前：不勾时提交 0（取消勾选也能改回「没注册」） #}
+        <input type="hidden" name="{{ key }}" value="0">
+        <label class="check" style="width:100%">
+          <input type="checkbox" name="{{ key }}" value="1" {% if p and p.registered(key) %}checked{% endif %}>
+          <i class="bi {{ icon }}" aria-hidden="true"></i> 是否注册{{ label }}账号
+        </label>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# —— 5. 其它 —— #}
+  <div class="card">
+    <h2><i class="bi bi-journal-text" aria-hidden="true"></i> 其它</h2>
+    <div class="field-row auto">
+      <div class="field">
+        <label>状态</label>
+        <select name="enabled">
+          <option value="1" {% if not p or p.enabled %}selected{% endif %}>启用中</option>
+          <option value="0" {% if p and not p.enabled %}selected{% endif %}>已停用（不再使用）</option>
+        </select>
+        <p class="help">停用 = 停机保号 / 已回收，记录保留</p>
+      </div>
+      <div class="field span-2">
+        <label>备注</label>
+        <textarea name="note" rows="3" placeholder="这个号在干什么：绑了哪台设备 / 开过哪些号 / 为什么停用">{{ p.note if p else '' }}</textarea>
+      </div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button class="btn primary" type="submit">{{ '保存' if is_edit else '新增手机号资源' }}</button>
+    <a class="btn" href="/phone-numbers">取消</a>
+  </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /* 副卡才填主卡号、预充值才填余额：不相关的字段收起来，表单不至于让人看花眼 */
+  (function () {
+    var cardSel = document.getElementById('cardTypeSel');
+    var parentField = document.getElementById('parentField');
+    var planSel = document.getElementById('planSel');
+    var balanceField = document.getElementById('balanceField');
+    function sync() {
+      if (cardSel && parentField) parentField.style.display = cardSel.value === 'sub' ? '' : 'none';
+      if (planSel && balanceField) balanceField.style.display = planSel.value === 'prepaid' ? '' : 'none';
+    }
+    if (cardSel) cardSel.addEventListener('change', sync);
+    if (planSel) planSel.addEventListener('change', sync);
+    sync();
+  })();
+</script>
+{% endblock %}

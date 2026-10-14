@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}{{ take.take_no }}{% endblock %}
+{% block actions %}<a class="btn" href="/wms/stocktake">返回列表</a>{% endblock %}
+
+{% block content %}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">账面</div><div class="value">{{ take.plan_qty }}</div></div>
+  <div class="stat"><div class="label">实盘</div><div class="value">{{ take.actual_qty }}</div></div>
+  <div class="stat {{ 'danger' if take.diff_qty else 'ok' }}"><div class="label">差异</div>
+    <div class="value">{{ take.diff_qty }}</div>
+    <div class="hint">{{ (take.diff_rate * 100) | round(2) }}% · ¥{{ money(take.diff_amount) }}</div></div>
+  <div class="stat"><div class="label">状态</div><div class="value sm">{{ take.status }}</div>
+    <div class="hint">{% if take.need_upgrade %}差异超阈值，已升级主管核查{% endif %}</div></div>
+</div>
+
+{% if take.status == 'draft' %}
+<div class="card">
+  <h2>扫码盘点</h2>
+  <form method="post" action="/wms/stocktake/{{ take.id }}/scan">
+    <div class="field-row auto">
+      <div class="field grow"><label for="s-b">扫条码</label>
+        <input id="s-b" type="text" name="barcode" placeholder="QCPH26100012" autofocus></div>
+      <div class="field"><label>&nbsp;</label><button class="btn primary">记录</button></div>
+    </div>
+  </form>
+  <form method="post" action="/wms/stocktake/{{ take.id }}/finish">
+    <button class="btn primary"><i class="bi bi-flag"></i> 结束盘点（算出差异）</button>
+  </form>
+</div>
+{% endif %}
+
+{% if take.status == 'done' %}
+<div class="card">
+  <h2>差异审批</h2>
+  <p class="d">盘亏的货会生成<b>调整流水</b>（严禁为了对平而直接改库存）。
+    {% if take.need_upgrade %}差异率 {{ (take.diff_rate * 100) | round(2) }}% 或金额 ¥{{ money(take.diff_amount) }} 超阈值，必须填核查说明。{% endif %}
+  </p>
+  <form method="post" action="/wms/stocktake/{{ take.id }}/approve">
+    <div class="field"><label for="a-n">核查说明</label>
+      <input id="a-n" type="text" name="note" placeholder="{% if take.need_upgrade %}必填{% else %}选填{% endif %}"></div>
+    <button class="btn primary">审批并生成调整流水</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card flush">
+  <h2>明细（{{ lines | length }}）</h2>
+  <div class="table-wrap"><table>
+    {# 数量（2026-10-10）：一台货可以带 N 台，盘点要点的是「台」不是「条」 #}
+    <thead><tr><th>显示编码</th><th class="num">数量</th><th>等级</th><th>账面仓</th><th>实盘仓</th><th>结果</th><th>时间</th></tr></thead>
+    <tbody>
+    {% for l in lines %}
+      <tr>
+        <td class="nowrap mono">{{ l.barcode }}</td>
+        <td class="num"><span class="qty-pill {{ 'many' if (l.qty or 1) > 1 }}">{{ l.qty or 1 }}</span></td>
+        <td>{{ bits.grade_badge(l.grade) }}</td>
+        <td>{{ wms_warehouse_label(l.book_warehouse) }}</td>
+        <td>{{ wms_warehouse_label(l.found_warehouse) if l.found else '—' }}</td>
+        <td>{% if l.found %}<span class="badge done">已盘到</span>
+            {% else %}<span class="badge failed">未盘到（盘亏候选）</span>{% endif %}</td>
+        <td class="nowrap muted">{{ (l.scanned_at or l.created_at) | dt }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

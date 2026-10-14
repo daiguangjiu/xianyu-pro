@@ -1,0 +1,104 @@
+{# WMS 通用小组件：等级色块 / 状态徽标 / 条码 —— 各页 import 后用，避免每页重写一遍 #}
+{% macro grade_badge(grade) %}
+<span class="badge {{ wms_grade_tone(grade) }}" title="等级（只由检测决定）">{{ wms_grade_label(grade) }}</span>
+{% endmacro %}
+
+{% macro status_badge(status) %}
+<span class="badge {{ wms_status_tone(status) }}" title="状态（由作业流转决定）">{{ wms_status_label(status) }}</span>
+{% endmacro %}
+
+{% macro barcode_cell(item, url=true) %}
+{% if url %}<a class="mono" href="/wms/items/{{ item.id }}">{{ item.display_code or item.barcode }}</a>
+{% else %}<span class="mono">{{ item.display_code or item.barcode }}</span>{% endif %}
+{% endmacro %}
+
+{% macro money_cell(value) %}
+{% if value %}<span class="num">¥{{ money(value) }}</span>{% else %}<span class="muted">—</span>{% endif %}
+{% endmacro %}
+
+{% macro empty(text) %}
+<div class="empty">{{ text }}</div>
+{% endmacro %}
+
+{# 三级品类选择器：一级 › 二级 › 三级，选完把「一级.二级.三级」写进 name=category 的隐藏域，
+   并把这一叶对应的渔枢系统三级类目（三级对三级）显示在下面。
+   tree = 服务端给的 CATEGORY_TREE；allow_generic=true 时多一个「通用」选项（分级规则用）。 #}
+{% macro cat_picker(tree, prefix='cat', value='', allow_generic=false, grow=false) %}
+<div class="field cat-field{% if grow %} grow{% endif %}">
+  <label for="{{ prefix }}-l1">品类（三级）</label>
+  <div class="cat-picker" id="{{ prefix }}">
+    <select id="{{ prefix }}-l1" aria-label="一级品类"></select>
+    <select id="{{ prefix }}-l2" aria-label="二级品类"></select>
+    <select id="{{ prefix }}-l3" aria-label="三级品类"></select>
+  </div>
+  <input type="hidden" name="category" id="{{ prefix }}-value" value="{{ value }}">
+  <div class="cat-map hint" id="{{ prefix }}-map"></div>
+</div>
+<script>
+window.WMS_CAT_TREE = window.WMS_CAT_TREE || {{ tree | tojson }};
+(function () {
+  var TREE = window.WMS_CAT_TREE, P = {{ prefix | tojson }};
+  var GENERIC = {{ 'true' if allow_generic else 'false' }};
+  var s1 = document.getElementById(P + '-l1'),
+      s2 = document.getElementById(P + '-l2'),
+      s3 = document.getElementById(P + '-l3'),
+      out = document.getElementById(P + '-value'),
+      map = document.getElementById(P + '-map');
+  function fill(sel, items, keep) {
+    sel.innerHTML = '';
+    items.forEach(function (it) {
+      var o = document.createElement('option');
+      o.value = it[0]; o.textContent = it[1];
+      if (it[0] === keep) o.selected = true;
+      sel.appendChild(o);
+    });
+  }
+  function kids(node) {
+    var c = (node && node.children) || {};
+    return Object.keys(c).map(function (k) { return [k, c[k].label || k]; });
+  }
+  var start = (out.value || '').split('.');
+  var v1 = start[0] || Object.keys(TREE)[0];
+  if (GENERIC && (out.value || '') === '*') v1 = '*';
+  function sync(keep2, keep3) {
+    if (v1 === '*') {
+      s2.style.display = 'none'; s3.style.display = 'none';
+      out.value = '*';
+      map.textContent = '通用：所有品类都按这条规则判级';
+      return;
+    }
+    s2.style.display = ''; s3.style.display = '';
+    var n1 = TREE[v1] || { children: {} };
+    fill(s2, kids(n1), keep2 || start[1] || Object.keys(n1.children || {})[0]);
+    var n2 = (n1.children || {})[s2.value] || { children: {} };
+    fill(s3, kids(n2), keep3 || (s2.value === start[1] ? start[2] : '') || Object.keys(n2.children || {})[0]);
+    render();
+  }
+  function render() {
+    var code = [v1, s2.value, s3.value].join('.');
+    out.value = code;
+    var n1 = TREE[v1] || {}, n2 = (n1.children || {})[s2.value] || {};
+    var leaf = (n2.children || {})[s3.value];
+    if (!leaf) { map.textContent = code; return; }
+    if (leaf.map) {
+      map.innerHTML = '对应渔枢系统三级类目：' + leaf.map +
+        (leaf.tickets ? ' · 对标工单 ' + leaf.tickets : '') +
+        (leaf.conf ? ' · 置信' + leaf.conf : '');
+    } else {
+      map.textContent = '这一类还没对标（等拿到工单数据再补，不猜）';
+    }
+  }
+  if (GENERIC) {
+    var items = [['*', '通用（全部品类）']].concat(
+      Object.keys(TREE).map(function (k) { return [k, TREE[k].label || k]; }));
+    fill(s1, items, v1);
+  } else {
+    fill(s1, Object.keys(TREE).map(function (k) { return [k, TREE[k].label || k]; }), v1);
+  }
+  s1.addEventListener('change', function () { v1 = s1.value; sync(); });
+  s2.addEventListener('change', function () { sync(s2.value); });
+  s3.addEventListener('change', render);
+  sync();
+})();
+</script>
+{% endmacro %}

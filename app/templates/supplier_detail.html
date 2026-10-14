@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}供应商 · {{ sup_label(supplier) }}{% endblock %}
+{% block heading %}{{ sup_label(supplier) }}{% endblock %}
+{% block sub %}{{ supplier.city or '未填城市' }} · {{ supplier.category or '未填主营类目' }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/suppliers">返回供应商列表</a>
+  <a class="btn" href="/orders?supplier={{ sup_label(supplier) }}">查看关联订单</a>
+{% endblock %}
+{% block content %}
+
+<div class="grid grid-4">
+  <div class="stat accent"><div class="label">关联订单</div><div class="value">{{ stat.orders }}</div><div class="hint">订单里填名称或编码都算这家</div></div>
+  <div class="stat"><div class="label">销售额</div><div class="value">¥{{ money(stat.sale) }}</div><div class="hint">成本 ¥{{ money(stat.cost) }}</div></div>
+  <div class="stat warn"><div class="label">待推单发货</div><div class="value">{{ stat.pending }}</div><div class="hint">可在订单页组批</div></div>
+  <div class="stat ok"><div class="label">对接微信群</div>
+    <div class="value">{{ '已建群' if supplier.has_group else '未建群' }}</div>
+    <div class="hint">{{ supplier.group_name or supplier.contact_name or '未填群名' }}</div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h2>编辑供应商信息</h2>
+  <form class="filters" method="post" action="/suppliers/{{ supplier.id }}/edit">
+    <div class="field grow"><label for="f-name">供应商名称</label>
+      <input id="f-name" type="text" name="name" required value="{{ supplier.name }}">
+    </div>
+    <div class="field"><label for="f-code">供应商编码</label>
+      <input id="f-code" type="text" name="code" value="{{ supplier.code }}" placeholder="如：GYS001">
+    </div>
+    <div class="field"><label for="f-city">城市</label>
+      <input id="f-city" type="text" name="city" value="{{ supplier.city }}" placeholder="如：深圳">
+    </div>
+    <div class="field"><label for="f-category">主营类目</label>
+      <input id="f-category" type="text" name="category" value="{{ supplier.category }}" placeholder="如：数码配件">
+    </div>
+    <div class="field"><label for="f-contact">联系人</label>
+      <input id="f-contact" type="text" name="contact_name" value="{{ supplier.contact_name }}">
+    </div>
+    <div class="field"><label for="f-info">联系方式</label>
+      <input id="f-info" type="text" name="contact_info" value="{{ supplier.contact_info }}" placeholder="手机号 / 微信号">
+    </div>
+    <div class="field"><label for="f-group">是否有对接微信群</label>
+      <span class="check">
+        <input id="f-group" type="checkbox" name="has_group" value="1" {{ 'checked' if supplier.has_group }}>
+        <span>已建群</span>
+      </span>
+    </div>
+    <div class="field"><label for="f-group-name">微信群名称</label>
+      <input id="f-group-name" type="text" name="group_name" value="{{ supplier.group_name }}" placeholder="有群时填写">
+    </div>
+    <div class="field grow"><label for="f-note">备注</label>
+      <input id="f-note" type="text" name="note" value="{{ supplier.note }}" placeholder="结算方式、账期等">
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">保存</button></div>
+  </form>
+  <div class="btn-row">
+    <form method="post" action="/suppliers/{{ supplier.id }}/delete"
+          data-confirm="删除供应商「{{ supplier.name }}」？仅删除档案，订单数据不受影响。">
+      <button class="btn danger">删除该供应商</button>
+    </form>
+    <span class="muted">创建于 {{ human_time(supplier.created_at) }} · 更新于 {{ human_time(supplier.updated_at) }}</span>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div class="row-between"><h2>最近关联订单</h2><span class="muted">订单里的「所属供应链」填 {% if supplier.code %}<span class="mono">{{ supplier.code }}</span>（编码）、{% endif %}{{ supplier.name }} 或 {{ sup_label(supplier) }} 都会匹配到，最多 10 条</span></div>
+  {% if orders %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th class="num">序号</th><th>订单号</th><th>产品名称</th><th class="num">售价</th><th>推单状态</th><th>时间</th><th></th></tr></thead>
+      <tbody>
+      {% for o in orders %}
+        <tr>
+          <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+          <td class="mono"><a href="/orders/{{ o.id }}">{{ o.order_no }}</a></td>
+          <td>{{ o.product_name or '-' }}</td>
+          <td class="num">¥{{ money(o.sale_amount) }}</td>
+          <td>
+            <span class="badge {{ 'recalled' if (o.is_recalled or o.order_state == 'canceled') else o.supplier_status }}">{{ push_status_label(o) }}</span>
+          </td>
+          <td class="nowrap muted">{{ human_time(o.ordered_at) }}</td>
+          <td class="nowrap"><a class="btn sm" href="/orders/{{ o.id }}">详情</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有匹配到订单。订单里的「所属供应链」填「{{ supplier.name }}」{% if supplier.code %} 或「{{ supplier.code }}」{% endif %} 后会自动出现在这里。</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}订单管理 · 审核台{% endblock %}
+
+{% block content %}
+{% if request.query_params.get('msg') %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid {% if request.query_params.get('ok') == '1' %}var(--c-success){% else %}var(--c-danger){% endif %};">
+  <div class="card-body" style="padding: 12px 16px;">
+    <i class="bi bi-{% if request.query_params.get('ok') == '1' %}check-circle{% else %}x-circle{% endif %}"></i>
+    {{ request.query_params.get('msg') }}
+  </div>
+</div>
+{% endif %}
+{% if not can_write %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid #b26a00;">
+  <div class="card-body" style="padding: 12px 16px; font-size: 14px;">
+    <i class="bi bi-lock"></i> 当前为<strong>只读浏览</strong>。退款审核需
+    <a href="/self/merchant/login?next=/platform/orders" style="color:var(--c-primary);">以平台管理员登录</a>。
+  </div>
+</div>
+{% endif %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>订单管理</h1>
+    <span class="page-subtitle">退款审核 · 标记退款后释放预占库存，已结算的从下期结算单扣回</span>
+  </div>
+</div>
+
+{# ====== 筛选 ====== #}
+<div class="card" style="margin-bottom: var(--s-4);">
+  <div class="card-body">
+    <form method="get" action="/self/platform/orders" class="d-flex gap-2 flex-wrap align-items-end">
+      <div class="field" style="margin:0; min-width: 220px;">
+        <label>订单号 / 买家</label>
+        <input type="text" name="keyword" value="{{ keyword }}" placeholder="搜索订单号或买家">
+      </div>
+      <button type="submit" class="btn btn-primary"><i class="bi bi-search"></i> 筛选</button>
+      <a href="/self/platform/orders" class="btn btn-outline-secondary">重置</a>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body" style="padding:0;">
+    {% if orders %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" style="margin:0;">
+        <thead>
+          <tr>
+            <th>订单号</th>
+            <th style="width:160px;">归属商家</th>
+            <th style="width:110px;">买家</th>
+            <th style="width:100px;">金额</th>
+            <th style="width:100px;">状态</th>
+            <th style="width:220px;">退款操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in orders %}
+          {% set m = merchants.get(o.merchant_id) %}
+          <tr>
+            <td>
+              <div style="font-weight:600;">{{ o.downstream_order_id }}</div>
+              <div style="font-size:12px;color:var(--c-text-muted);">{{ o.channel }} · {{ o.channel_sku_id }}</div>
+            </td>
+            <td>
+              {% if m %}
+                {{ m.short_name or m.name }}
+                <div style="font-size:12px;color:var(--c-text-muted);">{{ m.status_text }}</div>
+              {% else %}
+                <span style="color:var(--c-text-muted);">平台自营</span>
+              {% endif %}
+            </td>
+            <td>
+              {{ o.buyer_name or '-' }}
+              {% if o.buyer_phone %}
+                <div style="font-size:12px;color:var(--c-text-muted);">{{ o.buyer_phone }}</div>
+              {% endif %}
+            </td>
+            <td><strong>¥{{ '{:,.2f}'.format(o.amount) }}</strong></td>
+            <td>
+              {% if o.status == 'refunded' %}
+                <span class="badge" style="background:#fdecec;color:#b3261e;">{{ o.status_label }}</span>
+              {% elif o.status == 'completed' %}
+                <span class="badge" style="background:#eef0f3;color:#555;">{{ o.status_label }}</span>
+              {% elif o.status == 'shipped' %}
+                <span class="badge" style="background:#e6f7ee;color:#0a7a45;">{{ o.status_label }}</span>
+              {% elif o.status in ('confirmed', 'pushed') %}
+                <span class="badge" style="background:#e7f1ff;color:#1a56c4;">{{ o.status_label }}</span>
+              {% elif o.status == 'exception' %}
+                <span class="badge" style="background:#fdecec;color:#b3261e;">{{ o.status_label }}</span>
+              {% else %}
+                <span class="badge" style="background:#fff4e5;color:#b26a00;">{{ o.status_label }}</span>
+              {% endif %}
+            </td>
+            <td>
+              {% set refund = (o.raw_json or {}).get('refund') %}
+              {% if refund %}
+                <div style="font-size:12px;color:var(--c-text-muted);">
+                  已退款 · {{ refund.reason }}
+                  {% if refund.already_settled %}
+                    <div style="color:#b26a00;">已从下期结算扣回</div>
+                  {% endif %}
+                </div>
+              {% else %}
+                <form method="post" action="/self/platform/orders/{{ o.id }}/refund" style="margin:0;"
+                      onsubmit="return confirm('确认将订单 {{ o.downstream_order_id }} 标记为退款？');">
+                  <input type="text" name="reason" placeholder="退款原因"
+                         style="width:120px;font-size:12px;padding:2px 6px;">
+                  <button type="submit" class="btn btn-sm btn-outline-secondary" style="margin-left:2px;"
+                          {% if not can_write %}disabled title="需要平台管理员登录"{% endif %}>
+                    <i class="bi bi-arrow-return-left"></i> 标记退款
+                  </button>
+                </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="padding:48px;text-align:center;color:var(--c-text-muted);">
+      <i class="bi bi-receipt" style="font-size:40px;display:block;margin-bottom:12px;"></i>
+      暂无订单
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

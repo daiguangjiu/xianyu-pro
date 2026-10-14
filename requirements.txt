@@ -1,0 +1,30 @@
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.27
+sqlalchemy>=2.0,<3.0
+pydantic>=2.0,<3.0
+requests>=2.31
+jinja2>=3.1
+python-multipart>=0.0.9
+pyyaml>=6.0
+openpyxl>=3.1
+pycryptodome>=3.20
+# OCR 图片预处理（灰度/放大），开启截图 OCR 时需要
+pillow>=10.0
+# PostgreSQL 驱动（公网部署使用 docker-compose 里的 Postgres；纯 SQLite 部署可不装）
+psycopg[binary]>=3.1
+
+# ---------------------------------------------------------------------------
+# 渔货栈（渔货栈供应链中台，仓库根 src/ · templates/ · static/）
+# 与渔枢系统跑在同一个进程、同一个端口下，见 app/main.py 的 /hub 挂载
+# ---------------------------------------------------------------------------
+psycopg2-binary==2.9.9   # 渔枢系统侧 SQLAlchemy 用 psycopg2 驱动
+pydantic-settings==2.5.2
+httpx==0.27.2
+redis==5.0.8
+celery==5.4.0
+tenacity==9.0.0
+email-validator==2.2.0
+cryptography==43.0.1
+bcrypt==4.0.1
+PyJWT==2.9.0
+# 注：仓库里曾有 alembic 脚手架但从没生成过迁移（建表走 create_all + 兜底补列），已清理

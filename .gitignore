@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.playwright-cli/
+*.py[cod]
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+
+# 本地打包 / 部署临时目录、归档
+.deploy-*/
+/oh-pkg-*/
+backups/
+*.tar.gz
+*.dump
+*.zip

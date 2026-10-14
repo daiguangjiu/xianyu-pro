@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}商品字段{% endblock %}
+{% block sub %}字段以导入的 Excel 表头为准（顺序跟着表头走），之后可手工补、改名、调顺序、停用{% endblock %}
+{% block actions %}<a class="btn" href="/wms/batches">批次与建档</a>{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 一个字段一行：左栏元信息固定 200px，右栏「控件一行 + 动作按钮靠右」——
+     以前所有元素平铺在一个 flex 里，字段一多（10 个）就换行换得七零八落 */
+  .frow { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 10px 18px;
+    align-items: start; border-bottom: 1px solid var(--c-border); padding: 14px 0; margin: 0; }
+  .frow:last-child { border-bottom: none; }
+  .fmeta .fname { font-size: 14px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+  .fmeta .fkey { font-family: var(--font-mono); font-size: 11px; color: var(--c-text-muted);
+    overflow-wrap: anywhere; margin-top: 2px; }
+  .fmeta .fstat { font-size: 11.5px; color: var(--c-text-subtle); margin-top: 4px; line-height: 1.6; }
+  .fedit { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
+  .fedit .field { min-width: 110px; margin-bottom: 0; }
+  .fedit .field.grow { flex: 1 1 220px; }
+  .fedit .field.sort { max-width: 96px; }
+  .fedit select { width: auto; min-width: 96px; }
+  .fedit .check { white-space: nowrap; padding-bottom: 9px; }
+  .facts { display: flex; gap: 6px; align-items: center; margin-left: auto; padding-bottom: 1px; }
+  .badge.ml { margin-left: 6px; }
+  @media (max-width: 900px) {
+    .frow { grid-template-columns: minmax(0, 1fr); }
+    .facts { margin-left: 0; flex-wrap: wrap; width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card flush">
+  <h2>系统自带的字段</h2>
+  <p class="d">这些是货品表上真有的列，导入时直接对上就行（不用在这里登记）。</p>
+  <div class="table-wrap"><table>
+    <thead><tr><th style="width:180px">字段</th><th style="width:110px">类型</th><th>说明</th></tr></thead>
+    <tbody>{% for f in standard_fields %}
+      <tr>
+        <td><b>{{ f.label }}</b>{% if f.core %}<span class="badge done" style="margin-left:6px">必填</span>{% endif %}</td>
+        <td class="muted">{{ '数字' if f.type == 'number' else '文本' }}</td>
+        <td class="muted">{{ f.hint or '' }}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <h2>沉淀下来的字段（{{ fields | length }}）</h2>
+  <p class="d">
+    <b>字段以导入的 Excel 表头为准</b>：导表时认不出来的列按<b>表头顺序</b>登记在这里
+    （出处记在「来源」那列，写着是哪张表带来的）；之后想改名、调顺序、停用、或手工补一个都行。
+    值按「标识」存进货品的 extra，<b>改名不改值</b> —— 历史货品存过的内容不会跟着变。
+  </p>
+  {% if fields %}
+  {% for f in fields %}
+  {# 一行一个字段：左边固定「字段名 / 标识 / 在用与来源」，右边一行控件 + 右侧动作按钮组（2026-10-08 重排） #}
+  <form class="frow" method="post" action="/wms/fields">
+    <input type="hidden" name="field_id" value="{{ f.id }}">
+    <div class="fmeta">
+      <div class="fname">{{ f.label }}{% if not f.enabled %}<span class="badge muted ml">已停用</span>{% endif %}</div>
+      <div class="fkey">{{ f.key }}</div>
+      {# 出处只留在 hover 提示里：字段名后面挂一长串「（来自 某某.xlsx（2610-03））」太吵（2026-10-08 用户要求） #}
+      <div class="fstat" title="出处：{{ f.source or '手工添加' }}">{{ used.get(f.key, 0) }} 台在用</div>
+    </div>
+    <div class="fedit">
+      <div class="field grow"><label for="lb-{{ f.id }}">字段名（显示）</label>
+        <input id="lb-{{ f.id }}" type="text" name="label" value="{{ f.label }}"></div>
+      <div class="field type"><label for="ft-{{ f.id }}">类型</label>
+        <select id="ft-{{ f.id }}" name="field_type">
+          {% for v, t in types %}<option value="{{ v }}" {{ 'selected' if f.field_type == v }}>{{ t }}</option>{% endfor %}
+        </select></div>
+      <div class="field sort"><label for="so-{{ f.id }}">排序</label>
+        <input id="so-{{ f.id }}" type="number" name="sort" value="{{ f.sort }}"></div>
+      <div class="field chk"><label>&nbsp;</label>
+        <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if f.enabled }}> 启用</label></div>
+      <div class="facts">
+        <button class="btn primary">保存</button>
+        <button class="btn" formaction="/wms/fields/{{ f.id }}/move?dir=up" formnovalidate
+                title="上移一位">↑</button>
+        <button class="btn" formaction="/wms/fields/{{ f.id }}/move?dir=down" formnovalidate
+                title="下移一位">↓</button>
+        <button class="btn" formaction="/wms/fields/{{ f.id }}/toggle" formnovalidate
+                title="停用后新导入不再往这列沉淀，老值照旧显示">{{ '停用' if f.enabled else '启用' }}</button>
+        <button class="btn danger" formaction="/wms/fields/{{ f.id }}/delete" formnovalidate
+                onclick="return confirm('删除「{{ f.label }}」？已经存过的值不受影响。')">删除</button>
+      </div>
+    </div>
+  </form>
+  {% endfor %}
+  {% else %}{{ bits.empty('还没有沉淀的字段。导一张带多余列的 Excel，那些列就会登记到这里') }}{% endif %}
+</div>
+
+<div class="card">
+  <h2>手工加一个字段</h2>
+  <p class="d">字段以导入的表头为准 —— 这里是<b>手工补字段</b>的地方：先在这建好，导入时表头对上字段名
+    就会自动落进去（也可以在导入预览页直接勾「沉淀为商品字段」）；手工加的排在最后，之后能上移 / 下移调顺序。</p>
+  <form method="post" action="/wms/fields" class="filters">
+    <div class="field"><label for="nf-label">字段名</label>
+      <input id="nf-label" type="text" name="label" placeholder="如：供应商批次" required></div>
+    <div class="field"><label for="nf-key">标识（留空按字段名生成）</label>
+      <input id="nf-key" type="text" name="key" placeholder="supplier_lot"></div>
+    <div class="field"><label for="nf-type">类型</label>
+      <select id="nf-type" name="field_type">{% for v, t in types %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+    <div class="field grow"><label for="nf-note">说明</label>
+      <input id="nf-note" type="text" name="note" placeholder="选填"></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">新增</button></div>
+  </form>
+</div>
+{% endblock %}

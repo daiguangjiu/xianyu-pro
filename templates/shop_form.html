@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{# 新建 / 编辑店铺（2026-10-03）：字段与渔枢系统端店铺档案完全一致，
+   只是一页 21 个框太糙，按业务分成 5 组，右边挂一张说明卡。 #}
+{% block title %}{{ '编辑店铺' if editing else '新建店铺' }} · 渔货栈{% endblock %}
+
+{% block head_extra %}
+<style>
+  .sf-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--s-4); align-items: start; }
+  @media (max-width: 1000px) { .sf-wrap { grid-template-columns: minmax(0, 1fr); } }
+  .sf-card {
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    border-radius: var(--r-card); box-shadow: var(--shadow-card); margin-bottom: var(--s-4);
+  }
+  .sf-head {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 14px 18px; border-bottom: 1px solid var(--c-border);
+  }
+  .sf-head > .bi {
+    flex-shrink: 0; width: 30px; height: 30px; border-radius: 9px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--pdp-brand-soft, #FFF1E6); color: var(--pdp-brand, #FF6A00); font-size: 15px;
+  }
+  .sf-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .sf-head p { margin: 2px 0 0; font-size: 12px; color: var(--c-text-muted); }
+  .sf-body { padding: 16px 18px; }
+  .sf-hint { margin-top: 4px; font-size: 12px; color: var(--c-text-muted); }
+  .sf-side {
+    position: sticky; top: calc(var(--topbar-h, 56px) + 16px);
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 16px 18px;
+  }
+  .sf-side h3 { font-size: 14px; font-weight: 600; margin: 0 0 10px; }
+  .sf-side ol { margin: 0; padding-left: 18px; font-size: 12px; color: var(--c-text-muted); line-height: 1.75; }
+  .sf-side .tip {
+    margin-top: 12px; padding: 10px 12px; border-radius: var(--r-input);
+    background: var(--c-surface-2); font-size: 12px; color: var(--c-text-muted); line-height: 1.6;
+  }
+  @media (max-width: 1000px) { .sf-side { position: static; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>{{ '编辑店铺' if editing else '新建店铺' }}</h1>
+    <span class="page-subtitle">
+      {% if editing %}
+        改完会回到「待审核」，等渔枢系统重新审核通过后生效
+      {% else %}
+        {# 2026-10-11：新建只填这 6 项，别的一概不问 #}
+        只填这 6 项：店铺名称（闲鱼昵称）/ 会员名 / 闲鱼手机号 / 姓名 / 手机号码 / 店铺类型
+      {% endif %}
+    </span>
+  </div>
+  <a href="{{ self_url('/shops') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> 返回列表
+  </a>
+</div>
+
+{% if msg %}
+<div class="alert alert-{{ 'danger' if kind == 'err' else ('warning' if kind == 'warn' else 'success') }}">{{ msg }}</div>
+{% endif %}
+
+{% if not hub_available %}
+<div class="alert alert-warning">当前部署没接入渔枢系统（进程里没有店铺库），店铺管理不可用。</div>
+{% elif not linked %}
+<div class="alert alert-warning">没识别到登录账号：两端是同一套账号，请先从渔枢系统登录后再来维护店铺。</div>
+{% endif %}
+
+<form method="post"
+      action="{% if editing %}{{ self_url('/shops/' ~ editing.id ~ '/edit') }}{% else %}{{ self_url('/shops') }}{% endif %}">
+  <div class="sf-wrap">
+
+    <div>
+      {% for g_title, g_icon, g_desc, g_fields in shop_groups %}
+      <section class="sf-card">
+        <header class="sf-head">
+          <i class="bi {{ g_icon }}"></i>
+          <div>
+            <h2>{{ g_title }}</h2>
+            <p>{{ g_desc }}</p>
+          </div>
+        </header>
+        <div class="sf-body">
+          <div class="row g-3">
+            {% for field in g_fields %}
+            {% set meta = shop_field_map.get(field) or (field, '') %}
+            <div class="{{ 'col-12' if field == 'note' else 'col-md-6' }}">
+              <label class="form-label mb-1" for="f-{{ field }}">{{ meta[0] }}</label>
+
+              {% if field == 'real_name_verified' %}
+              {# 实名认证是否完成：勾选框（前面垫一个 hidden，取消勾选也能提交 0） #}
+              <div class="form-check form-switch mt-1">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       id="f-{{ field }}" name="real_name_verified" value="1"
+                       {% if editing and editing.real_name_verified %}checked{% endif %}>
+                {# 垫在勾选框后面：没勾时也有个 0 提交上来（勾上时先取到 1） #}
+                <input type="hidden" name="real_name_verified" value="0">
+                <label class="form-check-label" for="f-{{ field }}">
+                  {{ '已完成' if editing and editing.real_name_verified else '未完成' }}
+                </label>
+              </div>
+              <div class="sf-hint">闲鱼「账号与安全」里已实名就勾上</div>
+
+              {% elif field == 'shop_type' %}
+              {# 店铺类型：三个固定值，只能从下拉里选（与渔枢系统同一份选项） #}
+              {% set current_type = editing.shop_type if editing and editing.shop_type in shop_type_options else shop_type_default %}
+              <select class="form-select form-select-sm" id="f-{{ field }}" name="{{ field }}">
+                {% for t in shop_type_options %}
+                <option value="{{ t }}" {% if current_type == t %}selected{% endif %}>{{ t }}</option>
+                {% endfor %}
+              </select>
+              <div class="sf-hint">决定这条店铺按「个人闲置」还是「鱼小铺」口径统计</div>
+
+              {% elif field == 'service_fee_rate' %}
+              <input class="form-control form-control-sm" id="f-{{ field }}" name="{{ field }}"
+                     value="{{ (editing[field] if editing else '') or '' }}"
+                     placeholder="{{ meta[1] or service_fee_rate_default }}">
+              <div class="sf-hint">单位 %，订单「平台技术服务费 = 成交价 × 费率」，不填按 {{ service_fee_rate_default }}% 算</div>
+
+              {% elif field == 'note' %}
+              <textarea class="form-control form-control-sm" id="f-{{ field }}" name="{{ field }}" rows="2"
+                        placeholder="{{ meta[1] }}">{{ (editing[field] if editing else '') or '' }}</textarea>
+
+              {% else %}
+              <input class="form-control form-control-sm" id="f-{{ field }}" name="{{ field }}"
+                     value="{{ (editing[field] if editing else '') or '' }}" placeholder="{{ meta[1] }}">
+              {% if field == 'name' %}<div class="sf-hint">必填：与订单里的「出货闲鱼号」保持一致</div>{% endif %}
+              {# 闲鱼手机号的备注（用户定的原话）：填了「手机号码」会自动带进来，可以改 #}
+              {% if field == 'phone' %}<div class="sf-hint">此手机为闲鱼App的我的-设置-账号与安全的手机号</div>{% endif %}
+              {% endif %}
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </section>
+      {% endfor %}
+
+      <div class="d-flex align-items-center gap-2 mb-4">
+        <button class="btn btn-primary">{{ '保存修改' if editing else '提交审核' }}</button>
+        <a href="{{ self_url('/shops') }}" class="btn btn-outline-secondary">取消</a>
+        <span class="text-muted" style="font-size:12px;">
+          微信密码等敏感信息只在渔枢系统维护，这里不涉及
+        </span>
+      </div>
+    </div>
+
+    <aside class="sf-side">
+      <h3>{{ '编辑店铺' if editing else '新建店铺' }}流程</h3>
+      <ol>
+        <li>填好店铺档案，提交保存</li>
+        <li>渔枢系统审核（待审核状态）</li>
+        <li>审核通过后，这条店铺才在渔货栈生效</li>
+      </ol>
+      {% if student %}
+      <div class="tip">
+        填写的店铺如果在渔枢系统里已经建档过，提交后会自动带入你的账号，不用重复填；
+        填的「实际运营人姓名」对上渔枢系统自营账号组的人时，他那边的店铺会直接同步过来。
+      </div>
+      {% else %}
+      <div class="tip">
+        只填「账号与店铺」一组也能先存下来：账号名称是唯一必填项，其余信息可以后补，
+        改完随时回来编辑（改完会重新走一次审核）。
+      </div>
+      {% endif %}
+      {% if editing %}
+      <div class="tip">
+        当前店铺：<b>{{ editing.name }}</b>{% if editing.code %}（{{ editing.code }}）{% endif %}<br>
+        审核状态：{{ editing.audit_text or editing.audit_status }}
+        {% if editing.audit_note %}<br>审核备注：{{ editing.audit_note }}{% endif %}
+      </div>
+      {% endif %}
+    </aside>
+
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* 「手机号码」填了就自动带进「闲鱼手机号」：两个号大多数人是一样的，改过就不再覆盖 */
+(function () {
+  var contact = document.getElementById('f-contact_phone');
+  var xianyu = document.getElementById('f-phone');
+  if (!contact || !xianyu) { return; }
+  var touched = false;
+  xianyu.addEventListener('input', function () { touched = true; });
+  contact.addEventListener('input', function () {
+    if (!touched) { xianyu.value = contact.value; }
+  });
+})();
+</script>
+{% endblock %}

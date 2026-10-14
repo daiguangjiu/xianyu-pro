@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{# 库位选择器：值仍存在隐藏的 <select name="location_code"> 里，表单照旧提交 #}
+{% from "_warehouse_picker.html" import warehouse_picker with context %}
+{% block title %}{{ item.display_code }}{% endblock %}
+
+{# 价格三件套的样式（2026-10-10）：市场价 / 成本价 / 渔货价各一个底色 + 放大数字，
+   这三个数是定级出货的命根子，不能淹没在一堆灰字里 #}
+{% block head_extra %}
+<style>
+  .price-grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:10px; }
+  .price-cell { border:1px solid var(--c-border); border-radius:10px; padding:10px 12px;
+    background:var(--c-bg); }
+  .price-cell > label { display:block; font-size:12.5px; color:var(--c-text-muted); margin-bottom:4px; }
+  .pc-in { display:flex; align-items:center; gap:4px; }
+  .pc-in > span { font-size:18px; font-weight:700; color:var(--c-text-muted); flex:0 0 auto; }
+  .pc-in input { flex:1 1 auto; min-width:0; height:44px; font-size:22px; font-weight:800;
+    font-variant-numeric:tabular-nums; background:#fff; }
+  .pc-hint { font-size:12px; color:var(--c-text-muted); margin-top:6px; line-height:1.55; }
+  .price-cell.market { background:rgba(59,130,246,.08); border-color:rgba(59,130,246,.35); }
+  .price-cell.cost { background:rgba(245,158,11,.10); border-color:rgba(245,158,11,.38); }
+  .price-cell.sell { background:rgba(13,127,116,.10); border-color:rgba(13,127,116,.38); }
+  @media (max-width: 900px) { .price-grid { grid-template-columns:minmax(0,1fr); } }
+</style>
+{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/wms/items/{{ item.id }}/edit">编辑货品</a>
+  <a class="btn" href="/wms/inspect?code={{ item.barcode }}">去检测 / 复检</a>
+  <a class="btn" href="/wms/labels">打标签</a>
+  {# 退回入库：误检 / 练手 / 录错时的纠偏口子 —— 等级与渔货价清空重来，检测记录仍留痕 #}
+  {% if item.status not in ('PARTS', 'HAZARD', 'SOLD') %}
+  <form method="post" action="/wms/items/{{ item.id }}/reset-inbound" class="inline-form"
+        onsubmit="return confirm('把 {{ item.display_code }} 退回「刚入库、还没检测」的原始状态？\n\n· 状态回「待检」、回待检仓\n· 等级回到 W（未定级）、渔货价清空\n· 检测记录一条不删（历史查得到，复检接着算下一轮）\n· 库位保留（货还搁在那儿）')">
+    <button class="btn primary"><i class="bi bi-arrow-counterclockwise"></i> 退回入库原始状态</button></form>
+  {% endif %}
+  <form method="post" action="/wms/items/{{ item.id }}/delete" class="inline-form"
+        onsubmit="return confirm('删除 {{ item.display_code }}？检测过 / 上过出库单 / 报修过 / 进过盘点单的不让删（改走核销、报废）')">
+    <button class="btn danger">删除</button></form>
+{% endblock %}
+
+{% block content %}
+{% if item.safety_hit %}
+<div class="note danger"><b>安全红线货品：</b>禁止充电与任何流转，只做登记与拍照存档。</div>
+{% endif %}
+{% if item.need_recheck %}
+<div class="note warn"><b>待复检：</b>检测员标记存疑，在复检池里（不隔夜）。</div>
+{% endif %}
+
+<div class="grid grid-4">
+  <div class="stat"><div class="label">等级</div><div class="value">{{ wms_grade_label(item.grade) }}</div>
+    <div class="hint">永久属性，只由检测决定</div></div>
+  <div class="stat"><div class="label">状态</div><div class="value">{{ wms_status_label(item.status) }}</div>
+    <div class="hint">当前处境，由作业流转决定</div></div>
+  <div class="stat"><div class="label">所在仓 / 库位</div><div class="value sm">{{ wms_warehouse_label(item.warehouse_code) }}</div>
+    <div class="hint">{{ wms_location_label(item.location_code) if item.location_code else '未启用库位' }}</div></div>
+  <div class="stat {{ 'ok' if item.selling_price > item.purchase_cost }}"><div class="label">售价 / 成本</div>
+    <div class="value sm">¥{{ money(item.selling_price) }}</div>
+    <div class="hint">成本 ¥{{ money(item.purchase_cost) }}</div></div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>基础信息</h2>
+    <div class="kv">
+      <b>条码</b><span class="mono">{{ item.barcode }}</span>
+      <b>显示编码</b><span class="mono">{{ item.display_code }}</span>
+      <b>货号</b><span class="mono">{{ item.sku_code or '—' }}<span class="muted" style="font-weight:400">（进仓 / 检测扫它）</span></span>
+      {# 数量（2026-10-10）：同一个条码底下有几台 —— 台数是最要紧的事实，做成胶囊重点摆出来 #}
+      <b>数量</b><span><span class="qty-pill {{ 'many' if (item.qty or 1) > 1 }}">{{ item.qty or 1 }}</span>
+        <span class="muted"> 台（同一个条码，整台流转）</span></span>
+      <b>检修后条码</b><span class="mono">{{ item.own_barcode or '—' }}<span class="muted" style="font-weight:400">{% if item.own_barcode_at %}（{{ item.own_barcode_at | dt }} 贴的）{% else %}（检修规整后重新贴自己的码）{% endif %}</span></span>
+      <b>产品名称</b><span>{{ item.product_name or '—' }}</span>
+      {# 2026-10-10：这一格以前放的是展示名（= 产品名），跟上一行「产品名称」重复。
+         现场要的是品牌，型号归在商品字段里。 #}
+      <b>品牌</b><span>{{ item.brand or '—' }}</span>
+      <b>序列号 / IMEI</b><span class="mono">{{ item.serial_no or '—' }}</span>
+      <b>品类</b><span>{{ wms_category_label(item.category) }}</span>
+      <b>批次</b><span>{{ item.batch_no or '—' }}</span>
+      <b>理论残值</b><span>¥{{ money(item.residual_value) }}</span>
+    </div>
+    {% if item.extra %}<h3>商品字段（导入时沉淀下来的列）</h3>
+    <div class="kv">
+      {% for k, v in item.extra.items() if v %}<b>{{ field_labels.get(k, k) }}</b><span>{{ v }}</span>{% endfor %}
+    </div>
+    {% endif %}
+    <h3>定级依据</h3>
+    <p class="d">{{ item.grade_reason or '—' }}</p>
+    {% if item.flaw_desc %}<h3>外观瑕疵（A 档发布必填）</h3>
+      <p class="d">{{ item.flaw_desc }}</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <h2>作业</h2>
+    <form class="form-block" method="post" action="/wms/items/{{ item.id }}/move">
+      <input type="hidden" name="action" value="move">
+      <div class="field-row auto">
+        <div class="field"><label for="mv-wh">移库到</label>
+          <select id="mv-wh" name="warehouse_code">
+            {% for w in warehouses %}<option value="{{ w.code }}" {{ 'selected' if w.code == item.warehouse_code }}>{{ w.name }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="mv-loc">库位（选填）</label>
+          {# 库位只能从「仓库与货架」维护的表里选（2026-10-08）：手打的编码一旦写错，
+             货就挂在一个不存在的库位上，出库校验也跟着失效。
+             2026-10-11 起是搜索联想（短码 / 名称 / 首字母），值仍由隐藏 select 提交 #}
+          {{ warehouse_picker('mv-loc', 'location_code', item.location_code, '—（不放具体库位）') }}</div>
+      </div>
+      {# 按钮状态（2026-10-10）：以前是白底描边、跟旁边的标签长得像，现场看不出「这个要点」——
+         作业类动作一律做成实心主色按钮（点下去就写流水，必须一眼看得出来） #}
+      <button class="btn primary"><i class="bi bi-arrow-left-right"></i> 移库（写流水）</button>
+    </form>
+
+    <h3>状态流转</h3>
+    {% if next_statuses %}
+    <form class="form-block" method="post" action="/wms/items/{{ item.id }}/move">
+      <input type="hidden" name="action" value="status">
+      <div class="field-row auto">
+        <div class="field"><label for="st-to">目标状态</label>
+          <select id="st-to" name="to_status">
+            {% for v, t, act in next_statuses %}<option value="{{ v }}">{{ t }}（{{ act }}）</option>{% endfor %}</select></div>
+        <div class="field"><label for="st-rm">备注</label><input id="st-rm" type="text" name="remark" placeholder="选填"></div>
+      </div>
+      <button class="btn primary"><i class="bi bi-arrow-repeat"></i> 流转（只按白名单放行）</button>
+    </form>
+    {% else %}<p class="muted">当前状态没有可流转的下一步{% if item.status in ('SOLD','HAZARD') %}（终态不可逆）{% endif %}</p>{% endif %}
+
+    {# ---------------------------------------------------------------- 价格三件套
+       2026-10-10：这三个数是定级出货的命根子，页面得一眼看见 —— 每格一个底色 + 放大数字。
+       口径：市场价（= 基准价）是打分的底；成本价人工录；渔货价按「市场价 × 该档系数」
+       自动带出来（下面那格先填好数），现场看着不对可以改。 #}
+    <h3>价格（市场价 / 成本价 / 渔货价）</h3>
+    <form class="form-block" method="post" action="/wms/items/{{ item.id }}/price">
+      <div class="price-grid">
+        <div class="price-cell market">
+          <label for="p-base">市场价（基准价）</label>
+          <div class="pc-in"><span>¥</span><input id="p-base" type="number" step="0.01"
+            name="base_price" value="{{ '%.2f' % (item.base_price or 0) }}"></div>
+          <div class="pc-hint">分级与出价都按它算 —— 它就是这台货的市场价</div>
+        </div>
+        <div class="price-cell cost">
+          <label for="p-cost">成本价</label>
+          <div class="pc-in"><span>¥</span><input id="p-cost" type="number" step="0.01"
+            name="purchase_cost" value="{{ '%.2f' % (item.purchase_cost or 0) }}"></div>
+          {# 成本还没录（0）时别算毛利 —— 不然一律 100%，看着像白赚 #}
+          <div class="pc-hint">人工录入的采购 / 回收成本{% if default_price and item.purchase_cost %}
+            · 毛利 {{ '%.1f' % ((default_price - item.purchase_cost) / default_price * 100) }}%{% endif %}</div>
+        </div>
+        <div class="price-cell sell">
+          <label for="p-sell">渔货价</label>
+          <div class="pc-in"><span>¥</span><input id="p-sell" type="number" step="0.01"
+            name="selling_price" value="{{ '%.2f' % (default_price or 0) }}"></div>
+          <div class="pc-hint">按「市场价 ¥{{ '%.2f' % (item.base_price or 0) }} × {{ item.grade }} 档系数
+            {{ '%.2f' % (quote.factor or 1) }}」自动带出，可以改{% if quote.need_approval %}
+            · <b>低于底价 ¥{{ '%.2f' % (quote.floor or 0) }}，需主管审批</b>{% endif %}
+            {# 建议售价（2026-10-10）：渔枢 / 渔货栈建档时的建议售价就用它；渔货价不能高于它。
+               人工填过的（2026-10-12 建档 / 编辑页那格）以人填的为准，就不再说「市场价 × 系数」 #}
+            <br><b>建议售价 ¥{{ '%.2f' % (quote.suggest_price or 0) }}</b>
+            {% if quote.manual_suggest %}（建档时人工填的，渔货价不能高于它）{% else %}（市场价 × 建议售价系数
+            {{ '%.2f' % (quote.suggest_factor or 1) }}，渔货价不能高于它）{% endif %}</div>
+        </div>
+      </div>
+      <button class="btn primary">保存价格</button>
+    </form>
+
+    <h3>检修后条码（自己贴的码）</h3>
+    <p class="d" style="margin:0 0 8px">
+      检修规整完<b>我们自己重新贴一张码</b>：贴好后扫进来（或按规则生成一条），
+      以后复检 / 出库扫它就认这台。一码一台，贴过的不许再贴到第二台；留空 = 清除（贴错了）。
+    </p>
+    <form class="form-block" method="post" action="/wms/items/{{ item.id }}/own-barcode">
+      <div class="field-row auto">
+        <div class="field grow"><label for="ob-code">自有码（扫 / 手填）</label>
+          <input id="ob-code" type="text" name="own_barcode" value="{{ item.own_barcode or '' }}"
+                 placeholder="WMS26100001"></div>
+      </div>
+      <button class="btn primary">登记</button>
+      <button class="btn" name="action" value="gen">按规则生成一条</button>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <h2>检测记录（{{ records | length }} 次，只追加不覆盖）</h2>
+  {% if records %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>第几次</th><th>检测员</th><th>建议档</th><th>最终档</th><th>依据</th><th>时间</th></tr></thead>
+    <tbody>
+    {% for row in records %}
+      {% set r = row.record %}
+      <tr>
+        <td class="num">第 {{ r.round }} 次{% if r.is_recheck %}<span class="badge pending">复检</span>{% endif %}</td>
+        <td>{{ r.tester or '—' }}</td>
+        <td>{{ bits.grade_badge(r.suggest_grade) if r.suggest_grade else '—' }}</td>
+        <td>{% if r.uncertain %}<span class="badge muted">存疑</span>{% else %}{{ bits.grade_badge(r.final_grade) if r.final_grade else '—' }}{% endif %}</td>
+        <td class="clip">{% for x in (r.reasons or []) %}<div>{{ x }}</div>{% endfor %}
+          {% if r.override_reason %}<div class="muted">人工覆盖：{{ r.override_reason }}</div>{% endif %}</td>
+        <td class="nowrap muted">{{ r.tested_at | dt }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没检测过') }}{% endif %}
+</div>
+
+<div class="card">
+  <h2>拆机件残值明细</h2>
+  {% if part_rows %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>配件</th><th>名称</th><th class="num">估值</th><th class="num">实际售价</th><th>备注</th></tr></thead>
+    <tbody>
+    {% for p in part_rows %}
+      <tr><td>{{ wms_part_label(p.part_type) }}</td><td>{{ p.part_name }}</td>
+        <td class="num">¥{{ money(p.est_value) }}</td>
+        <td class="num">{% if p.actual_sold_price %}¥{{ money(p.actual_sold_price) }}{% else %}<span class="muted">未售</span>{% endif %}</td>
+        <td class="muted">{{ p.note or '—' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">D 档关工单前必须逐件估值（主板 / 屏 / 电池…），没有明细不允许关闭工单。</p>{% endif %}
+  <form class="form-block" method="post" action="/wms/parts/add">
+    <input type="hidden" name="item_id" value="{{ item.id }}">
+    <div class="field-row auto">
+      <div class="field"><label for="pt-t">配件类型</label>
+        <select id="pt-t" name="part_type">{% for v, t in part_choices %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="pt-n">名称</label><input id="pt-n" type="text" name="part_name" placeholder="选填"></div>
+      <div class="field"><label for="pt-v">估值</label><input id="pt-v" type="number" step="0.01" name="est_value" value="0"></div>
+    </div>
+    <button class="btn primary"><i class="bi bi-cash-stack"></i> 登记残值</button>
+  </form>
+</div>
+
+<div class="grid grid-2">
+  <div class="card flush">
+    <h2>库存流水（只增不改）</h2>
+    {% if ledgers %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>类型</th><th>从</th><th>到</th><th>操作人</th><th>时间</th></tr></thead>
+      <tbody>
+      {% for l in ledgers %}
+        <tr><td>{{ wms_ledger_label(l.biz_type) }}</td>
+          <td class="muted">{{ wms_warehouse_label(l.from_warehouse) }} {{ wms_status_label(l.from_status) if l.from_status }}</td>
+          <td>{{ wms_warehouse_label(l.to_warehouse) }} {{ wms_status_label(l.to_status) if l.to_status }}</td>
+          <td>{{ l.operator or '—' }}</td>
+          <td class="nowrap muted">{{ l.operated_at | dt }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}{{ bits.empty('还没有流水') }}{% endif %}
+  </div>
+
+  <div class="card flush">
+    <h2>审计日志</h2>
+    {% if logs %}
+    <div class="table-wrap"><table>
+      <thead><tr><th>动作</th><th>前</th><th>后</th><th>操作人</th><th>时间</th></tr></thead>
+      <tbody>
+      {% for g in logs %}
+        <tr><td>{{ wms_audit_action(g.action) }}</td>
+          <td class="muted">{{ g.before or '—' }}</td><td>{{ g.after or '—' }}</td>
+          <td>{{ g.operator or '—' }}</td>
+          <td class="nowrap muted">{{ g.created_at | dt }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    {% else %}{{ bits.empty('暂无留痕') }}{% endif %}
+  </div>
+</div>
+{% endblock %}

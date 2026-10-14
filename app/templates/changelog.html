@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}更新日志{% endblock %}
+{% block heading %}更新日志{% endblock %}
+{% block sub %}记录每次上线的核心能力{% endblock %}
+{% block actions %}
+  <span class="chip"><i class="bi bi-tag" aria-hidden="true"></i>当前版本 {{ current_version or '-' }}</span>
+{% endblock %}
+{% block content %}
+
+{# 分端看：渔枢系统与渔集的记录都在 config/changelog.json（渔集靠条目上的 system 区分），
+   渔货栈的来自 src/version.py；端名由 app/portals.py 统一给出，这里不写死 #}
+{% set portal_badge = {'hub': 'screenshot', 'self': 'template', 'wms': 'done'} %}
+<div class="filter-tabs">
+  <a class="filter-tab {{ 'active' if not portal_filter }}" href="/changelog">全部 {{ total_count }}</a>
+  {% for p in portal_tabs %}
+  <a class="filter-tab {{ 'active' if portal_filter == p.key }}"
+     href="/changelog?portal={{ p.key }}">{{ p.name }} {{ counts.get(p.key, 0) }}</a>
+  {% endfor %}
+</div>
+
+{% if entries %}
+  {% for e in entries %}
+  <div class="card">
+    <h2>
+      <span class="badge template">{{ e.version or '更新' }}</span>
+      <span class="badge {{ portal_badge.get(e.portal, 'screenshot') }}">{{ e.portal_name }}</span>
+      <span style="margin-left:8px">{{ e.title }}</span>
+      <span class="muted" style="margin-left:8px;font-weight:400;font-size:13px">{{ e.date }}</span>
+    </h2>
+    {% if e['items'] %}
+    <ul class="tick-list">
+      {% for item in e['items'] %}<li>{{ item }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <div class="empty">本次更新暂无说明</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+<div class="card">
+  <div class="empty">还没有更新记录。在 <span class="mono">config/changelog.json</span> 里追加一条即可展示。</div>
+</div>
+{% endif %}
+
+<div class="note muted">
+  更新内容维护在 <span class="mono">{{ changelog_path }}</span>：每次上线追加一条（最新放最前），
+  保存后刷新本页即可看到，无需重启服务。
+</div>
+{% endblock %}

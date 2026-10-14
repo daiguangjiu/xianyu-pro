@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block heading %}用户管理{% endblock %}
+{% block sub %}管理员可创建子账号；子账号能进哪些菜单，由「角色权限」里挂的角色决定{% endblock %}
+{% block actions %}
+  <a class="btn" href="/roles">角色权限</a>
+  <a class="btn" href="/logs">查看操作日志</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <h2>新增账号</h2>
+  <form method="post" action="/users">
+    {# 字段自适应排布（与「新增商品」等页面同一套栅格）：字段多也不会挤成一行错位 #}
+    <div class="field-row auto">
+      <div class="field"><label for="u-name">账号</label>
+        <input id="u-name" type="text" name="username" required placeholder="如：xiaoyu01">
+      </div>
+      <div class="field"><label for="u-display">显示名</label>
+        <input id="u-display" type="text" name="display_name" placeholder="如：小鱼（选填）">
+      </div>
+      <div class="field"><label for="u-pass">密码</label>
+        <input id="u-pass" type="password" name="password" required placeholder="8-32 位，含字母和数字">
+      </div>
+      <div class="field"><label for="u-role">账号类型</label>
+        <select id="u-role" name="role">
+          <option value="user">子账号</option>
+          <option value="admin">管理员</option>
+        </select>
+      </div>
+      {# 权限角色：子账号能进哪些菜单看这里；不选 = 默认菜单（与升级前一致） #}
+      <div class="field"><label for="u-role-id">权限角色</label>
+        <select id="u-role-id" name="role_id">
+          <option value="">默认（普通成员菜单）</option>
+          {% for r in role_choices %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+        </select>
+      </div>
+      {# 身份（2026-10-11）：外部学员第一次进渔货栈会先走「开店 → 选品 → 素材 → 第一单」引导 #}
+      <div class="field"><label for="u-identity">身份</label>
+        <select id="u-identity" name="identity">
+          {% for value, label in identity_choices %}
+            <option value="{{ value }}" {% if value == 'internal' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {# 可用端：一个账号可以同时有多个端，管理员建出来默认全端 #}
+      <div class="field"><label>可用端</label>
+        <div class="portal-checks">
+          {% for p in portals %}
+          <label class="portal-check" title="{{ p.desc }}">
+            <input type="checkbox" name="portals" value="{{ p.key }}" {{ 'checked' if p.key == 'self' }}>
+            <span>{{ p.name }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="form-actions">
+      <button class="btn primary">创建账号</button>
+      <span class="help">管理员一律全部菜单，不看这里选的角色。</span>
+    </div>
+  </form>
+  <div class="chips">
+    <span class="chip"><i class="bi bi-person-badge" aria-hidden="true"></i>{{ username_rule }}</span>
+    <span class="chip"><i class="bi bi-shield-lock" aria-hidden="true"></i>{{ password_rule }}</span>
+    <span class="chip"><i class="bi bi-diagram-3" aria-hidden="true"></i>管理员默认拥有全部子系统；子账号按勾选的子系统，至少保留渔枢系统</span>
+    <span class="chip"><i class="bi bi-key" aria-hidden="true"></i>子账号能进哪些菜单：去「角色权限」建角色并勾选，再回来挂上</span>
+  </div>
+</div>
+
+<div class="card flush">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">序号</th>
+          <th>账号</th><th>显示名</th><th>身份</th><th>类型 / 权限角色</th><th>可用端</th><th>状态</th>
+          {# 两个时间合成一列，给右边那列编辑控件腾出宽度 #}
+          <th>最近登录 / 创建</th>
+          {# 操作列只放「编辑 / 删除」两个入口，不用再给一堆表单留宽度 #}
+          <th style="min-width: 150px;">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for u in accounts %}
+        <tr>
+          <td class="num muted">{{ loop.index }}</td>
+          <td class="mono">{{ u.username }}{% if me and u.id == me.id %}<span class="badge template">当前</span>{% endif %}</td>
+          <td>{{ u.display_name or '-' }}</td>
+          <td>
+            {% if u.is_student %}
+              <span class="badge pending">外部学员</span>
+              <span class="scope-note">进渔货栈先走引导</span>
+            {% else %}
+              <span class="badge muted">内部人员</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.role == 'admin' %}
+              <span class="badge template">管理员</span><span class="scope-note">全部菜单</span>
+            {% else %}
+              <span class="badge muted">子账号</span>
+              <span class="scope-note">{% if u.role_id %}{{ role_names.get(u.role_id, '角色已删（按默认菜单）') }}{% else %}默认菜单{% endif %}</span>
+            {% endif %}
+          </td>
+          {# 可用端：管理员一律全端不用配；子账号在这里勾选，改完点保存 #}
+          <td>
+            {% if u.role == 'admin' %}
+              <span class="badge template">全部子系统</span>
+            {% else %}
+              <form class="portal-form" method="post" action="/users/{{ u.id }}/portals">
+                {% for p in portals %}
+                <label class="portal-check" title="{{ p.desc }}">
+                  <input type="checkbox" name="portals" value="{{ p.key }}" {{ 'checked' if p.key in u.portal_keys }}>
+                  <span>{{ p.short }}</span>
+                </label>
+                {% endfor %}
+                <button class="btn sm">保存</button>
+              </form>
+            {% endif %}
+          </td>
+          <td>
+            {% if u.status == 'active' %}<span class="badge done">启用</span>
+            {% else %}<span class="badge cancelled">已停用</span>{% endif %}
+          </td>
+          <td class="nowrap muted">
+            {{ human_time(u.last_login_at) }}
+            <div class="scope-note">建号 {{ human_time(u.created_at) }}</div>
+          </td>
+          <td>
+            <div class="row-actions">
+              {# 改字段都进编辑子页面：一行里塞一堆表单太挤，列表只留「编辑 / 删除」两个入口 #}
+              <a class="btn sm" href="/users/{{ u.id }}/edit"
+                 title="改账号 / 手机号 / 显示名 / 账号类型 / 权限角色 / 可用端，重置密码、停用启用也在这页">编辑</a>
+              {% if not me or u.id != me.id %}
+              <form method="post" action="/users/{{ u.id }}/delete" data-confirm="删除账号「{{ u.username }}」？其历史操作日志会保留。">
+                <button class="btn sm danger">删除</button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}{% if step == 'preview' %}确认映射{% else %}导入建档{% endif %} · {{ batch.batch_no }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/wms/batches/{{ batch.id }}">回批次</a>
+  <a class="btn" href="/wms/fields">商品字段</a>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  .imp-note { font-size: 13px; line-height: 1.7; color: var(--c-text-muted); }
+  .imp-note b { color: var(--c-text); }
+  .fields-table td { vertical-align: top; }
+  .col-head { font-weight: 600; }
+  .col-sample { display: block; font-size: 12px; color: var(--c-text-muted); margin-top: 4px; }
+  .col-sample span { display: inline-block; background: var(--c-bg); border: 1px solid var(--c-border);
+    border-radius: 4px; padding: 1px 6px; margin: 0 4px 4px 0; }
+  .key-input { font-family: var(--font-mono); font-size: 12px; }
+  .extra-box { border-top: 1px dashed var(--c-border); padding-top: 8px; margin-top: 8px; }
+  /* 预检出来的毛病清单：导入前就摆出来，别让人导完才知道整批没进来 */
+  .imp-precheck { font-size: 13px; line-height: 1.7; color: var(--c-text);
+    background: var(--c-warn-soft, #fff7e6); border: 1px solid var(--c-warn, #f0b429);
+    border-radius: var(--r-input, 8px); padding: 10px 12px; margin: 10px 0; }
+  .imp-precheck ul { margin: 6px 0 0; padding-left: 20px; }
+  .imp-precheck li { margin-bottom: 2px; }
+  /* 跳过坏行：脏数据不挡好货 */
+  .skip-bad { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 12px;
+    font-size: 13px; line-height: 1.6; background: var(--c-bg); border: 1px solid var(--c-border);
+    border-radius: var(--r-input, 8px); padding: 9px 12px; }
+  .skip-bad input { margin-top: 2px; }
+  /* 分类认不出来：当场给这几行定个类目，不用回去改表 */
+  .fix-cat { margin: 10px 0 12px; font-size: 13px; line-height: 1.7;
+    background: var(--c-info-soft, #eef6ff); border: 1px solid var(--c-info, #3b82f6);
+    border-radius: var(--r-input, 8px); padding: 9px 12px; }
+  .fix-cat-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+  .fix-cat-row select { min-width: 220px; }
+  @media (max-width: 900px) {
+    .fields-table .hide-sm { display: none; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if step == 'preview' %}
+{# ---------------------------------------------------------------- 第二步：确认映射 #}
+<div class="card">
+  <h2>① 这份表读到了 {{ row_count }} 行</h2>
+  <p class="imp-note">
+    文件：<b>{{ file_name }}</b> ·
+    <b>货号</b>那一列必须指定（后面扫码检测就靠它认货）·
+    分类如果是一级 / 二级 / 三级分开三列，三列各选对应字段就行（系统拼起来认品类）·
+    认不出来的列可以<b>沉淀成商品字段</b>，值跟着货品一起存，之后在「商品字段」页能改名排序。
+  </p>
+  {% if header_row and header_row > 1 %}
+  <p class="imp-note">这张表第一行是标题（不是表头），已自动拿<b>第 {{ header_row }} 行</b>当表头。</p>
+  {% endif %}
+  {% if preview_errors %}
+  <div class="imp-precheck">
+    <b>按现在的映射先预检了一遍，有 {{ preview_errors | length }} 处毛病</b> ——
+    默认是<b>整批一个事务</b>，只要有一行不合法就<b>一台都不导</b>（导一半的库存比不导更难收拾），
+    所以要么改表 / 改映射，要么在下面勾「跳过有毛病的行」：
+    <ul>
+    {% for e in preview_errors[:8] %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+    {% if preview_errors | length > 8 %}
+    <span class="muted">……还有 {{ preview_errors | length - 8 }} 处，改完上面这些再传一次就能看到后面的。</span>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="imp-note" style="color:var(--c-ok)">预检通过：{{ row_count }} 行都能认（货号有、分类认得出、没跟库里重复）。</p>
+  {% endif %}
+  <form method="post" action="/wms/batches/{{ batch.id }}/import/commit">
+    <input type="hidden" name="token" value="{{ token }}">
+    <input type="hidden" name="file_name" value="{{ file_name }}">
+    {% if preview_unknown %}
+    <div class="fix-cat">
+      <div>其中 <b>{{ unknown_rows }} 行</b>的分类认不出来（{{ preview_unknown | length }} 种写法，
+        比如「{{ preview_unknown[0].raw | truncate(20, True, '…') }}」）——
+        这几行的分类格多半填着备注或标题文本。<b>不用回去改表</b>，在这儿给它们定个类目，整批照导：</div>
+      <div class="fix-cat-row">
+        <select name="cat_fallback">
+          <option value="">（不指定 → 这几行不导，勾下面「跳过」可导其余行）</option>
+          {% for v, t in categories %}<option value="{{ v }}">{{ t }}</option>{% endfor %}
+        </select>
+        <span class="muted">这几台的类目会记进导入记录，回头查得到</span>
+      </div>
+      {% if preview_unknown | length > 1 %}
+      <div class="muted" style="font-size:12px;margin-top:4px">还认不出这些写法：
+        {% for u in preview_unknown[1:4] %}「{{ u.raw | truncate(16, True, '…') }}」{% endfor %}
+        {% if preview_unknown | length > 4 %}……{% endif %}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if preview_errors %}
+    <div class="imp-precheck" style="color:var(--c-text)">
+      <b>默认做法：跳过这 {{ preview_errors | length }} 行有毛病的，其余照导</b> ——
+      导完在提示条和「导入记录」里报清楚成功多少台、失败多少行，失败的那几行按行号补就行。
+      想退回「任一行不合法就整批不导」的老规矩，勾下面这个：
+      <label class="skip-bad">
+        <input type="checkbox" name="strict_mode" value="1">
+        <span>严格模式：有一行不合法就<b>整批不导</b>（导一半的库存比不导更难收拾时用）</span>
+      </label>
+    </div>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="fields-table">
+        <thead><tr>
+          <th style="min-width:150px">表格里的列</th>
+          <th style="min-width:210px">这一列是</th>
+          <th class="hide-sm" style="min-width:180px">沉淀成字段时的标识</th>
+        </tr></thead>
+        <tbody>
+        {% for h in headers %}{% set ci = loop.index0 %}
+          <tr>
+            <td>
+              <span class="col-head">{{ h or ('第 ' ~ (ci + 1) ~ ' 列') }}</span>
+              {% if samples[ci] %}
+              <span class="col-sample">{% for v in samples[ci] %}<span>{{ v }}</span>{% endfor %}</span>
+              {% endif %}
+            </td>
+            <td>
+              <select name="map_{{ ci }}" class="map-select" data-col="{{ ci }}">
+                <option value="">（不导入）</option>
+                {% for f in standard_fields %}
+                <option value="{{ f.key }}"{% if mapping.get(ci) == f.key %} selected{% endif %}>
+                  {{ f.label }}{% if f.core %}（必填）{% endif %}</option>
+                {% endfor %}
+                <option value="__extra__">沉淀为商品字段</option>
+              </select>
+              <div class="extra-box" id="extra_{{ ci }}" style="display:none">
+                <div class="field-row auto">
+                  <div class="field"><label>字段名（页面显示）</label>
+                    <input type="text" id="label_{{ ci }}" value="{{ h }}" disabled></div>
+                  <div class="field"><label>类型</label>
+                    <select name="type_{{ ci }}">
+                      <option value="text">文本</option><option value="number">数字</option>
+                      <option value="date">日期</option></select></div>
+                </div>
+                <div class="field"><label>字段标识（值按它存，导入后可在「商品字段」页改名）</label>
+                  <input class="key-input" type="text" name="key_{{ ci }}" value="{{ slugs[ci] }}"></div>
+              </div>
+            </td>
+            <td class="hide-sm muted">{{ slugs[ci] }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn primary">确认导入（{{ row_count }} 行）</button>
+    <a class="btn" href="/wms/batches/{{ batch.id }}/import">换一张表</a>
+  </form>
+</div>
+
+<div class="card flush">
+  <h2>② 前 8 行长这样</h2>
+  <div class="table-wrap"><table>
+    <thead><tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in preview_rows %}<tr>{% for c in r %}<td class="wrap2"><span class="clamp2">{{ c }}</span></td>{% endfor %}</tr>{% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% else %}
+{# ---------------------------------------------------------------- 第一步：上传 #}
+<div class="card">
+  <h2>上传货品清单</h2>
+  <p class="imp-note">
+    一批货吃进来的时候只有供应商那张表：<b>货号</b>是命根子（后面扫码检测扫的就是它），
+    品牌 / 型号 / 规格 / 品类都在表里认 —— 认不出来的列会<b>沉淀成商品字段</b>，
+    变成商品表自己的字段。
+  </p>
+  <form method="post" action="/wms/batches/{{ batch.id }}/import/preview" enctype="multipart/form-data">
+    <div class="field-row auto">
+      <div class="field grow"><label for="imp-file">选择文件（xlsx / xlsm / csv）</label>
+        <input id="imp-file" type="file" name="file" accept=".xlsx,.xlsm,.csv" required></div>
+    </div>
+    <button class="btn primary">下一步：确认列的映射</button>
+    <a class="btn" href="/wms/batches/{{ batch.id }}/import/template">下载导入模板</a>
+  </form>
+  <p class="imp-note" style="margin-top:12px">
+    第一行写表头，从第二行开始是数据。系统能认的写法（供应商清单那套）：
+    <b>货号</b>（款号 / SKU 编码 / 料号都行）、<b>产品 / 商品名称</b>、品牌、
+    <b>一级分类 / 二级分类 / 三级分类</b>（三列分开写，或合成一列「品类」写中文 / 三级码）、
+    型号、规格、序列号、<b>下单价格</b>（= 采购成本）、基准价、数量 ——
+    其余的列（故障原因 / 产品状态 / 售后状态 / 测试说明 / 建议折扣 / 下单时间…）
+    一律<b>沉淀成商品字段</b>，值跟着货品走。
+  </p>
+</div>
+
+<div class="card flush">
+  <h2>这一批已经导过 {{ logs | length }} 次</h2>
+  {% if logs %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>时间</th><th>文件</th><th class="num">行数</th><th>结果</th>
+      <th>沉淀的字段</th><th>操作人</th></tr></thead>
+    <tbody>{% for g in logs %}
+      <tr>
+        <td class="nowrap muted">{{ g.created_at | dt }}</td>
+        <td class="wrap2"><span class="clamp2">{{ g.file_name or '—' }}</span></td>
+        <td class="num">{{ g.row_count }}</td>
+        <td>{% if g.fail_count %}<span class="badge failed">没导成 {{ g.fail_count }} 处毛病</span>
+          {% if g.errors %}<div class="muted" style="font-size:12px;margin-top:4px">
+            {{ g.errors[:3] | join('；') }}{% if g.errors | length > 3 %} ……{% endif %}</div>{% endif %}
+          {% else %}<span class="badge done">入库 {{ g.ok_count }} 台</span>{% endif %}</td>
+        <td class="clip muted">{{ g.fields | join('、') if g.fields else '—' }}</td>
+        <td class="muted">{{ g.operator or '—' }}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没导过表。上面下载模板 → 照着填 → 上传') }}{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 选了「沉淀为商品字段」才展开标识与类型那一截（默认收着，别吓着人）
+document.querySelectorAll('.map-select').forEach(function (sel) {
+  var box = document.getElementById('extra_' + sel.dataset.col);
+  function sync() { box.style.display = sel.value === '__extra__' ? '' : 'none'; }
+  sel.addEventListener('change', sync);
+  sync();
+});
+</script>
+{% endblock %}

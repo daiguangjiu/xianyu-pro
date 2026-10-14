@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}收银台 · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 采购买家侧主色：与 1688 一致的品牌橙（和商品详情页 --pdp-brand 同值） */
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .btn-primary { background: var(--pdp-brand); border-color: var(--pdp-brand); }
+  .btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark);
+  }
+  .btn-outline-primary { color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .btn-outline-primary:hover { background: var(--pdp-brand); border-color: var(--pdp-brand); color: #fff; }
+  .pay-card { max-width: 720px; margin: 0 auto; }
+  .pay-amount { font-size: 40px; font-weight: 700; color: var(--pdp-brand); line-height: 1.2; }
+  .pay-method {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    border: 1px solid var(--c-border); border-radius: 8px; cursor: pointer; margin-bottom: 10px;
+  }
+  .pay-method:hover { border-color: var(--pdp-brand); background: var(--pdp-soft); }
+  .pay-method.on { border-color: var(--pdp-brand); background: var(--pdp-soft); }
+  .pay-method i { font-size: 20px; color: var(--pdp-brand); }
+  .pay-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .pay-row .k { color: var(--c-text-muted); }
+
+  /* ---- 手机端：金额与按钮缩一档，长地址与长金额不再挤在一行 ---- */
+  @media (max-width: 768px) {
+    .pay-card { max-width: none; }
+    .pay-amount { font-size: 32px; }
+    .pay-row { align-items: flex-start; gap: 16px; }
+    .pay-row > span:last-child { max-width: none !important; text-align: right; word-break: break-all; }
+    .pay-actions { flex-direction: column; align-items: stretch !important; }
+    .pay-actions .btn { width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>收银台</h1>
+    <span class="page-subtitle">{{ headline }}</span>
+  </div>
+  <a href="{{ self_url('/purchases') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> 我的采购单
+  </a>
+</div>
+
+<div class="pay-card">
+  <div class="card mb-3">
+    <div class="card-header"><i class="bi bi-receipt icon"></i> 应付金额</div>
+    <div class="card-body text-center">
+      <div class="pay-amount">{{ money(order.pay_amount) }}</div>
+      <div class="text-secondary small mt-1">
+        采购单 <span class="mono">{{ order.order_no }}</span>
+        · 共 {{ order.item_kinds }} 款 {{ order.total_qty }} 件
+        · {{ order.supplier_name or '渔货栈 · 平台货源' }}
+      </div>
+      <div class="text-secondary small">
+        商品 {{ money(order.goods_amount) }} ＋ 运费 {{ money(order.freight) }}
+        − 优惠 {{ money(order.discount) }}
+      </div>
+    </div>
+  </div>
+
+  <form method="post" action="{{ self_url('/pay/' ~ order.order_no) }}">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-wallet2 icon"></i> 选择支付方式</div>
+      <div class="card-body">
+        {% for key, label in methods.items() %}
+          <label class="pay-method {% if loop.first %}on{% endif %}" data-method="{{ key }}">
+            <input type="radio" name="method" value="{{ key }}" class="form-check-input"
+                   {% if loop.first %}checked{% endif %} onchange="payPick('{{ key }}')">
+            <i class="bi {% if key == 'balance' %}bi-wallet2{% elif key == 'alipay' %}bi-alipay{% else %}bi-wechat{% endif %}"></i>
+            <span>{{ label }}</span>
+            {% if key == 'balance' %}
+              <span class="ms-auto text-secondary small">平台账户余额</span>
+            {% endif %}
+          </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if subs %}
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-truck icon"></i> 这一笔会拆成 {{ subs | length }} 张子单</div>
+      <div class="card-body">
+        <div class="text-secondary small mb-2">
+          付一次钱、按下面的收货地址分别发货（合并支付 · 拆单履约）。
+        </div>
+        {% for sub in subs %}
+          <div class="pay-row">
+            <span class="k">
+              子单 {{ sub.sub_index }} · {{ sub.receiver_name or '—' }}
+              <span class="mono-sm text-secondary">{{ sub.receiver_phone or '' }}</span>
+            </span>
+            <span class="mono">{{ money(sub.pay_amount) }}</span>
+          </div>
+          <div class="text-secondary small" style="text-align: right; word-break: break-all;">
+            {{ sub.receiver_address or '—' }}
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+      <div class="card-body">
+        <div class="pay-row"><span class="k">收货人</span><span>{{ order.receiver_name or '—' }} {{ order.receiver_phone or '' }}</span></div>
+        <div class="pay-row"><span class="k">收货地址</span><span style="max-width: 440px; text-align: right;">{{ order.receiver_address or '—' }}</span></div>
+        <div class="pay-row"><span class="k">交易方式</span><span>{{ trade_types.get(order.trade_type, '—') }}</span></div>
+        <div class="pay-row"><span class="k">配送方式</span><span>快递</span></div>
+        {% if order.remark %}<div class="pay-row"><span class="k">留言</span><span>{{ order.remark }}</span></div>{% endif %}
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 align-items-center pay-actions">
+      <button class="btn btn-primary btn-lg flex-grow-1" type="submit">
+        <i class="bi bi-shield-check"></i> 确认支付 {{ money(order.pay_amount) }}
+      </button>
+      <button class="btn btn-outline-secondary btn-lg" type="submit" form="cancelOrderForm"
+              onclick="return confirm('取消这笔采购单？')">取消订单</button>
+    </div>
+  </form>
+
+  {# 取消走独立表单（HTML 里 form 不能嵌套），按钮用 form= 关联 #}
+  <form method="post" action="{{ self_url('/purchases/' ~ order.order_no ~ '/actions') }}"
+        id="cancelOrderForm" class="d-none">
+    <input type="hidden" name="action" value="cancel">
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function payPick(key) {
+    document.querySelectorAll('.pay-method').forEach(function (el) {
+      el.classList.toggle('on', el.dataset.method === key);
+    });
+  }
+</script>
+{% endblock %}

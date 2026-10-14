@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}商家登录 · 渔货栈{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>商家登录</h1>
+    <span class="page-subtitle">登录后进入商家端后台：发布商品 · 订单发货 · 资金结算</span>
+  </div>
+</div>
+
+<div class="card" style="max-width: 460px; padding: var(--s-5);">
+  {% if error %}
+  <div class="alert alert-danger" style="margin-bottom: var(--s-4);">
+    <i class="bi bi-exclamation-circle"></i> {{ error }}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/self/merchant/login" autocomplete="off">
+    <input type="hidden" name="next" value="{{ next_url or '/merchant' }}">
+
+    <div class="field" style="margin-bottom: var(--s-4);">
+      <label>手机号 <span class="req">*</span></label>
+      <input type="text" name="phone" placeholder="注册时填写的手机号" required autofocus>
+    </div>
+
+    <div class="field" style="margin-bottom: var(--s-4);">
+      <label>密码 <span class="req">*</span></label>
+      <input type="password" name="password" placeholder="登录密码" required>
+    </div>
+
+    <button type="submit" class="btn btn-primary" style="width: 100%;">
+      <i class="bi bi-box-arrow-in-right"></i> 登录
+    </button>
+  </form>
+
+  <div style="margin-top: var(--s-4); text-align: center; font-size: 13px; color: var(--c-text-muted);">
+    还没有商家账号？
+    <a href="/self/merchant/register" style="color: var(--c-primary);">立即注册并申请入驻</a>
+  </div>
+</div>
+{% endblock %}

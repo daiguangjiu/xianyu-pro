@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}商品审核 · 审核台{% endblock %}
+
+{% block content %}
+{% if not can_write %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid #b26a00;">
+  <div class="card-body" style="padding: 12px 16px; font-size: 14px;">
+    <i class="bi bi-lock"></i> 当前为<strong>只读浏览</strong>。审核操作需
+    <a href="/self/merchant/login?next=/platform/items" style="color:var(--c-primary);">以平台管理员登录</a>。
+  </div>
+</div>
+{% endif %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>商品审核</h1>
+    <span class="page-subtitle">
+      商家提交的商品 · 待审核 {{ counts.pending }} · 已通过 {{ counts.approved }} · 已驳回 {{ counts.rejected }}
+    </span>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom: var(--s-4);">
+  <div class="card-body">
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="/self/platform/items?audit_status=pending" class="btn btn-sm {% if audit_status == 'pending' %}btn-primary{% else %}btn-outline-secondary{% endif %}">待审核</a>
+      <a href="/self/platform/items?audit_status=approved" class="btn btn-sm {% if audit_status == 'approved' %}btn-primary{% else %}btn-outline-secondary{% endif %}">已通过</a>
+      <a href="/self/platform/items?audit_status=rejected" class="btn btn-sm {% if audit_status == 'rejected' %}btn-primary{% else %}btn-outline-secondary{% endif %}">已驳回</a>
+      <a href="/self/platform/items?audit_status=" class="btn btn-sm {% if not audit_status %}btn-primary{% else %}btn-outline-secondary{% endif %}">全部</a>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body" style="padding: 0;">
+    {% if items %}
+    <div class="table-responsive">
+      <table class="table table-hover align-middle" style="margin: 0;">
+        <thead>
+          <tr>
+            <th style="width:64px;"></th>
+            <th>商品</th>
+            <th style="width:120px;">所属商家</th>
+            <th style="width:90px;">供货价</th>
+            <th style="width:90px;">售价</th>
+            <th style="width:80px;">库存</th>
+            <th style="width:100px;">状态</th>
+            <th style="width:200px;">审核操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for it in items %}
+          <tr>
+            <td>
+              {% if it.main_image %}
+                <img src="{{ it.main_image }}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:8px;">
+              {% else %}
+                <div style="width:48px;height:48px;border-radius:8px;background:var(--c-surface-2);display:flex;align-items:center;justify-content:center;color:var(--c-text-muted);">
+                  <i class="bi bi-image"></i>
+                </div>
+              {% endif %}
+            </td>
+            <td>
+              <div style="font-weight:600;">{{ it.title }}</div>
+              <div style="font-size:12px;color:var(--c-text-muted);">
+                {{ it.category_name or '未分类' }} · {{ it.delivery_days }} 天发货
+              </div>
+              {% if it.audit_note %}
+                <div style="font-size:12px;color:var(--c-danger);margin-top:2px;">{{ it.audit_note }}</div>
+              {% endif %}
+            </td>
+            <td>{{ it.merchant_name }}</td>
+            <td>¥{{ '{:,.2f}'.format(it.cost_price) }}</td>
+            <td><strong>¥{{ '{:,.2f}'.format(it.sale_price or 0) }}</strong></td>
+            <td>{{ it.stock }}</td>
+            <td>
+              {% if it.audit_status == 'pending' %}
+                <span class="badge" style="background:#fff7e6;color:#d46b08;">待审核</span>
+              {% elif it.audit_status == 'approved' %}
+                <span class="badge" style="background:#f6ffed;color:#389e0d;">已通过{{ '（在售）' if it.is_listed else '（已下架）' }}</span>
+              {% else %}
+                <span class="badge" style="background:#fff1f0;color:#cf1322;">已驳回</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" action="/self/platform/items/{{ it.item_id }}/audit" class="d-flex gap-1 align-items-start">
+                <input type="text" name="audit_note" placeholder="审核意见" class="form-control form-control-sm" style="max-width:120px;">
+                <button type="submit" name="action" value="approve" class="btn btn-sm btn-primary" title="通过并上架">
+                  <i class="bi bi-check"></i>
+                </button>
+                <button type="submit" name="action" value="reject" class="btn btn-sm btn-outline-secondary" style="color:var(--c-danger);border-color:var(--c-danger);" title="驳回">
+                  <i class="bi bi-x"></i>
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center text-secondary" style="padding: var(--s-6);">
+      <i class="bi bi-inbox" style="font-size:32px;opacity:.35;"></i>
+      <p style="margin-top: var(--s-3);">暂无该状态的商品</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

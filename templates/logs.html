@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}日志 · 供应链小鱼{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>异常日志</h1>
+    <span class="page-subtitle">系统运行期所有未捕获异常的落库队列</span>
+  </div>
+  <div class="d-flex gap-2">
+    <span class="badge bg-danger">未解决 {{ counts.unresolved }}</span>
+    <span class="badge bg-success">已解决 {{ counts.resolved }}</span>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-3 align-items-center">
+      <div class="col-auto">
+        <label class="kpi-label mb-0">类型</label>
+      </div>
+      <div class="col-auto">
+        <select name="type" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">全部</option>
+          {% for t in type_options %}
+            <option value="{{ t }}" {% if type_filter == t %}selected{% endif %}>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-auto">
+        <label class="kpi-label mb-0">状态</label>
+      </div>
+      <div class="col-auto">
+        <select name="resolved" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="">全部</option>
+          <option value="false" {% if resolved_filter == 'false' %}selected{% endif %}>未解决</option>
+          <option value="true" {% if resolved_filter == 'true' %}selected{% endif %}>已解决</option>
+        </select>
+      </div>
+      {% if type_filter or resolved_filter %}
+        <div class="col-auto">
+          <a href="/self/logs" class="btn btn-sm btn-outline-secondary">清除筛选</a>
+        </div>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>时间</th>
+          <th>类型</th>
+          <th>错误信息</th>
+          <th>payload</th>
+          <th class="text-end">重试</th>
+          <th>状态</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+          <tr>
+            <td class="mono-sm text-secondary">#{{ log.id }}</td>
+            <td class="mono-sm text-secondary">{{ log.created_at | dt('%m-%d %H:%M:%S') }}</td>
+            <td><span class="badge bg-warning text-dark">{{ log.type }}</span></td>
+            <td class="text-danger small mono-sm">{{ log.error or '—' }}</td>
+            <td><code class="k" title="{{ log.payload }}">{{ (log.payload or '')[:48] }}{% if log.payload and log.payload|length > 48 %}…{% endif %}</code></td>
+            <td class="text-end mono-sm">{{ log.retry_count }}</td>
+            <td>
+              {% if log.resolved %}
+                <span class="badge bg-success">已解决</span>
+              {% else %}
+                <span class="badge bg-danger">未解决</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="7" class="text-center text-secondary py-5">
+              {% if type_filter or resolved_filter %}
+                当前筛选无数据。试试<a href="/self/logs">清除筛选</a>。
+              {% else %}
+                没有异常日志
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

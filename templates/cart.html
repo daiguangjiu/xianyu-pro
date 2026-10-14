@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% block title %}采购车 · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 采购买家侧主色：与 1688 一致的品牌橙（和商品详情页 --pdp-brand 同值） */
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .btn-primary { background: var(--pdp-brand); border-color: var(--pdp-brand); }
+  .btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark);
+  }
+  .btn-outline-primary { color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .btn-outline-primary:hover { background: var(--pdp-brand); border-color: var(--pdp-brand); color: #fff; }
+  .purchase-bar {
+    position: sticky; bottom: 0; z-index: 5; margin-top: 12px;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 16px; background: var(--c-surface);
+    border: 1px solid var(--c-border); border-radius: 8px;
+    box-shadow: 0 -2px 10px rgba(15, 23, 42, .06);
+  }
+  .purchase-bar .pb-left { display: flex; align-items: center; gap: 16px; }
+  .purchase-bar .pb-right { margin-left: auto; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .purchase-bar .pb-total { font-size: 14px; }
+  .purchase-bar .pb-total .mono { font-size: 20px; font-weight: 700; color: var(--pdp-brand); }
+  .cart-thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid var(--c-border); }
+  /* 每一款货自己的收货地址（2026-10-12）：一次给好几个人各带一件 */
+  .cart-addr > td { background: var(--c-bg, #FBFCFE); border-top: 0 !important; padding-top: 0 !important; }
+  .cart-addr-box { display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap; padding: 6px 0 10px; }
+  .cart-addr-box .addr-text {
+    font-size: 12px; color: var(--c-text-muted); line-height: 1.6; min-width: 0; flex: 1 1 260px;
+  }
+  .cart-addr-box .addr-text b { color: var(--c-text); font-weight: 600; }
+  .cart-addr-edit { display: none; width: 100%; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+  .cart-addr-edit.open { display: flex; }
+  .cart-addr-edit .field { margin: 0; flex: 1 1 180px; min-width: 0; }
+  .cart-addr-edit .field input { height: var(--ctl-h-sm, 32px); font-size: 13px; }
+  .cart-addr-edit .field label { font-size: 12px; margin-bottom: 2px; }
+  .cart-addr-edit .field.wide { flex: 2 1 320px; }
+  .cart-split-tip {
+    display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.6;
+    padding: 8px 10px; border-radius: 6px; margin-bottom: var(--s-3);
+    background: var(--pdp-soft); border: 1px solid var(--pdp-brand); color: var(--c-text);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>采购车</h1>
+    <span class="page-subtitle">
+      共 {{ lines|length }} 款、{{ summary.total_qty }} 件 · 商品 {{ money(summary.goods_amount) }}
+      ＋ 运费 {{ money(summary.freight) }} ＝ <strong>{{ money(summary.pay_amount) }}</strong>
+    </span>
+  </div>
+  <div class="page-actions">
+    <a href="{{ self_url('/purchases') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-receipt"></i> 我的采购单
+    </a>
+    <a href="{{ self_url('/harbor') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-plus-lg"></i> 继续选货
+    </a>
+    {% if lines %}
+      <button type="button" class="btn btn-sm btn-outline-danger" onclick="cartClear()">
+        <i class="bi bi-trash3"></i> 清空
+      </button>
+    {% endif %}
+  </div>
+</div>
+
+{% if not lines %}
+  <div class="card">
+    <div class="card-body text-center py-5 text-secondary">
+      采购车还是空的。去
+      <a href="{{ self_url('/harbor') }}" style="color: var(--c-primary);">货源广场</a>
+      看中哪款，点「加采购车」就进来了。
+    </div>
+  </div>
+{% else %}
+  {# 2026-10-12：一款货一个收货地址 —— 给不同的人各带一件时，结算会拆成几张子单（钱一起付、货分着发） #}
+  <div class="cart-split-tip">
+    <i class="bi bi-truck" style="color: var(--pdp-brand);"></i>
+    <div>
+      每一款货可以各填一个收货地址：<b>地址不同就各开一张子单</b>，结算时<b>合并付一次款</b>、
+      后面按子单分别发货。当前 {{ groups|length }} 个收货地址 →
+      {% if groups|length > 1 %}
+        结算后会拆成 <b>{{ groups|length }} 张子单</b>。
+      {% else %}
+        只有一张单（想分开寄就在下面给另一款货换个地址）。
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th style="width: 40px;">
+              <input type="checkbox" class="form-check-input" id="cartAll" checked onchange="cartToggleAll(this)">
+            </th>
+            <th>商品信息</th>
+            <th class="text-end" style="width: 120px;">渔货价</th>
+            <th class="text-center" style="width: 170px;">数量</th>
+            <th class="text-end" style="width: 120px;">小计</th>
+            <th style="width: 70px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for l in lines %}
+            <tr data-line="{{ l.id }}" data-price="{{ '%.2f' % (l.price | float) }}" data-stock="{{ l.stock }}">
+              <td>
+                <input type="checkbox" class="form-check-input cart-check" value="{{ l.id }}"
+                       checked onchange="cartRefresh()">
+              </td>
+              <td>
+                <div class="d-flex gap-2 align-items-center">
+                  {% if l.image %}
+                    <img src="{{ l.image }}" alt="" class="cart-thumb" loading="lazy">
+                  {% endif %}
+                  <div style="min-width: 0;">
+                    <div class="text-truncate" style="max-width: 420px;">
+                      <a href="{{ self_url('/goods/detail/' ~ l.item_id) }}"
+                         class="text-decoration-none" style="color: inherit;">{{ l.title }}</a>
+                    </div>
+                    <div class="mono-sm text-secondary">
+                      {{ l.spec_text }}{% if l.supplier_name %} · {{ l.supplier_name }}{% endif %}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td class="text-end mono">{{ money(l.price) }}</td>
+              <td class="text-center">
+                <div class="btn-group btn-group-sm" role="group">
+                  <button class="btn btn-outline-secondary" onclick="cartQty({{ l.id }}, -1)">−</button>
+                  <button class="btn btn-outline-secondary disabled" id="qty-{{ l.id }}"
+                          style="min-width: 54px;">{{ l.qty }}</button>
+                  <button class="btn btn-outline-secondary" onclick="cartQty({{ l.id }}, 1)">＋</button>
+                </div>
+                <div class="mono-sm text-secondary mt-1">可售 {{ l.stock }}</div>
+              </td>
+              <td class="text-end mono" id="amount-{{ l.id }}">{{ money(l.price | float * l.qty) }}</td>
+              <td class="text-end">
+                <button class="btn btn-sm btn-ghost" onclick="cartRemove({{ l.id }})" title="删掉这行">
+                  <i class="bi bi-trash3"></i>
+                </button>
+              </td>
+            </tr>
+            <tr class="cart-addr" data-line="{{ l.id }}">
+              <td></td>
+              <td colspan="5">
+                <div class="cart-addr-box">
+                  <div class="addr-text" id="addrText-{{ l.id }}">
+                    {% if l.receiver_address %}
+                      <i class="bi bi-geo-alt"></i> <b>{{ l.receiver_name or '（没填收货人）' }}</b>
+                      {% if l.receiver_phone %}<span class="mono-sm">{{ l.receiver_phone }}</span>{% endif %}
+                      · {{ l.receiver_address }}
+                    {% else %}
+                      <i class="bi bi-geo-alt"></i> <span style="color: var(--c-warn);">还没填收货地址</span>
+                      （结算前填好，否则按默认地址寄）
+                    {% endif %}
+                  </div>
+                  <button class="btn btn-sm btn-ghost" onclick="cartAddrToggle({{ l.id }})" id="addrBtn-{{ l.id }}">
+                    <i class="bi bi-pencil"></i> {{ '改收货地址' if l.receiver_address else '填收货地址' }}
+                  </button>
+                  <div class="cart-addr-edit" id="addrEdit-{{ l.id }}">
+                    <div class="field">
+                      <label>收货人</label>
+                      <input id="addrName-{{ l.id }}" value="{{ l.receiver_name or '' }}" placeholder="收件人姓名">
+                    </div>
+                    <div class="field">
+                      <label>电话</label>
+                      <input id="addrPhone-{{ l.id }}" value="{{ l.receiver_phone or '' }}" placeholder="手机号">
+                    </div>
+                    <div class="field wide">
+                      <label>收货地址</label>
+                      <input id="addrAddr-{{ l.id }}" value="{{ l.receiver_address or '' }}" placeholder="省市区 + 详细地址">
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="cartAddrSave({{ l.id }})">保存</button>
+                    <button class="btn btn-sm btn-ghost" onclick="cartAddrToggle({{ l.id }})">取消</button>
+                    {% if addresses %}
+                      <select class="form-select form-select-sm" style="width: auto; max-width: 240px;"
+                              onchange="cartAddrPick({{ l.id }}, this)">
+                        <option value="">— 从地址簿选 —</option>
+                        {% for a in addresses %}
+                          <option value="{{ a.receiver_name }}|{{ a.phone }}|{{ a.region }} {{ a.address }}">{{ a.receiver_name }} · {{ a.address }}</option>
+                        {% endfor %}
+                      </select>
+                    {% endif %}
+                  </div>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="purchase-bar">
+    <div class="pb-left">
+      <label class="d-flex align-items-center gap-2 mb-0">
+        <input type="checkbox" class="form-check-input" checked onchange="cartToggleAll(this)"> 全选
+      </label>
+      <span class="text-secondary small">
+        已选 <strong id="pickedKinds">0</strong> 款 <strong id="pickedQty">0</strong> 件
+      </span>
+    </div>
+    <div class="pb-right">
+      <span class="text-secondary small">
+        商品 <span class="mono" id="sumGoods">¥0.00</span>
+        ＋ 运费 <span class="mono" id="sumFreight">¥0.00</span>
+      </span>
+      <span class="pb-total">合计 <span class="mono" id="sumPay">¥0.00</span></span>
+      <button class="btn btn-primary" onclick="cartGo()">
+        <i class="bi bi-credit-card"></i> 去结算
+      </button>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var CART_UPDATE_URL = {{ self_url('/cart/update') | tojson }};
+  var CART_REMOVE_URL = {{ self_url('/cart/remove') | tojson }};
+  var CART_CLEAR_URL = {{ self_url('/cart/clear') | tojson }};
+  var CART_ADDRESS_URL = {{ self_url('/cart/address') | tojson }};
+  var CHECKOUT_URL = {{ self_url('/checkout') | tojson }};
+  var CART_FREIGHT = {{ ('%.2f' % (summary.freight | float)) | tojson }};
+
+  function cartMoney(v) { return '¥' + Number(v).toFixed(2); }
+
+  function cartPost(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        return { ok: resp.ok, data: data };
+      });
+    });
+  }
+
+  function cartToggleAll(box) {
+    document.querySelectorAll('.cart-check').forEach(function (c) { c.checked = box.checked; });
+    cartRefresh();
+  }
+
+  function cartRefresh() {
+    var kinds = 0, qty = 0, goods = 0;
+    document.querySelectorAll('.cart-check').forEach(function (box) {
+      if (!box.checked) return;
+      var tr = box.closest('tr');
+      kinds += 1;
+      qty += parseInt(document.getElementById('qty-' + tr.dataset.line).textContent, 10) || 0;
+      goods += Number(tr.dataset.price) * (parseInt(document.getElementById('qty-' + tr.dataset.line).textContent, 10) || 0);
+    });
+    var picked = kinds > 0;
+    var freight = picked ? Number(CART_FREIGHT) : 0;
+    document.getElementById('pickedKinds').textContent = kinds;
+    document.getElementById('pickedQty').textContent = qty;
+    document.getElementById('sumGoods').textContent = cartMoney(goods);
+    document.getElementById('sumFreight').textContent = cartMoney(freight);
+    document.getElementById('sumPay').textContent = cartMoney(goods + freight);
+  }
+
+  function cartQty(id, delta) {
+    var el = document.getElementById('qty-' + id);
+    var next = Math.max(1, (parseInt(el.textContent, 10) || 1) + delta);
+    cartPost(CART_UPDATE_URL, { line_id: id, qty: next }).then(function (res) {
+      if (!res.ok) { alert(res.data.detail || '改数量失败'); return; }
+      el.textContent = res.data.line.qty;
+      document.getElementById('amount-' + id).textContent = cartMoney(res.data.line.amount);
+      cartRefresh();
+    });
+  }
+
+  function cartRemove(id) {
+    cartPost(CART_REMOVE_URL, { line_ids: [id] }).then(function (res) {
+      if (res.ok) location.reload(); else alert(res.data.detail || '删除失败');
+    });
+  }
+
+  function cartClear() {
+    if (!confirm('清空采购车？已加进来的商品都会被移除')) return;
+    cartPost(CART_CLEAR_URL, {}).then(function () { location.reload(); });
+  }
+
+  function cartGo() {
+    var ids = Array.from(document.querySelectorAll('.cart-check:checked')).map(function (c) { return c.value; });
+    if (!ids.length) { alert('先勾选要结算的商品'); return; }
+    location.href = CHECKOUT_URL + '?ids=' + ids.join(',');
+  }
+
+  {# —— 每一款货自己的收货地址（2026-10-12：给不同的人各带一件） —— #}
+  function cartAddrToggle(id) {
+    var box = document.getElementById('addrEdit-' + id);
+    if (!box) return;
+    box.classList.toggle('open');
+  }
+
+  function cartAddrPick(id, sel) {
+    if (!sel.value) return;
+    var parts = sel.value.split('|');
+    document.getElementById('addrName-' + id).value = parts[0] || '';
+    document.getElementById('addrPhone-' + id).value = parts[1] || '';
+    document.getElementById('addrAddr-' + id).value = (parts[2] || '').trim();
+    sel.value = '';
+  }
+
+  function cartAddrSave(id) {
+    var name = document.getElementById('addrName-' + id).value.trim();
+    var phone = document.getElementById('addrPhone-' + id).value.trim();
+    var address = document.getElementById('addrAddr-' + id).value.trim();
+    if (!name || !address) { alert('收货人与收货地址都得填'); return; }
+    cartPost(CART_ADDRESS_URL, {
+      line_id: id, receiver_name: name, receiver_phone: phone, receiver_address: address
+    }).then(function (res) {
+      if (!res.ok) { alert(res.data.detail || '保存失败'); return; }
+      var view = document.getElementById('addrText-' + id);
+      view.innerHTML = '<i class="bi bi-geo-alt"></i> <b>' + name + '</b> '
+        + (phone ? '<span class="mono-sm">' + phone + '</span> ' : '') + '· ' + address;
+      var btn = document.getElementById('addrBtn-' + id);
+      if (btn) { btn.innerHTML = '<i class="bi bi-pencil"></i> 改收货地址'; }
+      cartAddrToggle(id);
+      if (res.data.groups > 1) {
+        alert('已保存。这一车的收货地址现在有 ' + res.data.groups + ' 个，结算时会拆成 ' + res.data.groups + ' 张子单分别发货。');
+      }
+    });
+  }
+
+  window.addEventListener('DOMContentLoaded', cartRefresh);
+</script>
+{% endblock %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}系统设计方案{% endblock %}
+{% block sub %}整个系统是怎么设计出来的：业务流程、分级引擎、一码到底、权限模型、异常处理{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 方案是自带深色主题的单页文档：做成 iframe 装进来，跟系统自身的样式互不干扰 */
+  .doc-card{padding:0;overflow:hidden}
+  .doc-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+    padding:10px var(--s-4);border-bottom:1px solid var(--c-border);background:var(--c-surface-2)}
+  .doc-bar .doc-name{font-weight:600}
+  .doc-bar .doc-tip{color:var(--c-text-muted);font-size:12.5px}
+  .doc-bar .grow{flex:1}
+  .doc-frame{display:block;width:100%;border:0;background:#0d0f14;
+    height:calc(100vh - 260px);min-height:620px}
+  @media (max-width:900px){
+    .doc-frame{height:calc(100vh - 210px);min-height:520px}
+  }
+  @media (max-width:560px){
+    .doc-bar{padding:8px var(--s-3)}
+    .doc-bar .doc-tip{display:none}
+    .doc-frame{height:calc(100vh - 180px)}
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card doc-card flush">
+  <div class="doc-bar">
+    <span class="doc-name">{{ doc_title or '系统设计方案' }}</span>
+    <span class="doc-tip">新来的同事先看「业务流程」和「分级引擎」两节，再看自己岗位用到的那几步</span>
+    <span class="grow"></span>
+    <a class="btn sm" href="{{ doc_src }}" target="_blank" rel="noopener">
+      <i class="bi bi-box-arrow-up-right"></i> 新窗口打开</a>
+  </div>
+  <iframe class="doc-frame" src="{{ doc_src }}" title="系统设计方案"
+          loading="lazy" referrerpolicy="no-referrer"></iframe>
+</div>
+{% endblock %}

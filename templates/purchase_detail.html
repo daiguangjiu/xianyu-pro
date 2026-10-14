@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}采购单 {{ order.order_no }} · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 采购买家侧主色：与 1688 一致的品牌橙（和商品详情页 --pdp-brand 同值） */
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .btn-primary { background: var(--pdp-brand); border-color: var(--pdp-brand); }
+  .btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark);
+  }
+  .btn-outline-primary { color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .btn-outline-primary:hover { background: var(--pdp-brand); border-color: var(--pdp-brand); color: #fff; }
+  .po-flow { display: flex; align-items: flex-start; gap: 0; }
+  .po-step { flex: 1 1 0; text-align: center; position: relative; padding-top: 4px; }
+  .po-step .dot {
+    width: 12px; height: 12px; border-radius: 50%; margin: 0 auto 6px;
+    background: var(--c-border-strong);
+  }
+  .po-step.done .dot { background: var(--pdp-brand); box-shadow: 0 0 0 3px var(--pdp-soft); }
+  .po-step .lb { font-size: 12px; color: var(--c-text-muted); }
+  .po-step.done .lb { color: var(--c-text); font-weight: 600; }
+  .po-step .tm { font-size: 11px; color: var(--c-text-subtle); }
+  .po-step::before {
+    content: ''; position: absolute; top: 9px; left: -50%; width: 100%; height: 1px;
+    background: var(--c-border);
+  }
+  .po-step:first-child::before { display: none; }
+  .po-step.done::before { background: var(--pdp-brand); }
+  .po-row { display: flex; justify-content: space-between; padding: 7px 0; font-size: 13px; border-bottom: 1px dashed var(--c-border); }
+  .po-row:last-child { border-bottom: 0; }
+  .po-row .k { color: var(--c-text-muted); }
+  .po-thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--c-border); flex: none; }
+  .po-w-price { width: 90px; }
+  .po-w-qty { width: 70px; }
+  .po-w-amount { width: 100px; }
+  .po-title { font-size: 14px; line-height: 1.45; word-break: break-word; }
+  .po-spec { font-size: 12px; word-break: break-all; }
+
+  /* ---- 合并单的子单（2026-10-12：一次付款、分开发货） ---- */
+  .po-sub { border-bottom: 1px solid var(--c-border); }
+  .po-sub:last-child { border-bottom: 0; }
+  .po-sub-hd {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 16px; background: var(--c-surface-2); border-bottom: 1px solid var(--c-border);
+    font-size: 14px; font-weight: 600;
+  }
+  .po-sub-body { padding: 14px 16px; }
+  .po-sub-item {
+    display: flex; align-items: center; gap: 10px; padding: 6px 0;
+    border-bottom: 1px dashed var(--c-border);
+  }
+  .po-sub-item:last-of-type { border-bottom: 0; }
+  .po-sub-item .po-thumb { width: 44px; height: 44px; }
+
+  /* ---- 手机端：商品明细改成「一货一卡」，标题不再被单价 / 数量挤成一条缝 ---- */
+  @media (max-width: 768px) {
+    .po-step .lb { font-size: 11px; }
+    .po-step .tm { font-size: 11px; }
+    .po-row { align-items: flex-start; gap: 16px; }
+    /* 行内写死的 max-width 会拦住换行，收货地址在手机上要能占满整行 */
+    .po-row > span:last-child { max-width: none !important; text-align: right; word-break: break-all; }
+    .po-table thead { display: none; }
+    .po-table, .po-table tbody, .po-table tr, .po-table td { display: block; width: 100% !important; }
+    .po-table tr { padding: 12px; border-bottom: 1px solid var(--c-border); }
+    .po-table tr:last-child { border-bottom: 0; }
+    .po-table td { border: 0; padding: 0; text-align: left !important; }
+    .po-table td.po-cell-main { padding-bottom: 4px; }
+    .po-table td[data-label] {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 3px 0; font-size: 13px;
+    }
+    .po-table td[data-label]::before {
+      content: attr(data-label); flex: none; font-size: 12px; color: var(--c-text-muted);
+    }
+    .po-thumb { width: 60px; height: 60px; }
+    .po-title {
+      font-size: 13px;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set badge_map = {'pending_pay': 'bg-warning text-dark', 'paid': 'bg-info text-dark',
+                    'shipped': 'bg-primary', 'completed': 'bg-success', 'cancelled': 'bg-secondary'} %}
+
+{% if request.query_params.get('paid') %}
+  <div class="alert alert-success"><i class="bi bi-check-circle"></i> 支付成功，采购单已转入「待发货」，平台会照收货地址发货。</div>
+{% endif %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1 class="mono">{{ order.order_no }}</h1>
+    <span class="page-subtitle">
+      <span class="badge {{ badge_map.get(order.status, 'bg-light') }}">{{ stock_status_text(order.status) }}</span>
+      · {{ order.item_kinds }} 款 {{ order.total_qty }} 件 · 应付 {{ money(order.pay_amount) }}
+      · {{ '直接采购' if order.source == 'buy_now' else '采购车结算' }}
+    </span>
+  </div>
+  <div class="d-flex gap-2">
+    {% if order.status == 'pending_pay' %}
+      <a href="{{ self_url('/pay/' ~ order.order_no) }}" class="btn btn-sm btn-primary">
+        <i class="bi bi-credit-card"></i> 去支付
+      </a>
+    {% endif %}
+    <a href="{{ self_url('/purchases') }}" class="btn btn-sm btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="po-flow">
+      {% for step in progress %}
+        <div class="po-step {% if step.done %}done{% endif %}">
+          <div class="dot"></div>
+          <div class="lb">{{ step.label }}</div>
+          <div class="tm">{{ step.time | dt('%m-%d %H:%M') if step.time else '' }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-8">
+    {% if subs %}
+      {# 合并单（2026-10-12）：钱在母单上一次付清，货按子单各发各的地址 #}
+      <div class="card mb-3">
+        <div class="card-header">
+          <i class="bi bi-truck icon"></i> 子单（{{ subs | length }} 张 · 各发各的收货地址）
+        </div>
+        <div class="card-body p-0">
+          {% for sub in subs %}
+            {% set sub_items = sub_items_map.get(sub.order_no, []) %}
+            <div class="po-sub">
+              <div class="po-sub-hd">
+                <div>
+                  <a href="{{ self_url('/purchases/' ~ sub.order_no) }}" class="mono-sm text-decoration-none"
+                     style="color: var(--c-primary);">{{ sub.order_no }}</a>
+                  <span class="badge {{ badge_map.get(sub.status, 'bg-light') }} ms-2">{{ stock_status_text(sub.status) }}</span>
+                </div>
+                <div class="mono-sm text-secondary">{{ money(sub.pay_amount) }}</div>
+              </div>
+              <div class="po-sub-body">
+                <div class="po-row">
+                  <span class="k">寄往</span>
+                  <span>{{ sub.receiver_name or '—' }}{% if sub.receiver_phone %} · {{ sub.receiver_phone }}{% endif %}</span>
+                </div>
+                <div class="po-row"><span class="k">地址</span><span>{{ sub.receiver_address or '—' }}</span></div>
+                {% for it in sub_items %}
+                  <div class="po-sub-item">
+                    {% if it.image %}<img src="{{ it.image }}" alt="" class="po-thumb" loading="lazy">{% endif %}
+                    <div style="min-width: 0;">
+                      <div class="po-title">{{ it.title }}</div>
+                      <div class="po-spec mono-sm text-secondary">{{ it.spec_text }} × {{ it.qty }}</div>
+                    </div>
+                    <div class="mono ms-auto">{{ money(it.amount) }}</div>
+                  </div>
+                {% endfor %}
+                {% if sub.shipping_no %}
+                  <div class="po-row"><span class="k">物流</span><span class="mono">{{ sub.shipping_company or '' }} {{ sub.shipping_no }}</span></div>
+                {% endif %}
+                <div class="d-flex gap-2 flex-wrap mt-2">
+                  {% if sub.status == 'paid' %}
+                    <form method="post" action="{{ self_url('/purchases/' ~ sub.order_no ~ '/actions') }}"
+                          class="d-flex gap-2 flex-wrap">
+                      <input type="hidden" name="action" value="ship">
+                      <input class="form-control form-control-sm" name="company" placeholder="快递公司" style="width: 130px;">
+                      <input class="form-control form-control-sm" name="shipping_no" placeholder="物流单号" style="width: 160px;">
+                      <button class="btn btn-outline-primary btn-sm" type="submit">标记发货</button>
+                    </form>
+                  {% endif %}
+                  {% if sub.status == 'shipped' %}
+                    <form method="post" action="{{ self_url('/purchases/' ~ sub.order_no ~ '/actions') }}"
+                          onsubmit="return confirm('确认这张子单已收到货？')">
+                      <input type="hidden" name="action" value="complete">
+                      <button class="btn btn-success btn-sm" type="submit">确认收货</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      </div>
+    {% else %}
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-bag-check icon"></i> 商品明细</div>
+      <div class="table-responsive">
+        <table class="table align-middle mb-0 po-table">
+          <thead>
+            <tr>
+              <th>商品信息</th>
+              <th class="text-end po-w-price">单价</th>
+              <th class="text-end po-w-qty">数量</th>
+              <th class="text-end po-w-amount">小计</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for it in items %}
+              <tr>
+                <td class="po-cell-main">
+                  <div class="d-flex gap-3 align-items-center">
+                    {% if it.image %}<img src="{{ it.image }}" alt="" class="po-thumb" loading="lazy">{% endif %}
+                    <div style="min-width: 0;">
+                      <div class="po-title">
+                        <a href="{{ self_url('/goods/detail/' ~ it.item_id) }}"
+                           class="text-decoration-none" style="color: inherit;">{{ it.title }}</a>
+                      </div>
+                      <div class="po-spec mono-sm text-secondary">{{ it.spec_text }} · 货源 {{ it.item_id }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td class="text-end mono" data-label="单价">{{ money(it.price) }}</td>
+                <td class="text-end mono" data-label="数量">{{ it.qty }}</td>
+                <td class="text-end mono" data-label="小计">{{ money(it.amount) }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card mb-3">
+      <div class="card-header">
+        <i class="bi bi-geo-alt icon"></i> 收货信息
+        {% if order.parent_order_no %}
+          <a href="{{ self_url('/purchases/' ~ order.parent_order_no) }}" class="btn btn-sm btn-ghost float-end">
+            看合并单 {{ order.parent_order_no }}
+          </a>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        <div class="po-row"><span class="k">收货人</span><span>{{ order.receiver_name or '—' }}</span></div>
+        <div class="po-row"><span class="k">手机号</span><span class="mono">{{ order.receiver_phone or '—' }}</span></div>
+        <div class="po-row"><span class="k">收货地址</span><span style="max-width: 460px; text-align: right;">{{ order.receiver_address or '—' }}</span></div>
+        <div class="po-row"><span class="k">留言</span><span>{{ order.remark or '—' }}</span></div>
+        <div class="po-row"><span class="k">交易方式</span><span>{{ trade_types.get(order.trade_type, '—') }}</span></div>
+        <div class="po-row"><span class="k">配送方式</span><span>快递</span></div>
+        {% if order.shipping_no %}
+          <div class="po-row"><span class="k">物流单号</span><span class="mono">{{ order.shipping_company or '' }} {{ order.shipping_no }}</span></div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-cash-coin icon"></i> 金额明细</div>
+      <div class="card-body">
+        <div class="po-row"><span class="k">商品总计</span><span class="mono">{{ money(order.goods_amount) }}</span></div>
+        <div class="po-row"><span class="k">运费</span><span class="mono">{{ money(order.freight) }}</span></div>
+        <div class="po-row"><span class="k">店铺优惠</span><span class="mono">− {{ money(order.discount) }}</span></div>
+        <div class="po-row"><span class="k"><strong>应付金额</strong></span>
+          <span class="mono" style="font-size: 18px; color: var(--pdp-brand); font-weight: 700;">{{ money(order.pay_amount) }}</span></div>
+      </div>
+    </div>
+
+    <div class="card mb-3">
+      <div class="card-header"><i class="bi bi-wallet2 icon"></i> 支付信息</div>
+      <div class="card-body">
+        {% if order.paid_at %}
+          <div class="po-row"><span class="k">支付方式</span><span>{{ pay_methods.get(order.pay_method, '—') }}</span></div>
+          <div class="po-row"><span class="k">支付流水号</span><span class="mono-sm">{{ order.pay_no or '—' }}</span></div>
+          <div class="po-row"><span class="k">支付时间</span><span class="mono-sm">{{ order.paid_at | dt('%Y-%m-%d %H:%M') }}</span></div>
+        {% else %}
+          <div class="text-secondary small">还没付款{{ '（订单已取消）' if order.status == 'cancelled' else '，去收银台完成支付后平台才会发货' }}。</div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><i class="bi bi-tools icon"></i> 可做的操作</div>
+      <div class="card-body d-flex flex-column gap-2">
+        {% if order.status == 'pending_pay' %}
+          <a href="{{ self_url('/pay/' ~ order.order_no) }}" class="btn btn-primary btn-sm">去支付 {{ money(order.pay_amount) }}</a>
+        {% endif %}
+        {% if order.status == 'paid' and subs %}
+          {# 合并单：发货要在子单上做（各发各的地址） #}
+          <div class="text-secondary small">
+            <i class="bi bi-truck"></i> 已付款，请在上面各张子单上分别标记发货。
+          </div>
+        {% endif %}
+        {% if order.status == 'paid' and not subs %}
+          <form method="post" action="{{ self_url('/purchases/' ~ order.order_no ~ '/actions') }}" class="row g-2">
+            <input type="hidden" name="action" value="ship">
+            <div class="col-6"><input class="form-control form-control-sm" name="company" placeholder="快递公司"></div>
+            <div class="col-6"><input class="form-control form-control-sm" name="shipping_no" placeholder="物流单号"></div>
+            <div class="col-12">
+              <button class="btn btn-outline-primary btn-sm w-100" type="submit">平台已发货（标记发货）</button>
+            </div>
+            <div class="col-12"><span class="text-secondary" style="font-size: 12px;">平台侧发货后回填，物流单号可以不填</span></div>
+          </form>
+        {% endif %}
+        {% if order.status == 'shipped' %}
+          <form method="post" action="{{ self_url('/purchases/' ~ order.order_no ~ '/actions') }}"
+                onsubmit="return confirm('确认已收到货？')">
+            <input type="hidden" name="action" value="complete">
+            <button class="btn btn-success btn-sm w-100" type="submit">确认收货，完成采购单</button>
+          </form>
+        {% endif %}
+        {% if order.status in ('pending_pay', 'paid') %}
+          <form method="post" action="{{ self_url('/purchases/' ~ order.order_no ~ '/actions') }}"
+                onsubmit="return confirm('确定取消这笔采购单？已支付的会按原路退款处理')" class="row g-2">
+            <input type="hidden" name="action" value="cancel">
+            <div class="col-8"><input class="form-control form-control-sm" name="reason" placeholder="取消原因（选填）"></div>
+            <div class="col-4"><button class="btn btn-outline-danger btn-sm w-100" type="submit">取消订单</button></div>
+          </form>
+        {% endif %}
+        {% if order.status in ('completed', 'cancelled') %}
+          <div class="text-secondary small">
+            {{ '采购单已完成，货款已结给供应商。' if order.status == 'completed' else '采购单已取消' ~ ('（' ~ (order.cancel_reason or '') ~ '）' if order.cancel_reason else '') }}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

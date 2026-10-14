@@ -1,0 +1,902 @@
+{% extends "base.html" %}
+{% block title %}渔货栈 · 货源广场{% endblock %}
+
+{% block head_extra %}
+<style>
+  .result-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: var(--s-4); flex-wrap: wrap;
+    font-size: 13px; color: var(--c-text-muted);
+    /* 这一行原来紧贴上方运营位与下方卡片，字都挤在一起；上下各留一段呼吸空间 */
+    padding: var(--s-4) 0 var(--s-3);
+    line-height: 2;
+  }
+  /* 类目栏折叠：一级类目几十个，默认摆前 10 个，其余收起（末尾「更多类目」点开） */
+  .mega-rail.rail-folded > .mega-rail-item.rail-more { display: none; }
+  /* 「更多类目」= 类目栏最后一格：对齐 / 字号 / 颜色 / hover 与其它类目条**完全一致**
+     （左边距、图标位、文字基线都对齐），只是图标换成展开-收起 chevron、不带数量。
+     2026-10-04 用户反馈：以前那版是虚线框居中，看着不像类目条里的东西。 */
+  .mega-rail-more {
+    display: flex; align-items: center; gap: 5px;
+    min-height: 30px; padding: 5px 8px; cursor: pointer;
+    border: 0; border-left: 3px solid transparent; border-radius: 4px;
+    background: transparent; font-family: inherit; text-align: left;
+    font-size: 13px; color: var(--c-text);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .mega-rail-more > .bi { font-size: 14px; color: var(--c-text-muted); flex: 0 0 16px; }
+  .mega-rail-more > span {
+    font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .mega-rail-more:hover { background: var(--c-b2b-soft); }
+  .mega-rail-more:hover > .bi { color: var(--c-b2b); }
+  .mega-rail.rail-open > .mega-rail-more { color: var(--c-text-muted); }
+  /* —— 类目栏「更多类目」展开后整行会被拉高：趋势飙升榜 / 采购节点把多出来的
+     商品补上（收起状态只摆放得下的那几个，免得上下挤成一团）——
+     用 :has() 读类目栏的状态，纯 CSS 自适应，不需要再发请求；
+     不支持 :has() 的老浏览器退化成只显示放得下的那几个，不影响可用性。 */
+  .sourcing-mega:not(:has(.mega-rail.rail-open)) .trend-grid > .trend-item:nth-child(n + 5),
+  .sourcing-mega:not(:has(.mega-rail.rail-open)) .node-items > .node-item:nth-child(n + 3) {
+    display: none;
+  }
+  /* —— 展开后整行被拉高：右侧三块把富余高度用起来，别让下半截空着 ——
+     趋势榜的每行已经按 1fr 均分；采购节点让 6 张小卡也均分剩余高度（卡片跟着长高、
+     缩略图同步放大）；经营卡的「经营数据 / 我的采购单 / 快捷入口」均匀铺开
+     （收起态保持原来的紧凑排布，只有展开时才铺开）。 */
+  .sourcing-mega:has(.mega-rail.rail-open) .node-items {
+    grid-auto-rows: minmax(0, 1fr); flex: 1 1 auto;
+  }
+  .sourcing-mega:has(.mega-rail.rail-open) .node-item .thumb {
+    width: 56px; height: 56px; flex: 0 0 56px;
+  }
+  .sourcing-mega:has(.mega-rail.rail-open) .mega-side { justify-content: space-between; }
+  .sourcing-mega:has(.mega-rail.rail-open) .mega-side .me-quick { margin-top: 0; }
+  /* 经营卡：账号身份行（名字后面跟身份 / 登录态） */
+  .me-role { font-size: 11px; color: var(--c-text-subtle); margin-left: 4px; }
+  .me-scope {
+    font-weight: 400; font-size: 11px; color: var(--c-text-subtle);
+    border: 1px solid var(--c-line); border-radius: 8px; padding: 0 6px; margin-left: 6px;
+  }
+  .me-mine {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--c-text-muted);
+    padding: 6px 0 2px;
+  }
+  /* 面包屑与命中统计同处一行：inline-flex，随窗口宽度自然换行 */
+  .crumb-line {
+    display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    font-size: 12px; color: var(--c-text-muted);
+    min-width: 0;
+  }
+  .crumb-line .sep { color: var(--c-text-subtle); }
+  .crumb-line a { color: var(--c-text-muted); text-decoration: none; }
+  .crumb-line a:hover { color: var(--c-b2b); }
+  .empty-state {
+    grid-column: 1 / -1;
+    padding: var(--s-16) var(--s-6);
+    text-align: center;
+    background: var(--c-surface);
+    border: 1px dashed var(--c-border-strong);
+    border-radius: var(--r-card);
+    color: var(--c-text-muted);
+  }
+  .empty-state i { font-size: 28px; color: var(--c-text-subtle); display: block; margin-bottom: 8px; }
+  /* 平台下架提示（渔枢系统把货源从渔货栈下架后，渔货栈在卡片上看到的那一条） */
+  .fish-unlisted {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    font-size: 11px; line-height: 1.4; margin-bottom: 4px;
+    padding: 4px 6px; border-radius: 6px;
+    background: var(--c-warning-soft); border: 1px solid var(--c-warning-border);
+    color: var(--c-warning-fg);
+  }
+  .fish-unlisted a { margin-left: auto; color: inherit; text-decoration: underline; }
+  /* 「最新上架的货源」板块已于 2026-10-04 取消（合并进 feed，默认按上架时间倒序），
+     样式一并删掉；.fresh-* 若再出现说明还有老引用没清。 */
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# ============================================================
+   1. 顶部搜索区（1688 版式）：大搜索框（橙色按钮）+ 居中的热搜词
+      品牌与经营数都在顶栏（2026-10-03 搬过去的），
+      这里不再重复渲染，只留搜索本身
+   ============================================================ #}
+<section class="harbor-hero">
+
+  <form class="harbor-search" method="get" action="/self/harbor">
+    <div class="search-box">
+      <i class="bi bi-search"></i>
+      <input type="search" name="q" value="{{ keyword }}"
+             placeholder="搜商品名 / 商品ID / 供货商 / 品牌 / 商家编码，如：机械键盘">
+      <button class="search-btn" type="submit">搜货源</button>
+    </div>
+    <div class="hot-words">
+      <span class="cap"><i class="bi bi-fire"></i> 热搜：</span>
+      {# 热搜词也是搜索参数：点它只换关键词，类目 / 榜单 / 活动节点都跟着带下去 #}
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q='机械键盘', node=node_sel) }}">机械键盘</a>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q='游戏鼠标', node=node_sel) }}">游戏鼠标</a>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q='保温杯', node=node_sel) }}">保温杯</a>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q='睡衣', node=node_sel) }}">珊瑚绒睡衣</a>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q='洗面奶', node=node_sel) }}">洗面奶</a>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q='瑜伽垫', node=node_sel) }}">瑜伽垫</a>
+    </div>
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <input type="hidden" name="cat" value="{{ cat_raw }}">
+    <input type="hidden" name="sub" value="{% if sub_filter != '全部' %}{{ sub_filter }}{% endif %}">
+    <input type="hidden" name="l3" value="{{ l3_filter }}">
+    <input type="hidden" name="node" value="{{ node_sel }}">
+  </form>
+</section>
+
+{# ============================================================
+   2. 顶部四块（1688 首页版式）：
+      左侧两级类目 ｜ 趋势飙升榜 ｜ 采购节点 ｜ 我的经营卡
+   ============================================================ #}
+<section class="sourcing-mega">
+
+  {# —— 左：货源类目（一级单列 + 悬浮二级面板）—— #}
+  {# 类目栏：一级类目换成 1688 那套之后有几十个，默认只摆前 15 个 + 末尾「…」，
+     点「…」看全部（当前选中的类目在收起的那截里时服务端会直接展开） #}
+  <nav class="mega-rail {% if rail_open %}rail-open{% else %}rail-folded{% endif %}" id="catRail">
+    <div class="mega-rail-head">货源类目</div>
+    <div class="mega-rail-item {% if cat_filter == '全部' %}active{% endif %}">
+      <a class="mega-rail-link" href="{{ harbor_url(tab=tab, q=keyword, node=node_sel) }}">
+        <i class="bi bi-grid-3x3-gap"></i>
+        <span class="txt"><span class="nm">全部货源</span><span class="hint">不限类目</span></span>
+        <span class="n">{{ total }}</span>
+      </a>
+    </div>
+    {% for n in cat_rail %}
+      <div class="mega-rail-item {% if n.active %}active{% endif %}{% if loop.index > rail_visible %} rail-more{% endif %}"
+           data-cat="{{ n.name }}">
+        <a class="mega-rail-link" href="{{ harbor_url(tab=tab, cat=n.name, q=keyword, node=node_sel) }}">
+          <i class="bi {{ n.icon }}"></i>
+          <span class="txt"><span class="nm">{{ n.name }}</span><span class="hint">{{ n.hint }}</span></span>
+          <span class="n">{{ n.count }}</span>
+        </a>
+        {% if n.children %}
+          <div class="mega-fly" data-open="{{ n.open_idx }}">
+            <div class="mega-fly-head">
+              {{ n.name }} · {{ n.hint }}
+              <span style="font-weight: 400; color: var(--c-text-subtle);">
+                （{{ n.count }} 款在架货源）
+              </span>
+            </div>
+            <div class="mega-fly-body">
+              <div class="mega-fly-sub">
+                {% for ch in n.children %}
+                  <div class="mega-fly-subitem" data-idx="{{ ch.idx }}">
+                    <a class="mega-fly-cell mega-fly-sublink {% if ch.active %}active{% endif %}"
+                       href="{{ harbor_url(tab=tab, cat=n.name, sub=ch.name, q=keyword, node=node_sel) }}">
+                      <i class="bi {{ ch.icon }}"></i>
+                      <span>{{ ch.name }}</span>
+                      {% if ch.count %}<em>{{ ch.count }}</em>{% endif %}
+                    </a>
+                  </div>
+                {% endfor %}
+              </div>
+              <div class="mega-fly-leaf">
+                {% for ch in n.children %}
+                  {# 三级只给当前展开的那一屏渲染（53 个一级 × 上千个二级全渲染是几 MB HTML），
+                     其余一级点二级名进去再细分 #}
+                  {% if ch.leaves %}
+                  <div class="mega-fly-leafcol" data-idx="{{ ch.idx }}">
+                    <div class="lf-head">
+                      <span>{{ ch.name }}</span>
+                      <a href="{{ harbor_url(tab=tab, cat=n.name, sub=ch.name, q=keyword, node=node_sel) }}">全部 {{ ch.count }} 款</a>
+                    </div>
+                    {% if ch.leaves %}
+                      <div class="lf-grid">
+                        {% for lf in ch.leaves %}
+                          <a class="lf-cell {% if lf.active %}active{% endif %}{% if loop.index0 >= leaf_fold_limit %} lf-hidden{% endif %}"
+                             href="{{ harbor_url(tab=tab, cat=n.name, sub=ch.name, l3=lf.name, q=keyword, node=node_sel) }}">
+                            <span>{{ lf.name }}</span>
+                            {% if lf.count %}<em>{{ lf.count }}</em>{% endif %}
+                          </a>
+                        {% endfor %}
+                      </div>
+                      {# 三级全在页面上了，默认只摆前 N 个，点「展开全部」再看其余的 #}
+                      {% if ch.leaves|length > leaf_fold_limit %}
+                        <button type="button" class="lf-more" data-total="{{ ch.leaves|length }}"
+                                onclick="toggleLeafCol(this)">
+                          展开全部 {{ ch.leaves|length }} 个三级类目 <i class="bi bi-chevron-down"></i>
+                        </button>
+                      {% endif %}
+                    {% else %}
+                      <div class="lf-empty">该类目暂未细分，可直接查看全部货源</div>
+                    {% endif %}
+                  </div>
+                  {% endif %}
+                {% endfor %}
+              </div>
+            </div>
+            <div class="mega-fly-foot">
+              <a href="{{ harbor_url(tab=tab, cat=n.name, q=keyword, node=node_sel) }}">
+                <i class="bi bi-arrow-right-short"></i> 查看「{{ n.name }}」全部货源
+              </a>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% if cat_rail|length > rail_visible %}
+      <button type="button" class="mega-rail-more" id="catRailMore"
+              aria-expanded="{{ 'true' if rail_open else 'false' }}"
+              title="{{ '收起类目' if rail_open else '展开全部 %d 个类目'|format(cat_rail|length) }}">
+        <i class="bi {{ 'bi-chevron-up' if rail_open else 'bi-chevron-down' }}"></i>
+        <span>{% if rail_open %}收起类目{% else %}更多类目{% endif %}</span>
+      </button>
+    {% endif %}
+  </nav>
+
+  {# —— 中左：趋势飙升榜（按类目热度取 4 款，指标全部取真实库表）—— #}
+  <div class="trend-card">
+    <div class="panel-head">
+      <span class="t">趋势飙升榜</span>
+      <span class="sub">{{ trend.cat }}</span>
+      <span class="nav-btn">
+        <a class="btn btn-sm"
+           href="{{ harbor_url(tab='hot', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel, l3=l3_filter) }}"
+           style="font-size:11px; padding:2px 8px;">全部 {{ trend.pool }} 款</a>
+      </span>
+    </div>
+    <div class="trend-grid">
+      {% for it in trend.cards %}
+        {% set _p = '%.2f' % it.cost_price %}
+        <a class="trend-item" href="/self/goods/detail/{{ it.item_id }}" title="{{ it.title }}">
+          <span class="thumb">
+            {% if it.main_image %}
+              <img src="{{ it.main_image }}" alt="{{ it.title }}" loading="lazy">
+            {% else %}
+              <i class="bi bi-image"></i>
+            {% endif %}
+          </span>
+          <span class="info">
+            <span class="p"><span class="cur">¥</span>{{ _p }}</span>
+            <span class="g">月销 <em>{{ it.sold_shown }}</em> 件</span>
+            <span class="nm">{{ it.title }}</span>
+          </span>
+        </a>
+      {% else %}
+        <div class="mega-empty" style="grid-column: 1 / -1;">暂无可对比的货源数据</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# —— 中右：采购节点（节点日历 + 关键词实时匹配的节点货源）—— #}
+  <div class="node-card">
+    <div class="panel-head">
+      <span class="t">采购节点</span>
+      {% if nodes %}
+        <span class="sub">{{ nodes[0].name }}{% if nodes[0].status == 'ongoing' %}
+          剩 {{ nodes[0].days_left }} 天{% endif %}</span>
+      {% endif %}
+    </div>
+    <div class="node-chips">
+      {% for n in nodes %}
+        <a class="node-chip {% if n.active %}active{% endif %}"
+           href="{{ node_url(n.id) }}"
+           title="{{ n.name }} {{ n.date_text }} · {{ n.count }} 款在架，点击查看该节点主推">
+          <span class="nm"><i class="bi {{ n.icon }}"></i>{{ n.name }}</span>
+          <span class="dt">{{ n.date_text }}</span>
+        </a>
+      {% endfor %}
+    </div>
+    {% if active_node and active_node.cards %}
+      {% set hot = active_node.cards[0] %}
+      <div class="node-main">
+        <span class="t" title="{{ hot.title }}">{{ hot.title }}</span>
+        <span class="tag">{{ active_node.name }}主推 · {{ active_node.count }} 款</span>
+      </div>
+      {# 节点下命中几款就摆几款（主推 1 + 小卡 6），板块高度跟着内容走 #}
+      <div class="node-items">
+        {% for it in active_node.cards[1:7] %}
+          <a class="node-item" href="/self/goods/detail/{{ it.item_id }}" title="{{ it.title }}">
+            <span class="thumb">
+              {% if it.main_image %}
+                <img src="{{ it.main_image }}" alt="{{ it.title }}" loading="lazy">
+              {% else %}
+                <i class="bi bi-image"></i>
+              {% endif %}
+            </span>
+            <span class="info">
+              <span class="p"><span class="cur">¥</span>{{ '%.1f' % it.cost_price }}</span>
+              <span class="s">月销 {{ it.sold_shown }} 件</span>
+            </span>
+          </a>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+
+  {# —— 右：我的经营卡（当前登录账号 + 订单 / 采购 / 售后 + 快捷入口）——
+     口径：订单 / 推单两块表暂未按账号隔离，这里的三个数字与「订单 N 单」是全店的真实
+     库表统计，卡上标了「全店」；与当前账号绑定的（采购单 / 采购车）单独一行列出来。 #}
+  <aside class="mega-side">
+    <div class="me-user">
+      <span class="avatar">{{ me.avatar }}</span>
+      <span class="nm">{{ me.name }}</span>
+      {% if me.role_text %}<span class="me-role">{{ me.role_text }}</span>{% endif %}
+      <a href="{{ self_url('/overview') }}" title="去概览" style="margin-left:auto; color: var(--c-text-subtle);">
+        <i class="bi bi-box-arrow-in-right"></i>
+      </a>
+    </div>
+
+    <div class="side-cap">经营数据<span class="me-scope">{{ '全店' if me.shared_scope else '我的' }}</span></div>
+    <div class="me-stats">
+      <a class="me-stat text-decoration-none" href="{{ self_url('/orders?status=pending') }}">
+        <span class="n">{{ me.to_ship }}</span><span class="l">待发货</span>
+      </a>
+      <a class="me-stat text-decoration-none" href="{{ self_url('/orders?status=shipped') }}">
+        <span class="n">{{ me.to_receive }}</span><span class="l">待收货</span>
+      </a>
+      <a class="me-stat text-decoration-none" href="{{ self_url('/orders?status=exception') }}">
+        <span class="n">{{ me.after_sale }}</span><span class="l">退款售后</span>
+      </a>
+    </div>
+    {# 经营卡原来还有一行「订单 N 单 / 采购 N 单 / 失败 N 单」：与上面三个指标重复，
+       用户 2026-10-04 要求删掉（红框处表述） #}
+    <div class="me-mine">
+      <i class="bi bi-person-badge"></i>
+      <span>我的采购单 {{ me.my_pos }} 张 · 采购车 {{ me.my_cart }} 件</span>
+    </div>
+
+    <div class="side-cap">快捷入口</div>
+    <div class="me-quick">
+      <a href="{{ self_url('/harbor?tab=new') }}"><i class="bi bi-stars"></i><span>今日上新</span></a>
+      {# 2026-10-11：「我的上架」页下线，入口换成每次都要去的「我的店铺商品」 #}
+      <a href="{{ self_url('/shop-goods') }}"><i class="bi bi-bag-check"></i><span>我的店铺商品</span></a>
+      <a href="{{ self_url('/orders') }}"><i class="bi bi-truck"></i><span>订单</span></a>
+      <a href="{{ self_url('/pricing') }}"><i class="bi bi-graph-up-arrow"></i><span>利润报表</span></a>
+    </div>
+  </aside>
+</section>
+
+{# ============================================================
+   3. 推荐类目横排条（对齐 1688 feed 顶部类目横排）
+   ============================================================ #}
+<div class="mega-panel">
+  <div class="mega-panel-head">
+    <span class="t">推荐类目</span>
+    {% if panel_title not in ('推荐类目', '全部货源') %}
+      <span class="sub">{{ panel_title }}</span>
+    {% endif %}
+  </div>
+  <div class="mega-tiles">
+    {% for ch in panel_cats %}
+      <a class="mega-tile accent-{{ ch.accent }} {% if ch.active %}active{% endif %}"
+         href="{{ harbor_url(tab=tab, sub=ch.name, q=keyword, node=node_sel) }}" title="{{ ch.name }} · {{ ch.count }} 款">
+        <span class="ic"><i class="bi {{ ch.icon }}"></i></span>
+        <span class="nm">{{ ch.name }}</span>
+        <span class="cnt">{{ ch.count }}</span>
+      </a>
+    {% else %}
+      <div class="mega-empty">
+        {% if keyword %}「{{ keyword }}」暂无归类货源{% else %}该类目暂无货源，试试左侧其它类目{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{# ============================================================
+   4. 精选货源工具栏：二级类目横排 + 四大榜单
+   ============================================================ #}
+<section class="card">
+  <div class="pick-head">
+    <span class="pick-title">精选货源</span>
+    <div class="pick-tabs">
+      <a class="pick-tab {% if sub_filter == '全部' %}active{% endif %}"
+         href="{{ harbor_url(tab=tab, q=keyword, node=node_sel) }}">
+        全部二级类目
+      </a>
+      {% for t in sub_tabs %}
+        <a class="pick-tab {% if sub_filter == t.name %}active{% endif %}"
+           href="{{ harbor_url(tab=tab, cat=t.cat1, sub=t.name, q=keyword, node=node_sel) }}">
+          {{ t.name }} <em>{{ t.count }}</em>
+        </a>
+      {% endfor %}
+    </div>
+    {# 切榜单只换排序：类目 / 搜索词 / 活动节点都按当前条件一起带下去 #}
+    <div class="rank-tabs">
+      <a href="{{ harbor_url(tab='recommend', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel, l3=l3_filter) }}"
+         class="rank-tab {% if tab == 'recommend' %}active{% endif %}">
+        <i class="bi bi-hand-thumbs-up"></i> 今日主推
+      </a>
+      <a href="{{ harbor_url(tab='hot', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel, l3=l3_filter) }}"
+         class="rank-tab {% if tab == 'hot' %}active{% endif %}">
+        昨日热销榜
+      </a>
+      <a href="{{ harbor_url(tab='new', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel, l3=l3_filter) }}"
+         class="rank-tab {% if tab == 'new' %}active{% endif %}">
+        新品尖货榜
+      </a>
+      <a href="{{ harbor_url(tab='cut', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel, l3=l3_filter) }}"
+         class="rank-tab {% if tab == 'cut' %}active{% endif %}">
+        <span class="flag">降价</span> 捡漏榜
+      </a>
+    </div>
+  </div>
+</section>
+
+{# ============================================================
+   5. 结果信息（面包屑 + 命中统计合并为一行）
+   ============================================================ #}
+<div class="result-bar">
+  <span class="crumb-line">
+    <i class="bi bi-geo-alt"></i>
+    <a href="{{ harbor_url(tab=tab, q=keyword, node=node_sel) }}">货源广场</a>
+    {% if cat_filter != '全部' %}
+      <span class="sep">/</span>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, q=keyword, node=node_sel) }}">{{ cat_filter }}</a>
+    {% endif %}
+    {% if sub_filter != '全部' %}
+      <span class="sep">/</span>
+      <a href="{{ harbor_url(tab=tab, cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel) }}">{{ sub_filter }}</a>
+    {% endif %}
+    {% if l3_filter %}
+      <span class="sep">/</span>
+      <span style="color: var(--c-b2b-deep); font-weight: 700;">{{ l3_filter }}</span>
+    {% endif %}
+    <span class="sep">·</span>
+    {% if keyword %}关键词「{{ keyword }}」· {% endif %}
+    {% if node_name %}
+      活动「{{ node_name }}」
+      {% if node_keywords %}（{{ node_keywords | join(' / ') }}）{% endif %}·
+    {% endif %}
+    {% if l3_filter %}三级类目「{{ l3_filter }}」· {% endif %}
+    共 <strong style="color: var(--c-text);">{{ shown }}</strong> / {{ total }} 款货源
+    <span style="color: var(--c-text-subtle);">· 覆盖 {{ cat_total }} 个一级类目 / {{ sub_total }} 个二级类目</span>
+  </span>
+</div>
+
+{# ============================================================
+   6. 商品 feed 流（1688：促销卡 + 自适应列数商品卡）
+   —— feed 默认就按「最新上架」倒序（2026-10-04：顶部那块独立的「最新上架的
+      货源」取消，合并进这里），刚上架的货在第一页第一排就能看到。
+   ============================================================ #}
+<div class="fish-grid feed-grid">
+
+  {# —— 1688 feed 首位促销卡（入口数字全部取真实榜单统计）—— #}
+  <article class="promo-card">
+    <span class="pc-badge">严选采购日</span>
+    <div class="pc-t">源头直供 · 一件代发</div>
+    <div class="pc-s">节庆爆款上新，看中就能一键铺货到店铺</div>
+    {# 促销卡入口也是榜单入口：当前类目 / 搜索词 / 活动节点一起带下去 #}
+    <div class="pc-grid">
+      <a href="{{ harbor_url(tab='new', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel) }}">
+        <i class="bi bi-stars"></i><span>今日上新</span><em>{{ ops.new.count }}</em>
+      </a>
+      <a href="{{ harbor_url(tab='cut', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel) }}">
+        <i class="bi bi-graph-down-arrow"></i><span>降价捡漏</span><em>{{ ops.cut.count }}</em>
+      </a>
+      <a href="{{ harbor_url(tab='hot', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel) }}">
+        <i class="bi bi-fire"></i><span>热销榜单</span><em>{{ ops.hot.count }}</em>
+      </a>
+      <a href="{{ harbor_url(tab='recommend', cat=cat_filter, sub=sub_filter, q=keyword, node=node_sel) }}">
+        <i class="bi bi-patch-check"></i><span>供应之星</span><em>{{ ops.star.count }}</em>
+      </a>
+    </div>
+  </article>
+
+  {% for c in cards %}
+    {% set _p = '%.2f' % c.cost_price %}
+    {% set _ip = _p.split('.') %}
+    <article class="fish-card">
+      <div class="fish-thumb">
+        <a href="/self/goods/detail/{{ c.item_id }}" title="查看详情"
+           style="display: block; width: 100%; height: 100%;">
+          {% if c.main_image %}
+            <img src="{{ c.main_image }}" alt="{{ c.title }}"
+                 loading="lazy" onerror="this.style.display='none'">
+          {% else %}
+            <div class="ph"><i class="bi bi-image"></i></div>
+          {% endif %}
+        </a>
+
+        {% if c.promo %}<div class="fish-promo"><span>{{ c.promo }}</span></div>{% endif %}
+
+        {% if c.unlisted %}
+          <span class="fish-tag warn" title="渔枢系统已把它从渔货栈下架{% if c.unlisted_reason %}：{{ c.unlisted_reason }}{% endif %}">
+            <i class="bi bi-box-arrow-up"></i> 已下架
+          </span>
+        {% elif c.is_oversold %}
+          <span class="fish-tag warn"><i class="bi bi-exclamation-triangle"></i> 超卖</span>
+        {% elif c.is_new %}
+          <span class="fish-tag hot"><i class="bi bi-stars"></i> 今日上新</span>
+        {% elif c.cut_amount > 0 %}
+          <span class="fish-tag hot"><i class="bi bi-graph-down-arrow"></i> 直降{{ '%.0f' % c.cut_amount }}元</span>
+        {% elif c.prefix == '源头工厂' %}
+          <span class="fish-tag"><i class="bi bi-geo-alt-fill"></i> 源头工厂</span>
+        {% endif %}
+
+        <a class="fish-hoverbar" href="/self/goods/detail/{{ c.item_id }}" title="查看详情">
+          <i class="bi bi-box-arrow-up-right"></i> 查看详情
+        </a>
+      </div>
+
+      <div class="fish-body">
+        <div class="fish-titlerow">
+          <span class="fish-prefix">{{ c.prefix }}</span>
+          <h3 class="fish-title">
+            <a href="/self/goods/detail/{{ c.item_id }}" title="{{ c.title }}">{{ c.title }}</a>
+          </h3>
+        </div>
+
+        {% if c.unlisted %}
+          <div class="fish-unlisted" title="{{ c.unlisted_reason }}">
+            <i class="bi bi-info-circle-fill"></i>
+            渔枢系统已下架{% if c.unlisted_at %} · {{ c.unlisted_at | dt('%m-%d %H:%M') }}{% endif %}
+            <a href="/self/goods/detail/{{ c.item_id }}">看下架前的样子</a>
+          </div>
+        {% endif %}
+
+        <div class="fish-tags">
+          {# 前缀标签已展示的标签不重复渲染；卡片上最多 3 个（顺序：固定标签 → 降价 / 高毛利 → 今日上新） #}
+          {% set rest = c.tags[1:] if (c.tags and c.prefix == c.tags[0].text) else c.tags %}
+          {% for t in rest[:3] %}
+            <span class="ftag {{ t.kind }}">{{ t.text }}</span>
+          {% endfor %}
+        </div>
+
+        <div class="fish-priceline" title="建议售价 ¥{{ '%.2f' % c.suggested_price }}">
+          <span class="lab">渔货价</span>
+          <span class="cur">¥</span><span class="int">{{ _ip[0] }}</span><span class="dec">.{{ _ip[1] }}</span>
+          <span class="unit">起</span>
+          {# 卡片上给人看的是「展示基数 + 真实销量」（渔枢后台配的基数），排序与统计仍用真实值 #}
+          <span class="fish-sold">已售 {{ c.sold_shown }}</span>
+        </div>
+
+        <div class="fish-meta">
+          <span>{{ c.delivery_days }} 天发货</span>
+          <span class="dot">·</span>
+          <span>库存 {{ c.stock }}</span>
+          <span class="dot">·</span>
+          <span>利润 {{ '%.0f' % (c.profit_rate * 100) }}%</span>
+        </div>
+
+        <div class="fish-foot">
+          <div class="fish-shoprow">
+            <span class="fish-company" title="{{ c.shop_name }}">
+              <i class="bi bi-shop-window"></i><span>{{ c.shop_name }}</span>
+            </span>
+            <span class="fish-merchants"
+                  title="有多少家店铺把这款货铺进了自己的店铺商品池（含渔枢后台配的展示基数 {{ c.merchants_shown - c.merchants }} 家，真实 {{ c.merchants }} 家）">
+              <i class="bi bi-people-fill"></i>{{ c.merchants_shown }} 家上架
+            </span>
+          </div>
+          <div class="fish-actions">
+          {% if c.unlisted %}
+            <button class="btn btn-shelf btn-sm" disabled
+                    title="该货源已被渔枢系统下架，不能再上架到店铺">已下架</button>
+          {% elif c.is_oversold %}
+            <button class="btn btn-shelf btn-sm" disabled title="货源超卖，暂不可上架">不可上架</button>
+          {% elif c.listing_status == 'published' %}
+            {# 已铺货：只可能是「当前账号自己铺过」（铺货记录按账号隔离） #}
+            <span class="badge bg-success" title="你已经把这款货铺进自己的店铺商品池">
+              <i class="bi bi-check2"></i> 已铺货</span>
+          {% elif c.listing_status == 'failed' %}
+            <span class="badge bg-danger" title="上次发布没成功，去商品详情重铺一次">
+              <i class="bi bi-exclamation-circle"></i> 发布失败</span>
+          {% elif c.listing_status in ('draft', 'needs_review') %}
+            <a href="/self/goods/detail/{{ c.item_id }}?handoff=1" class="badge bg-primary text-decoration-none"
+               title="已生成铺货草稿，去商品详情继续">待发布</a>
+          {% else %}
+            {# 没店铺 / 店铺没过审 → 置灰，点了提示去找带教老师（2026-10-11 用户拍板） #}
+            <button class="btn btn-shelf btn-sm{% if not shops_approved %} locked{% endif %}"
+                    data-item="{{ c.item_id }}"
+                    {% if not shops_approved %}title="{{ shop_required_msg }}"{% endif %}
+                    onclick="shelfToStore(this)">
+              <i class="bi bi-plus-lg"></i> 铺货到店铺
+            </button>
+          {% endif %}
+          </div>
+        </div>
+      </div>
+    </article>
+  {% else %}
+    {# 空态：只在这条筛选真的能给出「换个词 / 换个类目」这种可操作提示时才占位置。
+       原来兜底那句「暂无货源，先通过 Swagger POST /api/v1/goods/sync 同步 1688 商品」
+       是给运维看的开发者提示，2026-10-04 用户要求删掉（截图红框区域）—— 数据同步
+       是我们的事，不该让商家在货源广场上看到。 #}
+    {% if keyword and node_name %}
+      <div class="empty-state">
+        <i class="bi bi-search"></i>
+        没有同时匹配「{{ keyword }}」和活动「{{ node_name }}」的货源，换个词或退出活动试试
+      </div>
+    {% elif node_name %}
+      <div class="empty-state">
+        <i class="bi bi-search"></i>
+        活动「{{ node_name }}」暂无匹配货源（关键词：{{ node_keywords | join(' / ') }}）
+      </div>
+    {% elif keyword %}
+      <div class="empty-state">
+        <i class="bi bi-search"></i>
+        没有匹配「{{ keyword }}」的货源，换个关键词试试
+      </div>
+    {% elif sub_filter != '全部' %}
+      <div class="empty-state">
+        <i class="bi bi-search"></i>
+        「{{ sub_filter }}」暂无货源，试试其它类目
+      </div>
+    {% elif cat_filter and cat_filter != '全部' %}
+      <div class="empty-state">
+        <i class="bi bi-search"></i>
+        「{{ cat_filter }}」暂时没有在架货源，换个类目看看
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{# ============================================================
+   6.5 feed 流分页器（每页 HARBOR_PAGE_SIZE 款；价格 / 标签 / 类目都在内存派生，无法 SQL 分页）
+   ============================================================ #}
+{% if page_total > 1 %}
+<div class="harbor-pager">
+  <div class="hp-meta">
+    共 <strong>{{ shown }}</strong> 款货源 · 第 <strong>{{ page_from }}–{{ page_to }}</strong> 款
+    <span style="color: var(--c-text-subtle);">/ 每页 {{ page_size }} 款</span>
+  </div>
+  <div class="hp-nav">
+    {% if page_no > 1 %}
+      <a class="hp-btn" href="{{ page_url(page_no - 1) }}"><i class="bi bi-chevron-left"></i> 上一页</a>
+    {% else %}
+      <span class="hp-btn disabled"><i class="bi bi-chevron-left"></i> 上一页</span>
+    {% endif %}
+
+    {% set _first = page_nav[0].no %}
+    {% set _last = page_nav[-1].no %}
+    {% if _first > 1 %}
+      <a class="hp-num" href="{{ page_url(1) }}" title="第 1 页">1</a>
+      {% if _first > 2 %}<span class="hp-gap">…</span>{% endif %}
+    {% endif %}
+
+    {% for p in page_nav %}
+      {% if p.active %}
+        <span class="hp-num active">{{ p.no }}</span>
+      {% else %}
+        <a class="hp-num" href="{{ p.url }}">{{ p.no }}</a>
+      {% endif %}
+    {% endfor %}
+
+    {% if _last < page_total %}
+      {% if _last < page_total - 1 %}<span class="hp-gap">…</span>{% endif %}
+      <a class="hp-num" href="{{ page_url(page_total) }}" title="第 {{ page_total }} 页">{{ page_total }}</a>
+    {% endif %}
+
+    {% if page_no < page_total %}
+      <a class="hp-btn" href="{{ page_url(page_no + 1) }}">下一页 <i class="bi bi-chevron-right"></i></a>
+    {% else %}
+      <span class="hp-btn disabled">下一页 <i class="bi bi-chevron-right"></i></span>
+    {% endif %}
+  </div>
+  <div class="hp-jump">
+    <a href="{{ reset_url }}" title="清空筛选 / 分页">
+      <i class="bi bi-arrow-counterclockwise"></i> 回到筛选
+    </a>
+  </div>
+</div>
+{% else %}
+<div class="harbor-pager" style="justify-content: flex-end;">
+  <div class="hp-meta">
+    共 <strong>{{ shown }}</strong> 款货源 · 第 <strong>{{ page_from }}–{{ page_to }}</strong> 款
+  </div>
+  <div class="hp-jump">
+    <a href="{{ reset_url }}" title="清空筛选"><i class="bi bi-arrow-counterclockwise"></i> 回到筛选</a>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // 铺货到店铺的前置条件（2026-10-11 用户拍板）：名下得有一家审核通过的店铺
+  var SHOPS_APPROVED = {{ (shops_approved or 0) | tojson }};
+  var SHOP_REQUIRED_MSG = {{ shop_required_msg | tojson }};
+
+  // 铺货到店铺：调选品引擎生成铺货草稿 → 卡片变「待发布」，去「我的店铺商品」继续
+  async function shelfToStore(btn) {
+    if (Number(SHOPS_APPROVED) <= 0) {
+      showToast(SHOP_REQUIRED_MSG, 'err');
+      return;
+    }
+    var itemId = btn.getAttribute('data-item');
+    if (!itemId) return;
+
+    var original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split"></i> 提交中…';
+
+    try {
+      var res = await fetch('/api/v1/selection/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: [itemId], shadow_mode: false })
+      });
+      var data = {};
+      try { data = await res.json(); } catch (e) { data = {}; }
+
+      if (res.ok && (data.passed || 0) > 0) {
+        showToast('已铺货到店铺（通过 ' + data.passed + '）→ 去「我的店铺商品」继续', 'ok');
+        btn.outerHTML = '<a href="/self/goods/detail/' + encodeURIComponent(itemId)
+          + '?handoff=1" class="badge bg-primary text-decoration-none">待发布</a>';
+        return;
+      }
+      if (res.ok) {
+        var reasons = Object.keys(data.rejected_reasons || {}).join('、') || '未满足选品规则';
+        showToast('未通过选品规则：' + reasons, 'err');
+      } else {
+        showToast('提交失败：' + (data.detail || ('HTTP ' + res.status)), 'err');
+      }
+    } catch (e) {
+      showToast('网络错误：' + e.message, 'err');
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+
+  var LEAF_URL = {{ self_url('/harbor/leaves') | tojson }};
+
+  function escHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function withParam(href, key, val) {
+    return href + (href.indexOf('?') >= 0 ? '&' : '?') + key + '=' + encodeURIComponent(val);
+  }
+
+  // 三级类目清单：一级有几十个、三级一共一万多个，全渲染进 HTML 会把页面撑到几 MB，
+  // 所以服务端只给「当前展开的那个一级」带三级；鼠标移到别的一级时拉这份清单补出来
+  // （拉一次，之后走内存缓存），效果与点击进入该类目完全一致，二级 / 三级都能点选。
+  var leafTreePromise = null;
+  function loadLeafTree() {
+    if (!leafTreePromise) {
+      leafTreePromise = fetch(LEAF_URL, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : { tree: {}, fold_limit: 12 }; })
+        .catch(function () { return { tree: {}, fold_limit: 12 }; });
+    }
+    return leafTreePromise;
+  }
+
+  // 面板高度按内容收紧（2026-10-13 用户反馈：三级类目少时面板下半截空白太大）：
+  // 面板高度本来由二级列（上限 302px）决定，右侧三级只有两三行时下面全空。
+  // 这里在面板可见时量一次，把二级列高度压到 min(二级内容, 三级内容, 302)，
+  // 两列各自滚动，面板贴着内容走；面板不可见（:hover 未生效）就再等一帧重试。
+  var FLY_MAX_H = 302, FLY_MIN_H = 150;
+  function fitFly(fly, tries) {
+    requestAnimationFrame(function () {
+      var rect = fly.getBoundingClientRect();
+      if ((!rect.width || !rect.height) && (tries || 0) < 4) { fitFly(fly, (tries || 0) + 1); return; }
+      if (!rect.width || !rect.height) return;
+      var sub = fly.querySelector('.mega-fly-sub');
+      if (!sub) return;
+      sub.style.maxHeight = '';
+      var target = Math.min(sub.scrollHeight, FLY_MAX_H);
+      var shown = fly.querySelector('.mega-fly-leafcol.show');
+      var leafH = shown ? shown.scrollHeight : 0;
+      if (leafH && leafH < target) target = Math.max(leafH, FLY_MIN_H);
+      if (target < FLY_MAX_H) sub.style.maxHeight = target + 'px';
+    });
+  }
+
+  function renderLeafCols(item, fly, data) {
+    var cat = item.getAttribute('data-cat') || '';
+    var bySub = (data.tree || {})[cat] || {};
+    var fold = data.fold_limit || 12;
+    var l3 = new URLSearchParams(window.location.search).get('l3') || '';
+    var box = fly.querySelector('.mega-fly-leaf');
+    if (!box) return;
+    var loading = box.querySelector('.lf-loading');
+    if (loading) loading.remove();
+
+    fly.querySelectorAll('.mega-fly-subitem').forEach(function (si) {
+      var link = si.querySelector('.mega-fly-sublink');
+      if (!link) return;
+      var span = link.querySelector('span');
+      var name = span ? span.textContent : '';
+      var leaves = bySub[name] || [];
+      if (!leaves.length) return;  // 该二级没有三级：保持「暂未细分」的空态
+      var href = link.getAttribute('href') || '#';
+      var num = link.querySelector('em');
+      var col = document.createElement('div');
+      col.className = 'mega-fly-leafcol';
+      col.setAttribute('data-idx', si.getAttribute('data-idx'));
+      var html = '<div class="lf-head"><span>' + escHtml(name) + '</span>'
+        + '<a href="' + escHtml(href) + '">全部 ' + (num ? escHtml(num.textContent) : '') + ' 款</a></div>'
+        + '<div class="lf-grid">';
+      leaves.forEach(function (lf, i) {
+        var cls = 'lf-cell';
+        if (i >= fold) cls += ' lf-hidden';
+        if (lf === l3) cls += ' active';
+        html += '<a class="' + cls + '" href="'
+          + escHtml(withParam(href, 'l3', lf)) + '"><span>' + escHtml(lf) + '</span></a>';
+      });
+      html += '</div>';
+      if (leaves.length > fold) {
+        html += '<button type="button" class="lf-more" data-total="' + leaves.length
+          + '" onclick="toggleLeafCol(this)">展开全部 ' + leaves.length
+          + ' 个三级类目 <i class="bi bi-chevron-down"></i></button>';
+      }
+      col.innerHTML = html;
+      box.appendChild(col);
+    });
+  }
+
+  // 类目栏二级 → 再下级逐层展开（1688 版式）：鼠标移到左列二级类目
+  // 就切到对应右列三级类目；离开整块类目栏（rail-item）才恢复默认列。
+  (function () {
+    document.querySelectorAll('.mega-rail-item').forEach(function (item) {
+      var fly = item.querySelector(':scope > .mega-fly');
+      if (!fly) return;
+      var def = fly.getAttribute('data-open') || '1';
+      var subitems = fly.querySelectorAll('.mega-fly-subitem');
+      var asked = false;
+
+      function show(idx) {
+        // 每次实时取：三级列可能是刚补进来的
+        fly.querySelectorAll('.mega-fly-leafcol').forEach(function (col) {
+          col.classList.toggle('show', col.getAttribute('data-idx') === String(idx));
+        });
+        subitems.forEach(function (si) {
+          si.classList.toggle('cur', si.getAttribute('data-idx') === String(idx));
+        });
+        fitFly(fly);  // 切了三级列，面板高度跟着内容走
+      }
+
+      subitems.forEach(function (si) {
+        si.addEventListener('mouseenter', function () {
+          show(si.getAttribute('data-idx'));
+        });
+      });
+      item.addEventListener('mouseleave', function () { show(def); });
+      show(def);
+
+      // 鼠标进到这个一级（悬停或点开）就把它的三级补全：与点进该类目看到的一致
+      item.addEventListener('mouseenter', function () {
+        if (asked || fly.querySelector('.mega-fly-leafcol')) return;
+        asked = true;
+        var box = fly.querySelector('.mega-fly-leaf');
+        if (box) box.insertAdjacentHTML('afterbegin', '<div class="lf-loading">正在加载三级类目…</div>');
+        loadLeafTree().then(function (data) {
+          renderLeafCols(item, fly, data);
+          show(def);
+          fitFly(fly);  // 三级列刚渲染完，再收一次高度
+        });
+      });
+    });
+  })();
+
+  // 三级类目「展开全部 N 个」：三级都在页面上，默认只摆前几个，
+  // 点一下把当前二级剩下的三级摊开（再点收回去），不用再发一次请求
+  function toggleLeafCol(btn) {
+    var col = btn.closest('.mega-fly-leafcol');
+    if (!col) return;
+    var open = col.classList.toggle('open');
+    var total = btn.getAttribute('data-total') || '';
+    btn.innerHTML = (open ? '收起三级类目 ' : '展开全部 ' + total + ' 个三级类目 ')
+      + '<i class="bi bi-chevron-down"></i>';
+    var fly = col.closest('.mega-fly');
+    if (fly) fitFly(fly);  // 展开全部后三级变高，面板高度重新算
+  }
+
+  // 类目栏「更多类目」：一级类目几十个，默认只摆前 10 个（连「全部货源」正好 6 行），
+  // 点一下展开全部未停用类目、文案变「收起类目」，再点收回去
+  (function () {
+    var rail = document.getElementById('catRail');
+    var btn = document.getElementById('catRailMore');
+    if (!rail || !btn) return;
+    btn.addEventListener('click', function () {
+      var open = rail.classList.toggle('rail-open');
+      rail.classList.toggle('rail-folded', !open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.innerHTML = '<i class="bi ' + (open ? 'bi-chevron-up' : 'bi-chevron-down')
+        + '"></i><span>' + (open ? '收起类目' : '更多类目') + '</span>';
+      btn.title = open ? '收起类目' : '展开全部类目';
+    });
+  })();
+</script>
+{% endblock %}

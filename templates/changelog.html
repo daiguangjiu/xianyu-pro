@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}更新日志 · {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>更新日志</h1>
+    <span class="page-subtitle">{{ app_name }} · {{ app_tagline }} — 结构化发版记录（语义化版本）</span>
+  </div>
+  <div class="page-actions">
+    <span class="badge bg-primary">当前 v{{ version }}</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex flex-wrap gap-3 align-items-center mb-3 pb-3" style="border-bottom:1px solid var(--c-border);">
+      <span class="kpi-label mb-0">端结构</span>
+      <span class="badge bg-primary-subtle text-primary-emphasis"><i class="bi bi-person-badge"></i> 渔货栈：货源（搜索商品 / 热销榜单 / 我的上架 + 商品一键上架到店铺）+ 全功能工作台</span>
+      <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-box-arrow-in-right"></i> 联合 SSO：/sso/login（闲参谋跳转 / iframe 内嵌）</span>
+    </div>
+
+    <div class="changelog-timeline">
+      {% for rel in changelog %}
+      <div class="cl-item">
+        <div class="cl-rail">
+          <span class="cl-dot {% if loop.first %}cl-dot-latest{% endif %}"></span>
+          {% if not loop.last %}<span class="cl-line"></span>{% endif %}
+        </div>
+        <div class="cl-body">
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+            <span class="cl-version mono-sm">v{{ rel['version'] }}</span>
+            <span class="cl-date text-secondary">{{ rel['date'] }}</span>
+            {% for tag in rel['tags'] %}<span class="badge bg-light text-dark border">{{ tag }}</span>{% endfor %}
+            {% if loop.first %}<span class="badge bg-success">当前版本</span>{% endif %}
+          </div>
+          <div class="cl-title">{{ rel['title'] }}</div>
+          <ul class="cl-items mb-0">
+            {% for it in rel['items'] %}<li>{{ it }}</li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<style>
+  .changelog-timeline { display: flex; flex-direction: column; }
+  .cl-item { display: flex; gap: 14px; }
+  .cl-rail { display: flex; flex-direction: column; align-items: center; width: 14px; flex-shrink: 0; padding-top: 5px; }
+  .cl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--c-border-strong); flex-shrink: 0; }
+  .cl-dot-latest { background: var(--c-primary); box-shadow: 0 0 0 4px rgba(99,102,241,.15); }
+  .cl-line { width: 2px; flex: 1 1 auto; background: var(--c-border); margin-top: 4px; }
+  .cl-item { padding-bottom: 22px; }
+  .cl-item:last-child { padding-bottom: 4px; }
+  .cl-body { min-width: 0; flex: 1; }
+  .cl-version { font-weight: 600; color: var(--c-primary); font-size: 13px; }
+  .cl-date { font-size: 12px; }
+  .cl-title { font-size: 14px; font-weight: 600; color: var(--c-text); margin-bottom: 6px; }
+  .cl-items { padding-left: 18px; margin: 0; color: var(--c-text-muted); font-size: 13px; line-height: 1.9; }
+</style>
+{% endblock %}

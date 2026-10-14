@@ -1,0 +1,438 @@
+{% extends "base.html" %}
+{# 个人中心 · 地址管理（2026-10-03）：渔货栈收货地址簿，结算页一键带入。
+   2026-10-03 视觉改版（用户拍板）：
+   - 粘贴识别框加高（placeholder 不再被裁），并给出可识别内容说明；
+   - 地址条把标签（家 / 公司 / 仓库）做成带图标的醒目徽章，摆在姓名同一行；
+   - 默认地址重点强调：左侧橙色竖条 + 浅橙底 + 橙色「默认地址」徽章 + 列表头摘要。 #}
+{% block title %}地址管理 · 渔货栈{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 本页主色（base 里没有 --pdp-brand，得自己声明，否则橙色的默认标记会「无色」） */
+  :root {
+    --pdp-brand: #FF6A00;
+    --pdp-brand-deep: #E85D00;
+    --pdp-brand-soft: #FFF4EA;
+    --pdp-brand-border: #FFD9BB;
+    --tag-blue: #2563EB;
+    --tag-blue-soft: #EEF4FF;
+    --tag-blue-border: #CFE0FF;
+  }
+  .addr-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--s-4); align-items: start; }
+  @media (max-width: 960px) { .addr-wrap { grid-template-columns: minmax(0, 1fr); } }
+  .addr-card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-card); box-shadow: var(--shadow-card); }
+  .addr-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 16px; border-bottom: 1px solid var(--c-border); font-weight: 600;
+  }
+  .addr-head .bi { color: var(--pdp-brand); }
+  /* 列表头右侧：当前默认地址一眼可见（多条地址时最有用） */
+  .addr-head-def {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 10px; border-radius: var(--r-pill);
+    background: var(--pdp-brand-soft); border: 1px solid var(--pdp-brand-border);
+    color: var(--pdp-brand-deep); font-size: 12px; font-weight: 500;
+  }
+  .addr-head-def .bi { font-size: 11px; }
+  .addr-body { padding: 14px 16px; }
+  .addr-list { display: grid; gap: 10px; }
+
+  /* —— 地址条：左侧竖条标记默认，标签与姓名同行 —— */
+  .addr-row {
+    position: relative;
+    display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap;
+    padding: 14px 16px 14px 19px;
+    border: 1px solid var(--c-border); border-radius: var(--r-input);
+    background: var(--c-surface);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  }
+  .addr-row::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    border-radius: var(--r-input) 0 0 var(--r-input);
+    background: var(--c-border-strong);
+  }
+  .addr-row:hover { border-color: var(--pdp-brand-border); box-shadow: var(--shadow-card); }
+  .addr-row.is-default { border-color: var(--pdp-brand-border); background: var(--pdp-brand-soft); }
+  .addr-row.is-default::before { background: var(--pdp-brand); }
+  .addr-main { flex: 1 1 auto; min-width: 0; }
+  .addr-who {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 14px; font-weight: 600; color: var(--c-text);
+  }
+  .addr-who .phone {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--c-text-muted);
+  }
+  .addr-who .phone .bi { font-size: 11px; }
+  .addr-tags { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .addr-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 21px; padding: 0 9px; border-radius: var(--r-pill);
+    background: var(--c-surface-2); border: 1px solid var(--c-border);
+    color: var(--c-text-muted); font-size: 12px; font-weight: 500;
+  }
+  .addr-tag .bi { font-size: 11px; }
+  /* 家 / 公司 / 仓库：浅蓝徽章，明显但不抢默认的橙色 */
+  .addr-tag.tag-name { background: var(--tag-blue-soft); border-color: var(--tag-blue-border); color: var(--tag-blue); }
+  .addr-tag.def {
+    background: var(--pdp-brand); border-color: var(--pdp-brand); color: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(255, 106, 0, 0.28);
+  }
+  .addr-text {
+    display: flex; align-items: flex-start; gap: 6px;
+    margin-top: 6px; font-size: 13px; line-height: 1.6; color: var(--c-text-muted);
+  }
+  .addr-text .bi { margin-top: 3px; color: var(--c-text-subtle); font-size: 12px; }
+  .addr-text .txt { min-width: 0; word-break: break-all; }
+  .addr-row.is-default .addr-text { color: var(--c-text); }
+  .addr-ops { flex-shrink: 0; display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+  .addr-ops .btn { padding: 3px 10px; font-size: 12px; border-radius: var(--r-pill); }
+  .addr-ops .btn-setdef { color: var(--pdp-brand-deep); border-color: var(--pdp-brand-border); background: #FFFFFF; }
+  .addr-ops .btn-setdef:hover { background: var(--pdp-brand-soft); border-color: var(--pdp-brand); color: var(--pdp-brand-deep); }
+  .addr-ops .btn-del:hover { color: #DC2626; border-color: #FCA5A5; background: #FEF2F2; }
+  /* 就地编辑：与主信息拉开一条虚线，不像挤在一起 */
+  .addr-edit { width: 100%; margin-top: 10px; padding-top: 12px; border-top: 1px dashed var(--c-border); }
+  .addr-empty { padding: 32px 14px; text-align: center; color: var(--c-text-muted); font-size: 13px; }
+  .addr-empty .bi { display: block; font-size: 26px; margin-bottom: 8px; color: var(--c-text-subtle); }
+
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 12px; font-weight: 500; color: var(--c-text-muted); margin-bottom: 5px; }
+  .field input { width: 100%; }
+  .field-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+
+  /* —— 粘贴一整段收货信息 → 智能识别（2026-10-03 加高输入框）—— */
+  .paste-box {
+    padding: 12px 14px 14px; margin-bottom: 16px;
+    border: 1px solid var(--pdp-brand-border); border-radius: var(--r-input);
+    background: var(--pdp-brand-soft);
+  }
+  .paste-box .pb-title {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 600; color: var(--pdp-brand-deep); margin-bottom: 8px;
+  }
+  .paste-box textarea {
+    width: 100%; min-height: 96px; padding: 10px 12px;
+    font-size: 13px; line-height: 1.7; background: #FFFFFF; resize: vertical;
+  }
+  .paste-hint { margin-top: 8px; font-size: 12px; line-height: 1.7; color: var(--c-text-muted); }
+  .paste-hint .k {
+    display: inline-block; padding: 0 5px; margin-right: 3px; border-radius: 4px;
+    background: #FFFFFF; border: 1px solid var(--pdp-brand-border); color: var(--pdp-brand-deep);
+  }
+
+  /* 标签快捷选择 chips + 默认勾选 */
+  .tag-quick { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .tag-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 26px; padding: 0 11px; border-radius: var(--r-pill);
+    border: 1px solid var(--c-border); background: var(--c-surface);
+    color: var(--c-text-muted); font-size: 12px; cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .tag-chip:hover { border-color: var(--tag-blue-border); color: var(--tag-blue); background: var(--tag-blue-soft); }
+  .tag-chip.active { border-color: var(--tag-blue-border); color: var(--tag-blue); background: var(--tag-blue-soft); font-weight: 600; }
+  .def-check {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 12px; margin-bottom: 14px;
+    border: 1px solid var(--c-border); border-radius: var(--r-input);
+    background: var(--c-surface-2); font-size: 12px; color: var(--c-text);
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+  }
+  .def-check .desc { color: var(--c-text-muted); }
+  .def-check:has(input:checked) { border-color: var(--pdp-brand-border); background: var(--pdp-brand-soft); }
+  .def-check input { margin: 0; }
+  @media (max-width: 560px) {
+    .field-2 { grid-template-columns: minmax(0, 1fr); }
+    .addr-head-def { display: none; }   /* 窄屏列表头放不下摘要，卡片上已有徽章 */
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{# 标签 → 图标（家 / 公司 / 仓库 / 学校，其余给个通用标签图标） #}
+{% set TAG_ICONS = {'家': 'bi-house-door-fill', '公司': 'bi-building-fill',
+                    '仓库': 'bi-box-seam-fill', '学校': 'bi-mortarboard-fill'} %}
+{% set def_addr = (addresses | selectattr('is_default') | list | first) %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>地址管理</h1>
+    <span class="page-subtitle">
+      共 {{ addresses|length }} 个收货地址 · 结算页可一键带入，下单时落到采购单上
+    </span>
+  </div>
+  <a href="{{ self_url('/orders') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> 返回
+  </a>
+</div>
+
+{% if msg %}
+<div class="alert alert-{{ 'danger' if kind == 'err' else ('warning' if kind == 'warn' else 'success') }}">{{ msg }}</div>
+{% endif %}
+
+<div class="addr-wrap">
+
+  <div class="addr-card">
+    <div class="addr-head">
+      <i class="bi bi-geo-alt-fill"></i> 我的收货地址
+      {% if def_addr %}
+      <span class="addr-head-def">
+        <i class="bi bi-star-fill"></i>
+        默认：{{ def_addr.receiver_name }}{% if def_addr.phone %} {{ def_addr.phone }}{% endif %}
+      </span>
+      {% endif %}
+    </div>
+    <div class="addr-body">
+      {% if addresses %}
+      <div class="addr-list">
+        {% for a in addresses %}
+        <div class="addr-row {% if a.is_default %}is-default{% endif %}">
+          <div class="addr-main">
+            <div class="addr-who">
+              <span class="nm">{{ a.receiver_name }}</span>
+              {% if a.phone %}
+              <span class="phone"><i class="bi bi-telephone-fill"></i>{{ a.phone }}</span>
+              {% endif %}
+              <span class="addr-tags">
+                {% if a.is_default %}
+                <span class="addr-tag def"><i class="bi bi-star-fill"></i>默认地址</span>
+                {% endif %}
+                {% if a.tag %}
+                <span class="addr-tag tag-name">
+                  <i class="bi {{ TAG_ICONS.get(a.tag, 'bi-tag-fill') }}"></i>{{ a.tag }}
+                </span>
+                {% endif %}
+              </span>
+            </div>
+            <div class="addr-text">
+              <i class="bi bi-geo-alt"></i>
+              <span class="txt">{{ a.full or '（未填详细地址）' }}</span>
+            </div>
+          </div>
+
+          <div class="addr-ops">
+            {% if not a.is_default %}
+            <form method="post" action="{{ self_url('/addresses/' ~ a.id ~ '/default') }}" style="margin:0;">
+              <button type="submit" class="btn btn-sm btn-outline-secondary btn-setdef">
+                <i class="bi bi-star"></i> 设为默认
+              </button>
+            </form>
+            {% endif %}
+            <button type="button" class="btn btn-sm btn-outline-secondary"
+                    onclick="addrEdit({{ a.id }}, this)">编辑</button>
+            <form method="post" action="{{ self_url('/addresses/' ~ a.id ~ '/delete') }}" style="margin:0;"
+                  onsubmit="return confirm('删除这个收货地址？历史采购单不受影响。');">
+              <button type="submit" class="btn btn-sm btn-outline-secondary btn-del">删除</button>
+            </form>
+          </div>
+
+          {# 就地编辑：点「编辑」展开这一条的表单（默认收起，页面不啰嗦） #}
+          <form method="post" action="{{ self_url('/addresses/' ~ a.id ~ '/update') }}"
+                id="addrEdit-{{ a.id }}" class="addr-edit" style="display:none;">
+            <div class="row g-2">
+              <div class="col-md-3"><input class="form-control form-control-sm" name="receiver_name"
+                                           value="{{ a.receiver_name }}" placeholder="收货人" required></div>
+              <div class="col-md-3"><input class="form-control form-control-sm" name="phone"
+                                           value="{{ a.phone }}" placeholder="手机号" required></div>
+              <div class="col-md-3"><input class="form-control form-control-sm" name="tag"
+                                           list="addrTagList" value="{{ a.tag }}" placeholder="标签（家 / 公司）"></div>
+              <div class="col-md-3"></div>
+              <div class="col-md-4"><input class="form-control form-control-sm" name="region"
+                                           value="{{ a.region }}" placeholder="省 / 市 / 区"></div>
+              <div class="col-md-5"><input class="form-control form-control-sm" name="address"
+                                           value="{{ a.address }}" placeholder="街道门牌" required></div>
+              <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-primary">保存</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary"
+                        onclick="addrCancel({{ a.id }})">取消</button>
+              </div>
+            </div>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="addr-empty">
+        <i class="bi bi-geo-alt"></i>
+        还没有收货地址 —— 右边新增一条，以后结算不用每次重填。
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="addr-card">
+    <div class="addr-head"><i class="bi bi-plus-circle"></i> 新增地址</div>
+    <div class="addr-body">
+      {# 从闲鱼 / 微信 / 快递面单上复制一整段，点一下自动认人、电话、省市区、详细地址 #}
+      <div class="paste-box">
+        <div class="pb-title"><i class="bi bi-clipboard-plus"></i> 粘贴一整段收货信息（可选，最省事）</div>
+        <textarea class="form-control" id="pasteText" rows="4"
+                  placeholder="例：张三 13800000001 上海市闵行区虹桥镇万源路 2161 弄 150 号 306 室"></textarea>
+        <div class="paste-hint">
+          <span class="k">识别人名</span><span class="k">手机号</span><span class="k">省市区</span><span class="k">详细地址</span>
+          · 带「收货人：」「手机号：」标签、手机号写 <code>138-0000-0001</code>、全角标点都能认
+        </div>
+        <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+          <button type="button" class="btn btn-sm btn-primary" onclick="addrParse()">
+            <i class="bi bi-magic"></i> 智能识别并填入
+          </button>
+          <button type="button" class="btn btn-sm btn-link text-secondary"
+                  onclick="document.getElementById('pasteText').value='';document.getElementById('parseMsg').textContent='';">
+            清空
+          </button>
+          <span id="parseMsg" class="small text-muted"></span>
+        </div>
+      </div>
+
+      <form method="post" action="{{ self_url('/addresses') }}" id="newAddrForm">
+        <div class="field-2">
+          <div class="field">
+            <label>收货人</label>
+            <input class="form-control form-control-sm" name="receiver_name" placeholder="姓名" required>
+          </div>
+          <div class="field">
+            <label>手机号</label>
+            <input class="form-control form-control-sm" name="phone" placeholder="11 位手机号" required>
+          </div>
+        </div>
+        <div class="field">
+          <label>所在地区</label>
+          <input class="form-control form-control-sm" name="region" placeholder="省 / 市 / 区（选填）">
+        </div>
+        <div class="field">
+          <label>详细地址</label>
+          <input class="form-control form-control-sm" name="address"
+                 placeholder="街道门牌（例：万源路 2161 弄 150 号 306 室）" required>
+        </div>
+        <div class="field">
+          <label>标签（选填，会显示在地址条上）</label>
+          <input class="form-control form-control-sm" name="tag" id="newAddrTag"
+                 list="addrTagList" placeholder="家 / 公司 / 仓库 / 学校">
+          <div class="tag-quick">
+            <button type="button" class="tag-chip" onclick="addrSetTag('家')">
+              <i class="bi bi-house-door"></i> 家
+            </button>
+            <button type="button" class="tag-chip" onclick="addrSetTag('公司')">
+              <i class="bi bi-building"></i> 公司
+            </button>
+            <button type="button" class="tag-chip" onclick="addrSetTag('仓库')">
+              <i class="bi bi-box-seam"></i> 仓库
+            </button>
+            <button type="button" class="tag-chip" onclick="addrSetTag('学校')">
+              <i class="bi bi-mortarboard"></i> 学校
+            </button>
+          </div>
+        </div>
+        <label class="def-check">
+          <input type="checkbox" class="form-check-input" name="is_default" value="1" checked>
+          <span>设为默认地址 <span class="desc">（结算页自动带入）</span></span>
+        </label>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-check2"></i> 保存地址
+        </button>
+      </form>
+    </div>
+  </div>
+
+</div>
+
+{# 标签建议（新增与就地编辑共用） #}
+<datalist id="addrTagList">
+  <option value="家"></option>
+  <option value="公司"></option>
+  <option value="仓库"></option>
+  <option value="学校"></option>
+</datalist>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  function addrEdit(id, btn) {
+    var form = document.getElementById('addrEdit-' + id);
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    if (btn) btn.textContent = form.style.display === 'block' ? '收起' : '编辑';
+  }
+  function addrCancel(id) {
+    var form = document.getElementById('addrEdit-' + id);
+    if (!form) return;
+    form.style.display = 'none';
+    var btns = form.parentNode.querySelectorAll('.addr-ops .btn');
+    btns.forEach(function (b) { if (b.textContent === '收起') b.textContent = '编辑'; });
+  }
+
+  /* 标签快捷 chip：点一下填进输入框，选中态跟输入框内容同步 */
+  function addrSetTag(tag) {
+    var input = document.getElementById('newAddrTag');
+    if (!input) return;
+    input.value = (input.value === tag) ? '' : tag;
+    addrSyncTagChips();
+  }
+  function addrSyncTagChips() {
+    var input = document.getElementById('newAddrTag');
+    var cur = input ? input.value.trim() : '';
+    document.querySelectorAll('.tag-chip').forEach(function (chip) {
+      chip.classList.toggle('active', chip.textContent.trim() === cur);
+    });
+  }
+  document.addEventListener('DOMContentLoaded', function () {
+    var input = document.getElementById('newAddrTag');
+    if (input) {
+      input.addEventListener('input', addrSyncTagChips);
+      addrSyncTagChips();
+    }
+  });
+
+  /* 粘贴一整段 → 后端认人 / 认电话 / 认省市区 / 认详细地址（只解析，不落库） */
+  function addrParse() {
+    var box = document.getElementById('pasteText');
+    var msg = document.getElementById('parseMsg');
+    var text = (box.value || '').trim();
+    msg.className = 'small text-muted';
+    msg.textContent = '';
+    if (!text) {
+      msg.className = 'small text-danger';
+      msg.textContent = '先粘贴一段收货信息';
+      return;
+    }
+    msg.textContent = '识别中…';
+    fetch('{{ self_url("/addresses/parse") }}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.ok) {
+          msg.className = 'small text-danger';
+          msg.textContent = (d && d.message) || '识别失败，手动填一下吧';
+          return;
+        }
+        var form = document.getElementById('newAddrForm');
+        var put = function (name, val) {
+          var el = form.querySelector('[name=' + name + ']');
+          if (el && val) el.value = val;
+        };
+        put('receiver_name', d.receiver_name);
+        put('phone', d.phone);
+        put('region', d.region);
+        put('address', d.address);
+        put('tag', d.tag);
+        addrSyncTagChips();
+        var got = [];
+        if (d.receiver_name) got.push('收货人');
+        if (d.phone) got.push('手机号');
+        if (d.region) got.push('省市区');
+        if (d.address) got.push('详细地址');
+        msg.className = got.length >= 3 ? 'small text-success' : 'small text-warning';
+        msg.textContent = got.length
+          ? '已识别：' + got.join(' / ') + (got.length < 3 ? '，其余请补充' : '')
+          : '没认出有用信息，手动填一下吧';
+      })
+      .catch(function () {
+        msg.className = 'small text-danger';
+        msg.textContent = '识别失败，手动填一下吧';
+      });
+  }
+</script>
+{% endblock %}

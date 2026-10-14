@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}商家后台 · {{ merchant.name }}{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>{{ merchant.short_name or merchant.name }}</h1>
+    <span class="page-subtitle">
+      {{ merchant.subject_type_text }} ·
+      状态 <strong>{{ merchant.status_text }}</strong> ·
+      平台佣金率 {{ (merchant.commission_rate * 100)|round(1) }}%
+    </span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/self/merchant/items/new" class="btn btn-primary">
+      <i class="bi bi-plus-circle"></i> 发布商品
+    </a>
+    <a href="/self/merchant/apply" class="btn btn-outline-secondary">
+      <i class="bi bi-file-earmark-text"></i> 入驻资料
+    </a>
+  </div>
+</div>
+
+{# ====== 商品概览 ====== #}
+<div class="row g-3">
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-bag-check icon"></i> 在售商品</span>
+        <span class="kpi-value">{{ stats.on_sale }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-hourglass-split icon"></i> 待审核</span>
+        <span class="kpi-value" style="color: var(--c-warning);">{{ stats.pending }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-x-circle icon"></i> 已驳回</span>
+        <span class="kpi-value" style="color: var(--c-danger);">{{ stats.rejected }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-eye-slash icon"></i> 已下架</span>
+        <span class="kpi-value" style="color: var(--c-text-muted);">{{ stats.off_shelf }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ====== 资金概览（平台代收代付） ====== #}
+<div class="row g-3" style="margin-top: var(--s-1);">
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-wallet2 icon"></i> 可提现余额</span>
+        <span class="kpi-value" style="color: var(--c-success);">¥{{ '{:,.2f}'.format(wallet.available_balance) }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-clock icon"></i> 待结算</span>
+        <span class="kpi-value">¥{{ '{:,.2f}'.format(wallet.pending_balance) }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-receipt icon"></i> 待处理结算单</span>
+        <span class="kpi-value">{{ pending_bills }}</span>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-3 col-md-6">
+    <div class="card h-100">
+      <div class="kpi">
+        <span class="kpi-label"><i class="bi bi-bank icon"></i> 累计已提现</span>
+        <span class="kpi-value">¥{{ '{:,.2f}'.format(wallet.withdrawn_total) }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ====== 经营动作 ====== #}
+<div class="card" style="margin-top: var(--s-4);">
+  <div class="card-header">
+    <i class="bi bi-lightning-charge icon"></i> 经营动作
+  </div>
+  <div class="card-body">
+    <div class="d-flex gap-2 flex-wrap">
+      <a href="/self/merchant/items" class="btn btn-outline-secondary">
+        <i class="bi bi-box-seam"></i> 商品管理（{{ stats.total }}）
+      </a>
+      <a href="/self/merchant/items?audit_status=pending" class="btn btn-outline-secondary">
+        <i class="bi bi-hourglass-split"></i> 查看审核进度
+      </a>
+      <a href="/self/harbor" class="btn btn-outline-secondary">
+        <i class="bi bi-shop-window"></i> 逛货源广场
+      </a>
+    </div>
+  </div>
+  <div class="card-footer">
+    <i class="bi bi-info-circle" style="color: var(--c-primary);"></i>
+    订单管理 · 发货 · 结算明细将在后续版本开放（表结构与归属字段已就绪）
+  </div>
+</div>
+{% endblock %}

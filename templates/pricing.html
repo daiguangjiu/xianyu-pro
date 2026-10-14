@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}利润 · 供应链小鱼{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+{% macro pct(v) -%}{{ '%.2f' % ((v | float) * 100) }}%{%- endmacro %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>利润报表</h1>
+    <span class="page-subtitle">利润 = Σ (售价 − 渔货价) × 件数，成本口径统一走渔货价（没填渔货价时回落采购价）</span>
+  </div>
+  <div class="page-actions text-end">
+    <span class="kpi-label">累计利润</span>
+    <div class="kpi-value" style="font-size: 24px; color: var(--c-success);">{{ money(total_profit) }}</div>
+  </div>
+</div>
+
+<div class="row g-3">
+  {# ====== 按 PO 状态分组 ====== #}
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-bar-chart icon"></i> 按状态分组</div>
+      <div class="table-responsive">
+        <table class="table mb-0">
+          <thead>
+            <tr><th>状态</th><th class="text-end">单数</th><th class="text-end">件数</th><th class="text-end">利润</th></tr>
+          </thead>
+          <tbody>
+            {% for row in by_status %}
+              <tr>
+                <td><span class="badge badge-status-{{ row.status }}" title="{{ row.status }}">{{ status_text(row.status) }}</span></td>
+                <td class="text-end mono">{{ row.n }}</td>
+                <td class="text-end mono">{{ row.qty }}</td>
+                <td class="text-end mono {% if row.profit >= 0 %}text-success{% else %}text-danger{% endif %}">
+                  {{ money(row.profit) }}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="4" class="text-center text-secondary py-4">暂无数据</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# ====== Top 10 SKU ====== #}
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-trophy icon"></i> Top 10 SKU 利润榜</div>
+      <div class="table-responsive">
+        <table class="table mb-0">
+          <thead>
+            <tr><th style="width: 40px;">#</th><th>item_id</th><th>标题</th><th class="text-end">单数</th><th class="text-end">利润</th></tr>
+          </thead>
+          <tbody>
+            {% for sk in top_skus %}
+              <tr>
+                <td class="mono-sm text-secondary">{{ loop.index }}</td>
+                <td><code class="k">{{ sk.item_id }}</code></td>
+                <td class="small">{{ sk.title[:24] }}{% if sk.title|length > 24 %}…{% endif %}</td>
+                <td class="text-end mono">{{ sk.n }}</td>
+                <td class="text-end mono text-success">{{ money(sk.profit) }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5" class="text-center text-secondary py-4">暂无数据</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  {# ====== 加价规则 ====== #}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-percent icon"></i> 加价规则（按 priority 排序）</div>
+      <div class="table-responsive">
+        <table class="table mb-0">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>范围</th>
+              <th>key</th>
+              <th class="text-end">加价比</th>
+              <th class="text-end">固定运费</th>
+              <th class="text-end">最低价</th>
+              <th class="text-end">最高价</th>
+              <th class="text-end">优先级</th>
+              <th>激活</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rules %}
+              <tr>
+                <td class="mono-sm text-secondary">#{{ r.id }}</td>
+                <td><span class="badge bg-light">{{ r.scope }}</span></td>
+                <td class="mono-sm text-secondary">{{ r.scope_key or '—' }}</td>
+                <td class="text-end mono">{{ pct(r.margin_rate) }}</td>
+                <td class="text-end mono">{{ money(r.fixed_shipping) }}</td>
+                <td class="text-end mono">{{ money(r.price_min) if r.price_min else '—' }}</td>
+                <td class="text-end mono">{{ money(r.price_max) if r.price_max else '—' }}</td>
+                <td class="text-end mono">{{ r.priority }}</td>
+                <td>
+                  {% if r.is_active %}
+                    <span class="badge bg-success">启用</span>
+                  {% else %}
+                    <span class="badge bg-secondary">禁用</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="9" class="text-center text-secondary py-4">未配置加价规则</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

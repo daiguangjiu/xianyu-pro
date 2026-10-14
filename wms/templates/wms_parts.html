@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}拆机件与残值{% endblock %}
+{% block sub %}理论残值 ¥{{ money(rate.est) }} · 已变现 ¥{{ money(rate.actual) }} · 回收率 {{ (rate.rate * 100) | round(1) }}%{% endblock %}
+
+{% block content %}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">拆机件货品</div><div class="value">{{ items | length }}</div></div>
+  <div class="stat"><div class="label">已登记配件</div><div class="value">{{ rate.parts }}</div>
+    <div class="hint">已售 {{ rate.sold }}</div></div>
+  <div class="stat"><div class="label">理论残值</div><div class="value">¥{{ money(rate.est) }}</div>
+    <div class="hint">Σ 配件估值</div></div>
+  <div class="stat {{ 'warn' if rate.rate < 0.5 and rate.est else 'ok' }}"><div class="label">残值回收率</div>
+    <div class="value">{{ (rate.rate * 100) | round(1) }}%</div>
+    <div class="hint">实际变现 / 理论残值</div></div>
+</div>
+
+<div class="card">
+  <h2>登记残值明细</h2>
+  <p class="d">
+    D 档整机当废品扔掉，主板 / 电池残值白白流失。残值 = Σ 配件市场价 × 0.8（打包出）。
+    <b>无残值明细不允许关闭工单。</b>
+  </p>
+  <form method="post" action="/wms/parts/add">
+    <div class="field-row auto">
+      <div class="field grow"><label for="pi-i">货品</label>
+        <select id="pi-i" name="item_id" required>
+          {% for it in candidates %}<option value="{{ it.id }}">{{ it.display_code }} · {{ it.title }}</option>{% endfor %}
+        </select></div>
+      <div class="field"><label for="pi-t">配件类型</label>
+        <select id="pi-t" name="part_type">{% for v, t in part_choices %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="pi-n">名称</label><input id="pi-n" type="text" name="part_name" placeholder="选填"></div>
+      <div class="field"><label for="pi-v">市场价</label><input id="pi-v" type="number" step="0.01" name="est_value" value="0"></div>
+    </div>
+    <button class="btn primary">登记</button>
+  </form>
+</div>
+
+<div class="card flush">
+  <h2>拆机件仓</h2>
+  {% if items %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>显示编码</th><th>品牌型号</th><th>等级</th><th class="num">采购成本</th>
+      <th class="num">理论残值</th><th>已登记配件</th><th></th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
+        <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td>
+        <td>{{ bits.grade_badge(it.grade) }}</td>
+        <td class="num">{{ bits.money_cell(it.purchase_cost) }}</td>
+        <td class="num">¥{{ money(it.residual_value) }}</td>
+        <td>{% set rows = part_rows.get(it.id, []) %}
+          {% if rows %}{% for p in rows %}<span class="badge muted">{{ wms_part_label(p.part_type) }} ¥{{ money(p.est_value) }}</span> {% endfor %}
+          {% else %}<span class="badge failed">无明细，不允许关工单</span>{% endif %}</td>
+        <td><a class="btn sm" href="/wms/items/{{ it.id }}">详情</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('拆机件仓是空的') }}{% endif %}
+</div>
+{% endblock %}

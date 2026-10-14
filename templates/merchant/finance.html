@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}资金结算 · 商家后台{% endblock %}
+
+{% block content %}
+{# ====== 结果提示 ====== #}
+{% if request.query_params.get('msg') %}
+<div class="card" style="margin-bottom: var(--s-4); border-left: 3px solid {% if request.query_params.get('ok') == '1' %}var(--c-success){% else %}var(--c-danger){% endif %};">
+  <div class="card-body" style="padding: 12px 16px;">
+    <i class="bi bi-{% if request.query_params.get('ok') == '1' %}check-circle{% else %}x-circle{% endif %}"></i>
+    {{ request.query_params.get('msg') }}
+  </div>
+</div>
+{% endif %}
+
+<div class="page-header">
+  <div class="page-title">
+    <h1>资金结算</h1>
+    <span class="page-subtitle">
+      平台代收代付 · 佣金率 {{ '{:.1f}'.format(commission_rate * 100) }}%
+    </span>
+  </div>
+</div>
+
+{# ====== 钱包概览 ====== #}
+<div class="row g-3" style="margin-bottom: var(--s-4);">
+  <div class="col-md-3">
+    <div class="card" style="border-left:3px solid var(--c-primary);">
+      <div class="card-body">
+        <div style="font-size:12px;color:var(--c-text-muted);">可提现余额</div>
+        <div style="font-size:24px;font-weight:700;">¥{{ '{:,.2f}'.format(available) }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card" style="border-left:3px solid #1a56c4;">
+      <div class="card-body">
+        <div style="font-size:12px;color:var(--c-text-muted);">待结算</div>
+        <div style="font-size:24px;font-weight:700;">¥{{ '{:,.2f}'.format(pending) }}</div>
+        <div style="font-size:12px;color:var(--c-text-muted);">已发货，未到账期</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card" style="border-left:3px solid #b26a00;">
+      <div class="card-body">
+        <div style="font-size:12px;color:var(--c-text-muted);">冻结中</div>
+        <div style="font-size:24px;font-weight:700;">¥{{ '{:,.2f}'.format(frozen) }}</div>
+        <div style="font-size:12px;color:var(--c-text-muted);">提现审核中</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card">
+      <div class="card-body">
+        <div style="font-size:12px;color:var(--c-text-muted);">累计已提现</div>
+        <div style="font-size:24px;font-weight:700;">¥{{ '{:,.2f}'.format(withdrawn) }}</div>
+        <div style="font-size:12px;color:var(--c-text-muted);">
+          累计货款 ¥{{ '{:,.2f}'.format(goods_total) }} · 佣金 ¥{{ '{:,.2f}'.format(commission_total) }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  {# ====== 左：结算单 + 提现记录 ====== #}
+  <div class="col-lg-8">
+    <div class="card" style="margin-bottom: var(--s-4);">
+      <div class="card-header"><i class="bi bi-receipt"></i> 结算单</div>
+      <div class="card-body" style="padding:0;">
+        {% if bills %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle" style="margin:0;">
+            <thead>
+              <tr>
+                <th>结算单号</th>
+                <th style="width:70px;">订单</th>
+                <th style="width:100px;">货款</th>
+                <th style="width:90px;">佣金</th>
+                <th style="width:100px;">实结</th>
+                <th style="width:90px;">状态</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for b in bills %}
+              <tr>
+                <td class="mono-sm">{{ b.bill_no }}</td>
+                <td>{{ b.order_count }}</td>
+                <td>¥{{ '{:,.2f}'.format(b.goods_amount or 0) }}</td>
+                <td style="color:var(--c-danger);">-¥{{ '{:,.2f}'.format(b.commission or 0) }}</td>
+                <td><strong>¥{{ '{:,.2f}'.format(b.settle_amount or 0) }}</strong></td>
+                <td>
+                  {% if b.status == 'pending' %}
+                    <span class="badge" style="background:#fff4e5;color:#b26a00;">待结算</span>
+                  {% elif b.status == 'settled' %}
+                    <span class="badge" style="background:#e6f7ee;color:#0a7a45;">已结算</span>
+                  {% else %}
+                    <span class="badge" style="background:#eef0f3;color:#555;">{{ b.status_text }}</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div style="padding:32px;text-align:center;color:var(--c-text-muted);">
+          暂无结算单。平台按账期为已发货订单生成结算单
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><i class="bi bi-bank"></i> 提现记录</div>
+      <div class="card-body" style="padding:0;">
+        {% if withdraws %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle" style="margin:0;">
+            <thead>
+              <tr>
+                <th>申请单号</th>
+                <th style="width:100px;">金额</th>
+                <th>收款账户</th>
+                <th style="width:90px;">状态</th>
+                <th style="width:130px;">申请时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for w in withdraws %}
+              <tr>
+                <td class="mono-sm">{{ w.apply_no }}</td>
+                <td><strong>¥{{ '{:,.2f}'.format(w.amount or 0) }}</strong></td>
+                <td style="font-size:13px;">
+                  {{ w.bank_name or '-' }} {{ w.bank_account or '' }}
+                  {% if w.account_name %}<div style="color:var(--c-text-muted);">{{ w.account_name }}</div>{% endif %}
+                </td>
+                <td>
+                  {% if w.status == 'pending' %}
+                    <span class="badge" style="background:#fff4e5;color:#b26a00;">{{ w.status_text }}</span>
+                  {% elif w.status == 'paid' %}
+                    <span class="badge" style="background:#e6f7ee;color:#0a7a45;">{{ w.status_text }}</span>
+                  {% elif w.status == 'rejected' %}
+                    <span class="badge" style="background:#fdecec;color:#b3261e;">{{ w.status_text }}</span>
+                  {% else %}
+                    <span class="badge" style="background:#eef0f3;color:#555;">{{ w.status_text }}</span>
+                  {% endif %}
+                  {% if w.review_note %}
+                    <div style="font-size:12px;color:var(--c-text-muted);">{{ w.review_note }}</div>
+                  {% endif %}
+                </td>
+                <td style="font-size:13px;">{{ (w.reviewed_at | string)[:19] if w.reviewed_at else '-' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div style="padding:32px;text-align:center;color:var(--c-text-muted);">暂无提现记录</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ====== 右：提现申请 ====== #}
+  <div class="col-lg-4">
+    <div class="card">
+      <div class="card-header"><i class="bi bi-cash-coin"></i> 申请提现</div>
+      <div class="card-body">
+        <div style="font-size:13px;color:var(--c-text-muted);margin-bottom:12px;">
+          可提现 <strong style="color:var(--c-text);">¥{{ '{:,.2f}'.format(available) }}</strong>
+          {% if frozen > 0 %}（冻结中 ¥{{ '{:,.2f}'.format(frozen) }}）{% endif %}
+        </div>
+        <form method="post" action="/self/merchant/withdraw">
+          <div class="field">
+            <label>提现金额</label>
+            <input type="number" name="amount" step="0.01" min="0.01" max="{{ available }}"
+                   placeholder="0.00" required>
+          </div>
+          <div class="field">
+            <label>收款银行</label>
+            <input type="text" name="bank_name"
+                   value="{{ merchant.settle_bank_name or '' }}" placeholder="如 招商银行">
+          </div>
+          <div class="field">
+            <label>账户名</label>
+            <input type="text" name="account_name"
+                   value="{{ merchant.settle_account_name or '' }}">
+          </div>
+          <div class="field">
+            <label>银行账号</label>
+            <input type="text" name="bank_account"
+                   value="{{ merchant.settle_bank_account or '' }}">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width:100%;"
+                  {% if available <= 0 %}disabled{% endif %}>
+            <i class="bi bi-send"></i> 提交提现申请
+          </button>
+          {% if available <= 0 %}
+          <div style="font-size:12px;color:var(--c-text-muted);margin-top:8px;">
+            暂无可提现余额，需先由平台结算
+          </div>
+          {% endif %}
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

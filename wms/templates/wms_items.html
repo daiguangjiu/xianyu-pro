@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}库存台账{% endblock %}
+{% block sub %}共 {{ total }} 台 · 在库 {{ summary.on_hand }} · 可售 {{ summary.sellable }} · 在途 {{ summary.in_transit }}{% endblock %}
+
+{# 翻页链接（2026-10-11）：筛选条件要一路带着走，翻到第 2 页不能把筛掉的货又倒回来 #}
+{% macro plink(p) -%}
+/wms/items?q={{ filters.q | urlencode }}&status={{ filters.status | urlencode }}&grade={{ filters.grade | urlencode }}&warehouse={{ filters.warehouse | urlencode }}&category={{ filters.category | urlencode }}&page={{ p }}
+{%- endmacro %}
+{% block actions %}<a class="btn primary" href="/wms/inspect">扫码检测</a>{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form class="filters" method="get" action="/wms/items">
+    <div class="field grow"><label for="f-q">货号 / 条码 / 检修后码 / 产品名 / 序列号 / 批次</label>
+      <input id="f-q" type="search" name="q" value="{{ filters.q }}" placeholder="A-1002 或 QCPH26100012">
+      {# 扫码枪扫一下就搜（2026-10-10）：不用先点进输入框，也不用再按筛选 #}
+      <div class="hint">扫码枪对着这页扫一下就直接搜（不用先点输入框）</div></div>
+    <div class="field"><label for="f-s">状态</label>
+      <select id="f-s" name="status"><option value="">全部</option>
+        {% for v, t in statuses %}<option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="f-g">等级</label>
+      <select id="f-g" name="grade"><option value="">全部</option>
+        {% for v, t in grades %}<option value="{{ v }}" {{ 'selected' if filters.grade == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="f-w">仓库</label>
+      <select id="f-w" name="warehouse"><option value="">全部</option>
+        {% for w in warehouses %}<option value="{{ w.code }}" {{ 'selected' if filters.warehouse == w.code }}>{{ w.name }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="f-c">品类</label>
+      <select id="f-c" name="category"><option value="">全部</option>
+        {% for v, t in categories %}<option value="{{ v }}" {{ 'selected' if filters.category == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if items %}
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>显示编码</th><th>条码</th><th>货号</th>
+      {# 数量（2026-10-10）：一条货可以是多台 —— 现场最要紧的数字，摆在最前面 #}
+      <th class="num">数量</th><th>检修后码</th><th>产品名称</th><th>品类</th><th>等级</th><th>状态</th><th>所在仓</th>
+      <th class="num">成本</th><th class="num">售价</th><th class="num">残值</th><th>锁定</th>
+      <th>操作</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        {# 序号（2026-10-11 起带分页基准）：第几台是**全库第几行**，不再每页都从 1 开始 ——
+           报数 / 对账时说的「第 300 行」永远指的是同一台货 #}
+        <td class="num muted">{{ row_base + loop.index }}</td>
+        <td class="nowrap">{{ bits.barcode_cell(it) }}</td>
+        {# 条码（2026-10-13 用户拍板）：扫枪扫的就是这一串 #}
+        <td class="mono">{{ it.barcode or '—' }}</td>
+        {# 货号（2026-10-13 加回来）：现场按货号对供应商清单，两个都要看得见 #}
+        <td class="mono">{{ it.sku_code or '—' }}</td>
+        <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}"
+              title="这一个条码底下有几台">{{ it.qty or 1 }}</span></td>
+        <td class="mono">{{ it.own_barcode or '—' }}</td>
+        {# 产品名称（供应商清单里「产品」那一列）：没有就退回品牌 + 型号 + 规格，别留空 #}
+        <td class="wrap2" title="{{ it.title }}"><span class="clamp2">{{ it.product_name or it.title }}</span></td>
+        <td>{{ wms_category_label(it.category) }}</td>
+        <td>{{ bits.grade_badge(it.grade) }}</td>
+        <td>{{ bits.status_badge(it.status) }}</td>
+        {# 所在仓要把货架也带上（2026-10-10）：光一个仓库名找不着货在哪一格 #}
+        <td class="nowrap">{{ wms_warehouse_label(it.warehouse_code) }}{% if it.location_code %}
+          <div class="loc-sub" title="库位">{{ wms_location_label(it.location_code) }}</div>{% endif %}</td>
+        <td class="num">{{ bits.money_cell(it.purchase_cost) }}</td>
+        <td class="num">{{ bits.money_cell(it.selling_price) }}</td>
+        <td class="num">{{ bits.money_cell(it.residual_value) }}</td>
+        <td class="mono muted">{{ it.locked_by or '—' }}</td>
+        <td class="nowrap">
+          <a class="btn sm" href="/wms/items/{{ it.id }}/edit">改</a>
+          <form method="post" action="/wms/items/{{ it.id }}/delete" class="inline-form"
+                onsubmit="return confirm('删除 {{ it.display_code }}？检测过 / 出库 / 报修 / 盘点过的不让删')">
+            <button class="btn sm danger">删</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('没有符合条件的货品') }}{% endif %}
+  {# 分页（2026-10-11）：以前一刀切只出 200 条、没有下一页，867 台货翻不到后面 ——
+     现在按 50 条一页，页码窗口 ±2 + 首尾，翻页时筛选条件一路带着。 #}
+  {% if pages > 1 %}
+  <div class="pager foot">
+    <span class="pager-info">第 {{ row_base + 1 }}–{{ row_base + items | length }} 条 ·
+      共 {{ total }} 台 · 第 {{ page }} / {{ pages }} 页（每页 {{ page_size }} 条）</span>
+    {% if page > 1 %}<a class="btn sm" href="{{ plink(page - 1) }}">上一页</a>
+    {% else %}<span class="btn sm disabled">上一页</span>{% endif %}
+    {% for p in range(1, pages + 1) %}
+      {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
+        {% if p == page %}<span class="btn sm primary">{{ p }}</span>
+        {% else %}<a class="btn sm" href="{{ plink(p) }}">{{ p }}</a>{% endif %}
+      {% elif p == page - 3 or p == page + 3 %}
+        <span class="muted">…</span>
+      {% endif %}
+    {% endfor %}
+    {% if page < pages %}<a class="btn sm" href="{{ plink(page + 1) }}">下一页</a>
+    {% else %}<span class="btn sm disabled">下一页</span>{% endif %}
+  </div>
+  {% elif total and items %}
+  <div class="pager foot"><span class="pager-info">共 {{ total }} 台（每页 {{ page_size }} 条，一页放得下）</span></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  .loc-sub { font-size:12px; color:var(--c-text-muted); margin-top:2px; }
+</style>
+{% endblock %}
+
+{% block scripts %}
+{# 扫码枪自动搜索（2026-10-10）：键盘仿真扫码枪 = 连续快速击键 + 回车结尾。
+   手打（间隔 > 50ms）会被判成人工输入丢掉，回车照旧走浏览器的表单提交，不抢它的行为。
+   光标不在输入框里也能扫 —— 刚进台账页直接扫就能搜，不用先点一下。 #}
+<script>
+(function () {
+  var input = document.getElementById('f-q');
+  if (!input) { return; }
+  var form = input.form;
+  var buf = '', last = 0, firing = false;
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (firing && buf.length >= 5) {
+        e.preventDefault();
+        input.value = buf;
+        form.submit();
+      }
+      buf = ''; firing = false;
+      return;
+    }
+    if (!e.key || e.key.length !== 1) { return; }
+    var now = e.timeStamp || Date.now();
+    if (firing && now - last > 50) { buf = ''; }   // 间隔太大 = 人在打字，不算扫码
+    buf += e.key; last = now; firing = true;
+  }, true);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,507 @@
+{% extends "base.html" %}
+{% block title %}确认订单 · 渔货栈{% endblock %}
+
+{% macro money(v) -%}¥{{ '%.2f' % (v | float) }}{%- endmacro %}
+
+{% block head_extra %}
+<style>
+  /* 采购买家侧主色：与 1688 一致的品牌橙（和商品详情页 --pdp-brand 同值） */
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .btn-primary { background: var(--pdp-brand); border-color: var(--pdp-brand); }
+  .btn-primary:hover, .btn-primary:focus, .btn-primary:active {
+    background: var(--pdp-brand-dark); border-color: var(--pdp-brand-dark);
+  }
+  .btn-outline-primary { color: var(--pdp-brand-dark); border-color: var(--pdp-brand); }
+  .btn-outline-primary:hover { background: var(--pdp-brand); border-color: var(--pdp-brand); color: #fff; }
+  /* 卡片骨架（圆角 / 头·体内边距）走 base 的统一口径，这里只给间距与主色 */
+  .ck-card { margin-bottom: 12px; }
+  .ck-head i { color: var(--pdp-brand); }
+  .ck-thumb { width: 72px; height: 72px; object-fit: cover; border-radius: 6px; border: 1px solid var(--c-border); flex: none; }
+  .ck-tag {
+    display: inline-block; height: 19px; line-height: 18px; padding: 0 6px; margin-right: 4px;
+    font-size: 11px; color: var(--c-text-muted); border: 1px solid var(--c-border); border-radius: 3px;
+    background: var(--c-surface-2);
+  }
+  /* 还不能用的交易方式（在线支付）：整行压暗、光标提示，别让人以为能选 */
+  .ck-pay-off { opacity: 0.55; cursor: not-allowed; }
+  /* 合并支付 · 拆单履约（2026-10-12）：多地址时每张子单各一块 */
+  .ck-split-note {
+    display: flex; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 1.6;
+    padding: 8px 10px; border-radius: 6px; margin-bottom: 10px;
+    background: var(--pdp-soft); border: 1px solid var(--pdp-brand); color: var(--c-text);
+  }
+  .ck-sub .ck-head { background: var(--c-surface-2, #F7F8FA); }
+  .ck-qty-static { display: inline-block; min-width: 40px; font-weight: 600; }
+  .ck-sub-sum { text-align: right; color: var(--c-text-muted); margin-top: 6px; }
+  .ck-sub-sum strong { color: var(--c-text); font-size: 14px; }
+  .ck-table th { font-size: 12px; color: var(--c-text-muted); font-weight: 500; }
+  .ck-table td { vertical-align: middle; }
+  /* 列宽走 class 而不是行内 style：手机端要能整块覆盖成卡片 */
+  .ck-w-qty { width: 160px; }
+  .ck-w-price { width: 110px; }
+  .ck-w-amount { width: 110px; }
+  .ck-title { font-size: 14px; line-height: 1.45; word-break: break-word; }
+  .ck-spec { font-size: 12px; word-break: break-all; }
+  .ck-line { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+  .ck-line .k { color: var(--c-text-muted); }
+  .ck-total { display: flex; justify-content: space-between; align-items: baseline; padding-top: 10px; margin-top: 6px; border-top: 1px dashed var(--c-border); }
+  .ck-total .v { font-size: 24px; font-weight: 700; color: var(--pdp-brand); }
+  .ck-submit { height: 46px; font-size: 16px; font-weight: 600; }
+  .ck-sticky { position: sticky; top: 16px; }
+
+  /* ---- 手机端：商品明细改成「一货一卡」，标题不再被数量 / 单价挤成一条缝 ---- */
+  @media (max-width: 768px) {
+    .ck-sticky { position: static; }
+    .ck-head { padding: 11px 12px; font-size: 13px; }
+    .ck-head .right { display: none; }
+    .ck-body { padding: 12px; }
+    .ck-table thead { display: none; }
+    .ck-table, .ck-table tbody, .ck-table tr, .ck-table td { display: block; width: 100% !important; }
+    .ck-table tr { padding: 12px; border-bottom: 1px solid var(--c-border); }
+    .ck-table tr:last-child { border-bottom: 0; }
+    .ck-table td { border: 0; padding: 0; text-align: left !important; }
+    .ck-table td.ck-cell-main { padding-bottom: 4px; }
+    .ck-table td[data-label] {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 3px 0; font-size: 13px;
+    }
+    .ck-table td[data-label]::before {
+      content: attr(data-label); flex: none; font-size: 12px; color: var(--c-text-muted);
+    }
+    .ck-thumb { width: 60px; height: 60px; }
+    .ck-title {
+      font-size: 13px;
+      display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .ck-tag { margin-bottom: 4px; }
+    /* 加减按钮在手机上要够大，别挤成一排小方块 */
+    .ck-qty .btn { min-width: 36px; height: 34px; padding: 0 8px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>确认订单</h1>
+    <span class="page-subtitle">
+      {# 款数 / 件数跟着下面改数量一起变（JS: ckRefresh），不能再是写死的首次渲染值 #}
+      共 <b id="ckKinds">{{ lines|length }}</b> 款 <b id="ckQty">{{ total_qty }}</b> 件 ·
+      {% if source == 'cart' %}从采购车结算{% else %}直接采购{% endif %}
+    </span>
+  </div>
+  <a href="{{ self_url('/cart') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i> 返回采购车
+  </a>
+</div>
+
+<form method="post" action="{{ self_url('/checkout/submit') }}" id="checkoutForm" data-source="{{ source }}">
+  <input type="hidden" name="source" value="{{ source }}">
+  <input type="hidden" name="item_id" value="{{ item_id }}">
+  <input type="hidden" name="sku_id" value="{{ sku_id }}">
+  <input type="hidden" name="qty" id="qtyInput" value="{{ qty }}">
+  <input type="hidden" name="line_ids" value="{{ line_ids }}">
+  {# 交易方式（2026-10-12 用户拍板）：只用「带教代收」；在线支付先置灰不发出来 #}
+  <input type="hidden" name="trade_type" value="agent">
+  <input type="hidden" name="delivery_type" value="express">
+
+  <div class="row g-3">
+    <div class="col-lg-8">
+      {# ---- 收货地址（照 1688：地址卡 + 更改地址）----
+           2026-10-12：采购车里给不同的人各带了一件时（groups > 1），不在这里收一个统一地址，
+           而是按收货地址拆成几张子单，每张子单下面各填各的（见下面的子单区块）。 #}
+      <div class="ck-card">
+        <div class="ck-head">
+          <i class="bi bi-geo-alt-fill"></i> 收货地址
+          <span class="right">
+            {% if group_count > 1 %}
+              这一车有 {{ group_count }} 个收货地址 → 拆成 {{ group_count }} 张子单，一次付款、分开发货
+            {% else %}
+              填收货人信息，平台按这个地址发货
+            {% endif %}
+          </span>
+        </div>
+        <div class="ck-body">
+          {% if group_count > 1 %}
+          <div class="ck-split-note">
+            <i class="bi bi-info-circle"></i>
+            <div>
+              结算后会生成 <b>1 张合并单 + {{ group_count }} 张子单</b>：钱只付一次（合并单），
+              每张子单按自己的地址分别发货、分别确认收货。下面每张子单的收货人都能再改。
+            </div>
+          </div>
+          {% if addresses %}
+          <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+            <span class="kpi-label" style="margin:0;">把所有子单都填成</span>
+            <select class="form-select form-select-sm" id="addrPickerAll" style="width:auto; max-width: 340px;">
+              <option value="">— 手动填写 —</option>
+              {% for a in addresses %}
+              <option value="{{ a.id }}"
+                      data-name="{{ a.receiver_name }}" data-phone="{{ a.phone }}" data-full="{{ a.full }}"
+                      {% if a.is_default %}selected{% endif %}>
+                {{ a.receiver_name }} · {{ a.phone }} · {{ a.full }}{% if a.is_default %}（默认）{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="ckFillAllAddr()">批量填入</button>
+          </div>
+          {% endif %}
+          {% else %}
+          {# 地址簿（个人中心 · 地址管理）：选一条就填进下面三个框，不用每次重打一遍 #}
+          {% if addresses %}
+          <div class="d-flex align-items-center gap-2 flex-wrap mb-3">
+            <span class="kpi-label" style="margin:0;">从地址簿选择</span>
+            <select class="form-select form-select-sm" id="addrPicker" style="width:auto; max-width: 340px;"
+                    onchange="ckPickAddr(this)">
+              <option value="">— 手动填写 —</option>
+              {% for a in addresses %}
+              <option value="{{ a.id }}"
+                      data-name="{{ a.receiver_name }}" data-phone="{{ a.phone }}"
+                      data-full="{{ a.full }}"
+                      {% if a.is_default %}selected{% endif %}>
+                {{ a.receiver_name }} · {{ a.phone }} · {{ a.full }}{% if a.is_default %}（默认）{% endif %}
+              </option>
+              {% endfor %}
+            </select>
+            <a class="small" href="{{ self_url('/addresses') }}" target="_blank" rel="noopener">
+              <i class="bi bi-geo-alt"></i> 管理地址簿
+            </a>
+          </div>
+          {% else %}
+          <div class="d-flex align-items-center gap-2 flex-wrap mb-3 small text-secondary">
+            <i class="bi bi-info-circle"></i>
+            还没有收货地址 —— <a href="{{ self_url('/addresses') }}" target="_blank" rel="noopener">去地址管理里存一条</a>，
+            以后结算页自动带入。
+          </div>
+          {% endif %}
+
+          <div class="row g-2">
+            <div class="col-md-4">
+              <label class="kpi-label">收货人</label>
+              <input class="form-control form-control-sm" name="receiver_name" id="receiverName"
+                     value="{{ receiver.name }}" placeholder="姓名" required>
+            </div>
+            <div class="col-md-4">
+              <label class="kpi-label">手机号</label>
+              <input class="form-control form-control-sm" name="receiver_phone" id="receiverPhone"
+                     value="{{ receiver.phone }}" placeholder="11 位手机号">
+            </div>
+          </div>
+          <div class="mt-2">
+            <label class="kpi-label">详细地址</label>
+            <textarea class="form-control form-control-sm" name="receiver_address" id="receiverAddress" rows="2"
+                      placeholder="省 / 市 / 区 街道门牌（例：上海市 闵行区 虹桥镇 万源路 2161 弄 150 号 1 幢 306 室）">{{ receiver.address }}</textarea>
+          </div>
+          {# 选了地址簿里的哪条：下单时服务端按它兜底（前端已经填好，这里只是留个凭证） #}
+          <input type="hidden" name="address_id" id="addrId" value="">
+          {% endif %}
+        </div>
+      </div>
+
+      {# ---- 收货地址不同 → 每张子单各一块（2026-10-12 合并支付、拆单履约）---- #}
+      {% if group_count > 1 %}
+        {% for g in groups %}
+          {% set r = g.receiver %}
+          <div class="ck-card ck-sub">
+            <div class="ck-head">
+              <i class="bi bi-truck"></i> 第 {{ loop.index }} 张子单 · {{ g.supplier_name }}
+              <span class="right">寄往：{{ r.name or '（待填）' }}{% if r.address %} · {{ r.address }}{% endif %}</span>
+            </div>
+            <div class="ck-body">
+              <div class="row g-2">
+                <div class="col-md-3">
+                  <label class="kpi-label">收货人</label>
+                  <input class="form-control form-control-sm ck-addr-name"
+                         name="receiver_name__{{ g.key }}" value="{{ r.name }}" placeholder="姓名" required>
+                </div>
+                <div class="col-md-3">
+                  <label class="kpi-label">手机号</label>
+                  <input class="form-control form-control-sm ck-addr-phone"
+                         name="receiver_phone__{{ g.key }}" value="{{ r.phone }}" placeholder="11 位手机号">
+                </div>
+                <div class="col-md-6">
+                  <label class="kpi-label">收货地址</label>
+                  <textarea class="form-control form-control-sm ck-addr-full" rows="1"
+                            name="receiver_address__{{ g.key }}"
+                            placeholder="省 / 市 / 区 街道门牌">{{ r.address }}</textarea>
+                </div>
+              </div>
+              <div class="ck-sub-sum mono-sm">
+                {{ g.kinds }} 款 {{ g.total_qty }} 件 · 商品 {{ money(g.goods_amount) }} ＋ 运费 {{ money(g.freight) }}
+                ＝ <strong>{{ money(g.pay_amount) }}</strong>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="table ck-table align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>商品信息</th>
+                    <th class="text-center ck-w-qty">数量</th>
+                    <th class="text-end ck-w-price">单价</th>
+                    <th class="text-end ck-w-amount">小计</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for line in g.lines %}
+                    <tr data-idx="{{ g.key }}-{{ loop.index0 }}" data-price="{{ '%.2f' % (line.price | float) }}">
+                      <td class="ck-cell-main">
+                        <div class="d-flex gap-3">
+                          {% if line.image %}
+                            <img src="{{ line.image }}" alt="" class="ck-thumb" loading="lazy">
+                          {% endif %}
+                          <div style="min-width: 0;">
+                            <div class="ck-title">{{ line.title }}</div>
+                            <div class="ck-spec mono-sm text-secondary mt-1">规格：{{ line.spec_text }}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="text-center" data-label="数量">
+                        <span class="ck-qty-static" id="ckqty-{{ g.key }}-{{ loop.index0 }}">{{ line.qty }}</span>
+                        <div class="mono-sm text-secondary mt-1">件</div>
+                      </td>
+                      <td class="text-end mono" data-label="单价">{{ money(line.price) }}</td>
+                      <td class="text-end mono" data-label="小计" id="ckamount-{{ g.key }}-{{ loop.index0 }}">
+                        {{ money(line.price | float * line.qty) }}
+                      </td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        {% endfor %}
+      {% else %}
+
+      {# ---- 商品信息 ---- #}
+      <div class="ck-card">
+        <div class="ck-head">
+          <i class="bi bi-bag-check"></i> {{ lines[0].supplier_name }}
+        </div>
+        <div class="table-responsive">
+          <table class="table ck-table align-middle mb-0">
+            <thead>
+              <tr>
+                <th>商品信息</th>
+                <th class="text-center ck-w-qty">数量</th>
+                <th class="text-end ck-w-price">单价</th>
+                <th class="text-end ck-w-amount">小计</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for line in lines %}
+                <tr data-idx="{{ loop.index0 }}" data-price="{{ '%.2f' % (line.price | float) }}"
+                    data-line="{{ line.line_id if line.line_id else '' }}">
+                  <td class="ck-cell-main">
+                    <div class="d-flex gap-3">
+                      {% if line.image %}
+                        <img src="{{ line.image }}" alt="" class="ck-thumb" loading="lazy">
+                      {% endif %}
+                      <div style="min-width: 0;">
+                        <div class="ck-title">{{ line.title }}</div>
+                        <div class="ck-spec mono-sm text-secondary mt-1">
+                          规格：{{ line.spec_text }} · 可售 {{ line.stock }} 件
+                        </div>
+                        <div class="mt-1">
+                          <span class="ck-tag">{% if freight and (freight | float) > 0 %}运费 ¥{{ '%.2f' % (freight | float) }}{% else %}包邮{% endif %}</span>
+                          <span class="ck-tag">带教代收</span>
+                          <span class="ck-tag">7 天无理由退换</span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="text-center" data-label="数量">
+                    <div class="btn-group btn-group-sm ck-qty" role="group">
+                      <button type="button" class="btn btn-outline-secondary" onclick="ckQty({{ loop.index0 }}, -1)">−</button>
+                      <button type="button" class="btn btn-outline-secondary disabled" id="ckqty-{{ loop.index0 }}"
+                              data-line="{{ line.line_id if line.line_id else '' }}"
+                              style="min-width: 54px;">{{ line.qty }}</button>
+                      <button type="button" class="btn btn-outline-secondary" onclick="ckQty({{ loop.index0 }}, 1)">＋</button>
+                    </div>
+                  </td>
+                  <td class="text-end mono" data-label="单价">{{ money(line.price) }}</td>
+                  <td class="text-end mono" data-label="小计" id="ckamount-{{ loop.index0 }}">{{ money(line.amount) }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {% endif %}
+
+      {# ---- 留言 ---- #}
+      <div class="ck-card">
+        <div class="ck-head"><i class="bi bi-chat-left-text"></i> 留言</div>
+        <div class="ck-body">
+          <input class="form-control form-control-sm" name="remark"
+                 placeholder="选填，和平台 / 供应商协商一致后填写（如指定快递、发票抬头）">
+        </div>
+      </div>
+
+      {# ---- 交易方式 / 配送方式（照 1688 的选项区）----
+           2026-10-12 用户拍板：撤掉「担保交易」，改用「带教代收」；
+           「在线支付（微信 / 支付宝）」先置灰，后续版本再放出来。 #}
+      <div class="ck-card">
+        <div class="ck-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <div class="kpi-label mb-2">交易方式</div>
+              <label class="d-flex align-items-center gap-2 mb-1">
+                <input type="radio" class="form-check-input" checked disabled>
+                <span>带教代收</span>
+                <span class="text-secondary small ms-1">货款可以线下转付给带教，带教负责带采</span>
+              </label>
+              <label class="d-flex align-items-center gap-2 mb-1 ck-pay-off" title="后续版本再更新">
+                <input type="radio" class="form-check-input" disabled>
+                <span>在线支付</span>
+                <span class="text-secondary small ms-1">微信 / 支付宝（后续版本再更新）</span>
+              </label>
+            </div>
+            <div class="col-md-6">
+              <div class="kpi-label mb-2">配送方式</div>
+              <label class="d-flex align-items-center gap-2 mb-1">
+                <input type="radio" class="form-check-input" checked disabled>
+                <span>快递</span>
+                <span class="text-secondary small ms-1">{% if freight and (freight | float) > 0 %}运费 ¥{{ '%.2f' % (freight | float) }}{% else %}包邮{% endif %}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# ---- 店铺明细（照 1688 底部那一块）---- #}
+      <div class="ck-card">
+        <div class="ck-head"><i class="bi bi-shop"></i> 店铺明细</div>
+        <div class="ck-body">
+          <div class="ck-line">
+            <span class="k">商品总计 <span id="ckShopKinds">{{ lines|length }}</span> 种 <span id="ckShopQty">{{ total_qty }}</span> 件</span>
+            <span class="mono" id="ckShopGoods">{{ money(goods_amount) }}</span>
+          </div>
+          <div class="ck-line"><span class="k">运费</span><span class="mono">{{ money(freight) }}</span></div>
+          <div class="ck-line"><span class="k">服务</span><span>7 天无理由退换</span></div>
+          <div class="ck-line"><span class="k">店铺优惠</span><span class="mono">− {{ money(discount) }}</span></div>
+        </div>
+      </div>
+    </div>
+
+    {# ---- 右列：价格明细 + 立即下单 ---- #}
+    <div class="col-lg-4">
+      <div class="ck-sticky">
+        <div class="ck-card">
+          <div class="ck-head"><i class="bi bi-cash-coin"></i> 价格明细</div>
+          <div class="ck-body">
+            <div class="ck-line">
+              <span class="k">商品总计 <span id="pdKinds">{{ lines|length }}</span> 种 <span id="pdQty">{{ total_qty }}</span> 件</span>
+              <span class="mono" id="pdGoods">{{ money(goods_amount) }}</span>
+            </div>
+            <div class="ck-line"><span class="k">总运费</span><span class="mono" id="pdFreight">{{ money(freight) }}</span></div>
+            <div class="ck-line"><span class="k">店铺优惠</span><span class="mono">− {{ money(discount) }}</span></div>
+            <div class="ck-total">
+              <span>应付金额</span>
+              <span class="v mono" id="pdPay">{{ money(pay_amount) }}</span>
+            </div>
+            <button class="btn btn-primary w-100 ck-submit mt-3" type="submit">
+              立即下单 {{ money(pay_amount) }}
+            </button>
+            <div class="text-secondary small mt-2 text-center">
+              <i class="bi bi-person-badge"></i> 带教代收 · 货款线下转付给带教，带教负责带采
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  var CK_UPDATE_URL = {{ self_url('/cart/update') | tojson }};
+  var CK_FREIGHT = {{ ('%.2f' % (freight | float)) | tojson }};
+
+  function ckMoney(v) { return '¥' + Number(v).toFixed(2); }
+
+  /* 地址簿：选一条就填进收货人 / 手机号 / 详细地址（个人中心 · 地址管理里维护） */
+  function ckPickAddr(sel) {
+    var opt = sel.options[sel.selectedIndex];
+    var id = document.getElementById('addrId');
+    if (id) id.value = opt.value || '';
+    if (!opt.value) return;
+    var set = function (elId, val) {
+      var el = document.getElementById(elId);
+      if (el) el.value = val || '';
+    };
+    set('receiverName', opt.dataset.name);
+    set('receiverPhone', opt.dataset.phone);
+    set('receiverAddress', opt.dataset.full);
+  }
+
+  /* 数量一改，页面上所有「N 款 / 种 M 件」和金额都要跟着走：
+     顶部「共 N 款 M 件」、店铺明细、右列价格明细、应付与下单按钮。
+     以前只更新了行小计与应付，件数那几个数是首次渲染时写死的，改了数量纹丝不动。 */
+  function ckSet(ids, text) {
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = text;
+    });
+  }
+
+  function ckRefresh() {
+    var goods = 0, kinds = 0, qtyTotal = 0;
+    document.querySelectorAll('tbody tr[data-idx]').forEach(function (tr) {
+      var idx = tr.dataset.idx;
+      var qty = parseInt(document.getElementById('ckqty-' + idx).textContent, 10) || 0;
+      var amount = Number(tr.dataset.price) * qty;
+      goods += amount;
+      qtyTotal += qty;
+      if (qty > 0) kinds += 1;
+      document.getElementById('ckamount-' + idx).textContent = ckMoney(amount);
+    });
+    var pay = goods + Number(CK_FREIGHT);
+    ckSet(['ckKinds', 'ckShopKinds', 'pdKinds'], String(kinds));
+    ckSet(['ckQty', 'ckShopQty', 'pdQty'], String(qtyTotal));
+    ckSet(['pdGoods', 'ckShopGoods'], ckMoney(goods));
+    ckSet(['pdPay'], ckMoney(pay));
+    var btn = document.querySelector('.ck-submit');
+    if (btn) btn.textContent = '立即下单 ' + ckMoney(pay);
+  }
+
+  function ckQty(idx, delta) {
+    var el = document.getElementById('ckqty-' + idx);
+    var next = Math.max(1, (parseInt(el.textContent, 10) || 1) + delta);
+    var mode = document.getElementById('checkoutForm').dataset.source;
+    if (mode === 'cart') {
+      fetch(CK_UPDATE_URL, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ line_id: el.dataset.line, qty: next })
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { alert(res.data.detail || '改数量失败'); return; }
+          el.textContent = res.data.line.qty;
+          ckRefresh();
+        });
+      return;
+    }
+    // 直接采购：同步隐藏字段，提交时以这个数量为准
+    el.textContent = next;
+    document.getElementById('qtyInput').value = next;
+    ckRefresh();
+  }
+
+  /* 多地址结算：把地址簿里的一条一次填进所有子单（大部分时候是同一个人收货） */
+  function ckFillAllAddr() {
+    var sel = document.getElementById('addrPickerAll');
+    if (!sel || !sel.value) { alert('先从下拉里选一个地址'); return; }
+    var opt = sel.options[sel.selectedIndex];
+    document.querySelectorAll('.ck-addr-name').forEach(function (el) { el.value = opt.dataset.name || ''; });
+    document.querySelectorAll('.ck-addr-phone').forEach(function (el) { el.value = opt.dataset.phone || ''; });
+    document.querySelectorAll('.ck-addr-full').forEach(function (el) { el.value = opt.dataset.full || ''; });
+  }
+
+  /* 进来时把默认的那个地址填进表单（服务端已经回填过，这里补上隐藏字段的凭证） */
+  (function () {
+    var sel = document.getElementById('addrPicker');
+    if (sel && sel.value) ckPickAddr(sel);
+  })();
+</script>
+{% endblock %}

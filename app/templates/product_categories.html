@@ -1,0 +1,436 @@
+{# 类目管理：一级 / 二级 / 三级类目就在这里维护；发布商品、渔货栈货源广场都读这一份数据 #}
+{% extends "base.html" %}
+{% block title %}类目管理{% endblock %}
+{% block heading %}类目管理{% endblock %}
+{% block sub %}发布商品与渔货栈共用这一份类目 · 数据来源：{{ seed_source }}{% endblock %}
+{% block actions %}
+  <form method="post" action="/products/categories/sync" style="display:inline">
+    <button class="btn" data-confirm="从渔货栈同步一次：只补渔货栈新增的类目、跟进改名，本地自己加的类目和排序 / 停用状态都保留。继续？">从渔货栈同步</button>
+  </form>
+  <a class="btn" href="/products/categories/export">导出 JSON</a>
+  <button class="btn" id="catToggleAll" type="button">全部展开</button>
+  <a class="btn primary" href="/products/new">去发布商品</a>
+{% endblock %}
+{% block content %}
+
+<style>
+  /* 一级类目一张卡：<details> 默认折叠，点开才看下面的二级 / 三级 */
+  .cat-card {
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    border-radius: var(--r-card); box-shadow: var(--shadow-card);
+    margin-bottom: var(--s-3); overflow: hidden;
+  }
+  .cat-card > summary {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px; cursor: pointer;
+    font-size: 14px; font-weight: 600; list-style: none;
+  }
+  .cat-card > summary::-webkit-details-marker { display: none; }
+  .cat-card > summary:hover { background: var(--c-surface-2); }
+  .cat-caret { color: var(--c-text-subtle); transition: transform .15s ease; flex-shrink: 0; }
+  .cat-card[open] > summary .cat-caret { transform: rotate(90deg); }
+  .cat-card[open] > summary { border-bottom: 1px solid var(--c-border); }
+  .cat-title { font-size: 14px; font-weight: 600; }
+  .cat-meta {
+    margin-left: auto; font-size: 12px; font-weight: 400;
+    color: var(--c-text-muted); white-space: nowrap;
+  }
+  .cat-body { padding: 14px 18px 18px; display: flex; flex-direction: column; gap: var(--s-3); }
+  .cat-toolbar { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+  .cat-toolbar .btn { min-height: 30px; padding: 0 10px; font-size: 12.5px; }
+  .cat-toolbar .field { margin-bottom: 0; }
+  .cat-name-input { width: 220px; }
+  .cat-off { opacity: .55; }
+  .cat-submeta { font-size: 12px; color: var(--c-text-muted); margin-top: 4px; }
+  .cat-leaves { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .cat-leaf {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border: 1px solid var(--c-border);
+    border-radius: var(--r-pill); background: var(--c-surface-2); font-size: 12px;
+  }
+  .cat-leaf form { display: inline-flex; }
+  .cat-leaf button {
+    border: 0; background: transparent; color: var(--c-text-subtle);
+    cursor: pointer; padding: 0; line-height: 1;
+  }
+  .cat-leaf button:hover { color: var(--c-error); }
+  .cat-leaves .cat-add { display: inline-flex; gap: 4px; align-items: center; }
+  .cat-leaves .cat-add input { width: 120px; }
+  /* 拖拽排序：一级类目较多，逐个点「上移」很累，按住手柄直接拖 */
+  .cat-drag {
+    cursor: grab; color: var(--c-text-subtle); font-size: 13px;
+    line-height: 1; padding: 0 2px; user-select: none; flex-shrink: 0;
+  }
+  .cat-drag:active { cursor: grabbing; }
+  .cat-card.dragging { opacity: .45; }
+  .cat-card.drag-over > summary { background: var(--c-primary-soft, var(--c-surface-2)); }
+  .cat-sort-tip { font-size: 12px; color: var(--c-ok, green); margin-left: 8px; }
+  .cat-cell-actions { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+  .cat-cell-actions .btn { min-height: 30px; padding: 0 10px; font-size: 12.5px; }
+  /* 类目特性规则：折叠区，展开才编辑 */
+  .cat-rules { border: 1px solid var(--c-border); border-radius: var(--r-card); background: var(--c-surface-2); }
+  .cat-rules > summary {
+    padding: 10px 12px; cursor: pointer; font-size: 13px; font-weight: 600;
+    display: flex; gap: 8px; align-items: center; list-style: none;
+  }
+  .cat-rules > summary::-webkit-details-marker { display: none; }
+  .cat-rules > summary .cat-submeta { font-weight: 400; }
+  .cat-rules form { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .cat-rules textarea {
+    width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.6;
+  }
+</style>
+
+<div class="grid grid-5" style="margin-bottom: var(--s-4);">
+  <div class="stat"><div class="label">一级类目</div><div class="value">{{ stat.level1 }}</div><div class="hint">最外层分类</div></div>
+  <div class="stat"><div class="label">二级类目</div><div class="value">{{ stat.level2 }}</div><div class="hint">挂在一级下面</div></div>
+  <div class="stat"><div class="label">三级类目</div><div class="value">{{ stat.level3 }}</div><div class="hint">最细一层</div></div>
+  <div class="stat {{ 'warn' if stat.disabled }}"><div class="label">已停用</div><div class="value">{{ stat.disabled }}</div><div class="hint">发布页里不再出现</div></div>
+  <div class="stat"><div class="label">商品用到</div><div class="value">{{ stat.used }}</div><div class="hint">已被商品使用的类目写法</div></div>
+</div>
+
+<div class="card">
+  <div class="row-between">
+    <form class="filters" method="post" action="/products/categories/create" style="flex:1 1 420px;">
+      <div class="field grow"><label for="catNewTop">新增一级类目</label>
+        <input id="catNewTop" type="text" name="name" required maxlength="64" placeholder="如：数码配件">
+      </div>
+      <div class="field"><label>&nbsp;</label><button class="btn primary">新增一级</button></div>
+    </form>
+    <div class="field" style="min-width:240px;margin-bottom:0;">
+      <label for="catFilter">筛选类目</label>
+      <input id="catFilter" type="search" placeholder="输入关键字，如：耳机 / 睡衣">
+    </div>
+  </div>
+  <p class="help" style="margin: var(--s-2) 0 0;">
+    最多三级：一级 → 二级 → 三级。类目默认折叠，点一级类目展开看下级；这里改完，发布商品 / 编辑商品的类目下拉、
+    渔货栈货源广场的类目栏立刻跟着变，已发布商品上的类目文字不会被改动。
+    「停用」只是让它在发布页里不再出现，历史商品照旧。<br>
+    <b>排序</b>：按住一级类目左边的 <b>⋮⋮</b> 手柄上下拖动即可调顺序（拖完自动保存），也可以用「↑ 上移 / ↓ 下移」逐个调 —— 这个顺序就是前台的展示与选择顺序
+    （发布商品的类目级联、渔货栈货源广场的类目栏、运费模板 / 退货地址的类目下拉都按它排），调完立即生效。
+  </p>
+</div>
+
+{% for top in tree %}
+<details class="cat-card" data-name="{{ top.name }}" data-id="{{ top.id }}">
+  <summary>
+    <span class="cat-drag" draggable="true" title="按住拖动，调整一级类目的展示顺序" aria-label="拖动排序">⋮⋮</span>
+    <i class="bi bi-chevron-right cat-caret" aria-hidden="true"></i>
+    <span class="cat-title">{{ top.name }}</span>
+    <span class="badge cat-order" title="一级类目的展示与选择顺序：发布商品的级联、渔货栈货源广场都按这个顺序">第 {{ loop.index }} 位</span>
+    {% if not top.enabled %}<span class="badge">已停用</span>{% endif %}
+    <span class="cat-meta">
+      二级 {{ top.children|length }} 个 · 三级 {{ top.children | map(attribute='children') | map('length') | sum }} 个
+      · 商品用到 {{ usage.get(top.id, 0) }} 款
+    </span>
+  </summary>
+
+  <div class="cat-body">
+    <div class="cat-toolbar">
+      <form method="post" action="/products/categories/rename" style="display:flex;gap:6px;align-items:flex-end;">
+        <input type="hidden" name="id" value="{{ top.id }}">
+        <div class="field"><label>一级类目名称</label>
+          <input class="cat-name-input" type="text" name="name" value="{{ top.name }}" maxlength="64">
+        </div>
+        <button class="btn sm primary">保存</button>
+      </form>
+      <form method="post" action="/products/categories/move">
+        <input type="hidden" name="id" value="{{ top.id }}"><input type="hidden" name="direction" value="up">
+        <button class="btn sm" title="上移">↑ 上移</button>
+      </form>
+      <form method="post" action="/products/categories/move">
+        <input type="hidden" name="id" value="{{ top.id }}"><input type="hidden" name="direction" value="down">
+        <button class="btn sm" title="下移">↓ 下移</button>
+      </form>
+      <form method="post" action="/products/categories/toggle">
+        <input type="hidden" name="id" value="{{ top.id }}">
+        <input type="hidden" name="enabled" value="{{ '0' if top.enabled else '1' }}">
+        <button class="btn sm" title="{{ '停用后发布页不再出现' if top.enabled else '重新启用' }}">{{ '停用' if top.enabled else '启用' }}</button>
+      </form>
+      <form method="post" action="/products/categories/delete">
+        <input type="hidden" name="id" value="{{ top.id }}">
+        <button class="btn sm danger" data-confirm="删除「{{ top.name }}」会连同它下面 {{ top.children|length }} 个二级类目一起删掉，确认？">删除</button>
+      </form>
+    </div>
+
+    {# 类目特性规则：不影响类目显示，只作为上架商品与后续经营的经验规则 #}
+    <details class="cat-rules" {% if top.rules %}open{% endif %}>
+      <summary>
+        <i class="bi bi-lightbulb"></i> 类目特性规则
+        {% if top.rules %}<span class="badge">已维护</span>{% else %}<span class="cat-submeta">（未维护：标题生成与经营提示会退化）</span>{% endif %}
+      </summary>
+      <form method="post" action="/products/categories/rules">
+        <input type="hidden" name="id" value="{{ top.id }}">
+        <textarea name="rules" rows="6" placeholder="{{ rules_template }}">{{ top.rules }}</textarea>
+        <p class="help">
+          一行一条「键：值」，值用顿号 / 逗号分隔。键认这些：
+          <b>产品词</b>（该类目的核心叫法）、<b>修饰词</b>、<b>热搜词</b>、<b>长尾词</b>（人群 / 场景），
+          其余行都当作<b>经营提示</b>。<br>
+          用途：①「AI 生成渔货商品标题」按 品牌词 + 产品词 + 修饰词 + 热搜词 + 长尾词 拼到 30 字；
+          ② 上架到渔货栈时把经营提示展示给运营。
+          <b>不影响类目显示与级联</b>。
+        </p>
+        <button class="btn sm primary">保存类目特性规则</button>
+      </form>
+    </details>
+
+    {% if top.children %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:260px;">二级类目</th>
+            <th>三级类目</th>
+            <th class="table-actions">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for sub in top.children %}
+          <tr class="{% if not sub.enabled %}cat-off{% endif %}" data-name="{{ sub.name }}">
+            <td>
+              <form method="post" action="/products/categories/rename" style="display:flex;gap:6px;">
+                <input type="hidden" name="id" value="{{ sub.id }}">
+                <input type="text" name="name" value="{{ sub.name }}" maxlength="64" aria-label="二级类目名称">
+                <button class="btn sm primary">保存</button>
+              </form>
+              <div class="cat-submeta">
+                {% if not sub.enabled %}已停用 · {% endif %}
+                三级 {{ sub.children|length }} 个 · 商品用到 {{ usage.get(sub.id, 0) }} 款
+              </div>
+            </td>
+            <td>
+              <div class="cat-leaves" data-parent="{{ sub.id }}">
+                {# 三级一律点开才拉：1688 那套一共一万多个三级，全渲染出来是好几 MB HTML。
+                   一个二级下面有几个、停用了哪几个，按钮上的数字先给出来 #}
+                {% if sub.children %}
+                <button type="button" class="btn sm cat-load-leaves" data-parent="{{ sub.id }}">
+                  展开三级（{{ sub.children|length }}{% if not sub.enabled %} · 已停用{% endif %}）
+                </button>
+                {% endif %}
+                <form class="cat-add" method="post" action="/products/categories/create">
+                  <input type="hidden" name="parent_id" value="{{ sub.id }}">
+                  <input type="text" name="name" maxlength="64" placeholder="+ 三级类目" aria-label="新增三级类目">
+                  <button class="btn sm">加</button>
+                </form>
+              </div>
+            </td>
+            <td class="table-actions">
+              <div class="cat-cell-actions">
+                <form method="post" action="/products/categories/move">
+                  <input type="hidden" name="id" value="{{ sub.id }}"><input type="hidden" name="direction" value="up">
+                  <button class="btn sm" title="上移">↑</button>
+                </form>
+                <form method="post" action="/products/categories/move">
+                  <input type="hidden" name="id" value="{{ sub.id }}"><input type="hidden" name="direction" value="down">
+                  <button class="btn sm" title="下移">↓</button>
+                </form>
+                <form method="post" action="/products/categories/toggle">
+                  <input type="hidden" name="id" value="{{ sub.id }}">
+                  <input type="hidden" name="enabled" value="{{ '0' if sub.enabled else '1' }}">
+                  <button class="btn sm">{{ '停用' if sub.enabled else '启用' }}</button>
+                </form>
+                <form method="post" action="/products/categories/delete">
+                  <input type="hidden" name="id" value="{{ sub.id }}">
+                  <button class="btn sm danger" data-confirm="删除「{{ sub.name }}」会连同它下面 {{ sub.children|length }} 个三级类目一起删掉，确认？">删除</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty" style="padding: var(--s-6);">「{{ top.name }}」下面还没有二级类目，在下面加一个。</div>
+    {% endif %}
+
+    <form class="filters" method="post" action="/products/categories/create" style="align-items:flex-end;">
+      <input type="hidden" name="parent_id" value="{{ top.id }}">
+      <div class="field grow" style="max-width:280px;"><label>在「{{ top.name }}」下新增二级类目</label>
+        <input type="text" name="name" required maxlength="64" placeholder="如：耳机音响">
+      </div>
+      <div class="field"><label>&nbsp;</label><button class="btn">新增二级</button></div>
+    </form>
+  </div>
+</details>
+{% endfor %}
+
+{% if not tree %}
+<div class="empty">
+  还没有类目。点右上角「从渔货栈同步」按渔货栈那套三级类目导入一份，或者在上面新增一级类目。
+</div>
+{% endif %}
+
+<script>
+  // 筛选：输入关键字只留下匹配的一级 / 二级 / 三级（匹配到的自动展开，方便直接改）
+  (function () {
+    var box = document.getElementById('catFilter');
+    var toggle = document.getElementById('catToggleAll');
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.cat-card'));
+
+    function applyFilter() {
+      var q = (box && box.value || '').trim();
+      cards.forEach(function (card) {
+        var topHit = !q || (card.dataset.name || '').indexOf(q) >= 0;
+        var subHit = false;
+        card.querySelectorAll('tbody tr').forEach(function (row) {
+          var rowHit = !q || (row.dataset.name || '').indexOf(q) >= 0;
+          if (!rowHit) {
+            row.querySelectorAll('.cat-leaf').forEach(function (leaf) {
+              if ((leaf.dataset.name || '').indexOf(q) >= 0) { rowHit = true; }
+            });
+          }
+          row.querySelectorAll('.cat-leaf').forEach(function (leaf) {
+            var hit = !q || (leaf.dataset.name || '').indexOf(q) >= 0;
+            leaf.style.display = hit ? '' : 'none';
+          });
+          row.style.display = rowHit ? '' : 'none';
+          if (rowHit && q) { subHit = true; }
+        });
+        card.style.display = (topHit || subHit) ? '' : 'none';
+        if (q && (topHit || subHit)) { card.open = true; }
+      });
+    }
+
+    if (box) { box.addEventListener('input', applyFilter); }
+
+    // 全部展开 / 全部收起（类目多的时候逐个点很累）
+    if (toggle) {
+      toggle.addEventListener('click', function () {
+        var expand = toggle.textContent.indexOf('展开') >= 0;
+        cards.forEach(function (card) { card.open = expand; });
+        toggle.textContent = expand ? '全部收起' : '全部展开';
+      });
+    }
+  })();
+
+  // 三级类目按需加载：一个二级下面有上百个三级时（1688 那套就是这样），
+  // 页面首屏只放一个「展开三级（N）」按钮，点了才去服务端取这一份。
+  (function () {
+    function leafChip(leaf) {
+      var span = document.createElement('span');
+      span.className = 'cat-leaf' + (leaf.enabled ? '' : ' cat-off');
+      span.setAttribute('data-name', leaf.name);
+      span.appendChild(document.createTextNode(leaf.name + ' '));
+      var form = document.createElement('form');
+      form.method = 'post';
+      form.action = '/products/categories/delete';
+      form.innerHTML =
+        '<input type="hidden" name="id" value="' + leaf.id + '">' +
+        '<button title="删除" aria-label="删除 ' + leaf.name + '">×</button>';
+      // 动态插入的表单不在 app.js 那次绑定里，确认框自己挂一个
+      form.addEventListener('submit', function (e) {
+        if (!confirm('删除三级类目「' + leaf.name + '」？')) { e.preventDefault(); }
+      });
+      span.appendChild(form);
+      return span;
+    }
+
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest ? e.target.closest('.cat-load-leaves') : null;
+      if (!btn || btn.disabled) { return; }
+      var box = btn.closest('.cat-leaves');
+      var pid = btn.getAttribute('data-parent');
+      btn.disabled = true;
+      btn.textContent = '加载中…';
+      fetchJson('/products/categories/leaves?parent_id=' + encodeURIComponent(pid),
+        { where: '商品类目 · 展开末级' })
+        .then(function (res) { return res.data; })
+        .then(function (data) {
+          var host = document.createElement('div');
+          host.className = 'cat-leaves-list';
+          (data.leaves || []).forEach(function (leaf) { host.appendChild(leafChip(leaf)); });
+          box.insertBefore(host, box.querySelector('.cat-add'));
+          btn.remove();
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = '加载失败，点此重试';
+        });
+    });
+  })();
+
+  // 一级类目拖拽排序：一级有几十个，逐个点「上移」很累 —— 按住 ⋮⋮ 手柄上下拖，
+  // 松手就把新顺序提交到后台（不整页刷新，序号即时改）
+  (function () {
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.cat-card'));
+    if (!cards.length) { return; }
+    var dragging = null;
+    var saving = false;
+
+    function renumber() {
+      document.querySelectorAll('.cat-card').forEach(function (card, i) {
+        var badge = card.querySelector('.cat-order');
+        if (badge) { badge.textContent = '第 ' + (i + 1) + ' 位'; }
+      });
+    }
+
+    function tip(text) {
+      var first = document.querySelector('.cat-card');
+      if (!first) { return; }
+      var old = first.querySelector('.cat-sort-tip');
+      if (old) { old.remove(); }
+      var span = document.createElement('span');
+      span.className = 'cat-sort-tip';
+      span.textContent = text;
+      first.querySelector('summary').appendChild(span);
+      setTimeout(function () { span.remove(); }, 2500);
+    }
+
+    function save() {
+      var ids = Array.prototype.slice.call(document.querySelectorAll('.cat-card'))
+        .map(function (c) { return c.dataset.id; }).join(',');
+      renumber();
+      if (!ids || saving) { return; }
+      saving = true;
+      fetchJson('/products/categories/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'ids=' + encodeURIComponent(ids),
+        where: '商品类目 · 保存顺序'
+      }).then(function (res) { return res.data; })
+        .then(function (data) {
+          saving = false;
+          tip(data.ok ? '顺序已保存' : '顺序没保存成功，刷新后重试');
+        })
+        .catch(function () {
+          saving = false;
+          tip('顺序没保存成功，刷新后重试');
+        });
+    }
+
+    cards.forEach(function (card) {
+      var handle = card.querySelector('.cat-drag');
+      if (!handle) { return; }
+      handle.addEventListener('dragstart', function (e) {
+        dragging = card;
+        card.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', card.dataset.id || ''); } catch (err) { /* 老浏览器 */ }
+      });
+      handle.addEventListener('dragend', function () {
+        card.classList.remove('dragging');
+        cards.forEach(function (c) { c.classList.remove('drag-over'); });
+        dragging = null;
+        save();
+      });
+      card.addEventListener('dragover', function (e) {
+        if (!dragging || dragging === card) { return; }
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var box = card.getBoundingClientRect();
+        var after = e.clientY > box.top + box.height / 2;
+        if (after) {
+          card.parentNode.insertBefore(dragging, card.nextSibling);
+        } else if (dragging.nextSibling !== card) {
+          card.parentNode.insertBefore(dragging, card);
+        }
+        cards.forEach(function (c) { c.classList.remove('drag-over'); });
+        card.classList.add('drag-over');
+      });
+      card.addEventListener('drop', function (e) { e.preventDefault(); });
+    });
+  })();
+</script>
+
+{% endblock %}

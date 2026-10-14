@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{# 2026-10-13：手机存图専用页 —— 详情页「存到手机相册」点开就是这里。
+   浏览器（iOS / 安卓都一样）不允许网页直接把图写进相册，所以把全部图一次铺开，
+   用户在每张上「长按 → 存储到照片 / 下载图片」即可：一屏全看得见，比逐张点开强得多。 #}
+{% block title %}保存图片 · 渔货栈{% endblock %}
+
+{% block actions %}
+<a class="btn" href="{{ detail_url }}">← 回商品详情</a>
+<a class="btn primary" href="{{ zip_url }}">下载图片包（ZIP）</a>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  :root { --pdp-brand: #FF6A00; --pdp-brand-dark: #E85A00; --pdp-soft: #FFF6F0; }
+  .save-tip {
+    background: var(--pdp-soft); border: 1px solid var(--pdp-brand); color: var(--pdp-brand-dark);
+    padding: 10px 14px; border-radius: 8px; font-size: 13px; line-height: 1.7; margin-bottom: 16px;
+  }
+  .save-tip b { display: block; margin-bottom: 2px; }
+  .save-tip ol { margin: 4px 0 0; padding-left: 20px; }
+  .grp-hd { display: flex; align-items: center; gap: 8px; margin: 20px 0 10px; }
+  .grp-hd h2 { font-size: 15px; margin: 0; }
+  .grp-hd .cnt { font-size: 12px; color: var(--c-text-muted); }
+  .grp-hd .acts { margin-left: auto; display: flex; gap: 8px; }
+  /* 一次铺开：手机上一列到底，电脑上两列，图之间留缝好下手长按 */
+  .wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  @media (max-width: 700px) { .wall { grid-template-columns: 1fr; } }
+  .wall-cell {
+    border: 1px solid var(--c-border); border-radius: 8px; overflow: hidden; background: var(--c-surface);
+  }
+  .wall-cell > img {
+    width: 100%; height: auto; display: block; background: var(--c-surface-2);
+  }
+  .wall-cell .cap {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    font-size: 12px; color: var(--c-text-muted); border-top: 1px solid var(--c-border);
+  }
+  .wall-cell .cap .no { font-variant-numeric: tabular-nums; }
+  .wall-cell .cap .btn { margin-left: auto; }
+  .save-progress {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: rgba(17,17,17,.86); color: #fff; padding: 10px 16px; border-radius: 999px;
+    font-size: 13px; z-index: 60; display: none;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% if item %}
+<div class="save-tip">
+  <b><i class="bi bi-phone"></i> 手机这样存到相册</b>
+  <ol>
+    <li><b>苹果（Safari）</b>：在要存的图上<b>长按</b> →「存储到照片」。</li>
+    <li><b>安卓（Chrome / 浏览器）</b>：<b>长按</b> →「下载图片 / 保存图片」，之后在相册里就能看到。</li>
+    <li>也可以点右下角「<b>一键逐张下载</b>」：安卓会一次存进「下载」目录，苹果会存到「文件」App（再到相册里导入）。</li>
+    <li>微信里打开的话先点右上角「<b>···</b> → 在浏览器打开」，否则长按没有保存选项。</li>
+  </ol>
+</div>
+
+<div class="card flush" style="padding:14px 16px">
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <b style="font-size:15px">{{ item.title }}</b>
+    <span class="muted" style="font-size:12px">{{ item.item_id }}</span>
+    <div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap">
+      <button type="button" class="btn primary" onclick="wallSaveAll()">一键逐张下载</button>
+      <a class="btn" href="{{ detail_url }}">回详情页</a>
+    </div>
+  </div>
+</div>
+
+{% set total = (mains | length) + (details | length) %}
+{% if total %}
+  {% if mains %}
+  <div class="grp-hd">
+    <h2><i class="bi bi-image"></i> 主图</h2>
+    <span class="cnt">{{ mains | length }} 张</span>
+  </div>
+  <div class="wall">
+    {% for url in mains %}
+    <div class="wall-cell">
+      <img src="{{ url }}" alt="主图 {{ loop.index }}" loading="lazy">
+      <div class="cap"><span class="no">主图 {{ '%02d' % loop.index }}</span>
+        <a class="btn sm" href="{{ url }}" target="_blank" rel="noopener">打开原图</a></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if details %}
+  <div class="grp-hd">
+    <h2><i class="bi bi-images"></i> 详情图</h2>
+    <span class="cnt">{{ details | length }} 张</span>
+  </div>
+  <div class="wall">
+    {% for url in details %}
+    <div class="wall-cell">
+      <img src="{{ url }}" alt="详情图 {{ loop.index }}" loading="lazy">
+      <div class="cap"><span class="no">详情图 {{ '%02d' % loop.index }}</span>
+        <a class="btn sm" href="{{ url }}" target="_blank" rel="noopener">打开原图</a></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+{% else %}
+  {% if not_found %}
+  <div class="card"><p class="d">没有找到这款货源：{{ item_id }}</p></div>
+  {% else %}
+  <div class="card"><p class="d">这款货还没有图片。</p></div>
+  {% endif %}
+{% endif %}
+<div class="save-progress" id="saveProgress"></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  /* 一键逐张下载：浏览器不让一次给多张（会当成弹窗拦掉），所以隔 400ms 触发一张，
+     安卓基本能全部落进「下载」目录；苹果会逐张进「文件」App，之后再导相册。 */
+  var WALL_URLS = {{ (mains + details) | tojson }};
+  function wallSaveAll() {
+    if (!WALL_URLS.length) { alert('这款货还没有图片'); return; }
+    var tip = document.getElementById('saveProgress');
+    if (!confirm('共 ' + WALL_URLS.length + ' 张：开始下载后别关这个页面\n\n' +
+                 '苹果：图会存到「文件」App，再导入相册\n安卓：图会存到「下载」目录')) { return; }
+    WALL_URLS.forEach(function (url, i) {
+      setTimeout(function () {
+        var a = document.createElement('a');
+        a.href = url; a.download = '';
+        document.body.appendChild(a); a.click(); a.remove();
+        if (tip) {
+          tip.style.display = 'block';
+          tip.textContent = '正在下载 ' + (i + 1) + ' / ' + WALL_URLS.length + ' 张…';
+          if (i === WALL_URLS.length - 1) {
+            setTimeout(function () { tip.style.display = 'none'; }, 2500);
+          }
+        }
+      }, i * 400);
+    });
+  }
+</script>
+{% endblock %}

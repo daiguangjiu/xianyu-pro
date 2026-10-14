@@ -1,0 +1,380 @@
+{% extends "base.html" %}
+{# 流程说明弹窗：内容取自 app/services/help.py，与独立说明页 /help 同源 #}
+{% from "_help_dialog.html" import help_modal, help_btn %}
+{% block title %}供应链发货{% endblock %}
+{% block heading %}{{ heading }}{% endblock %}
+{% block sub %}{{ sub }}{% endblock %}
+{% block actions %}
+  {% if view == 'history' %}
+    <a class="btn" href="/batches">返回已推单记录</a>
+  {% else %}
+    {# 按天 / 按月的走势明细单独成页（2026-10-11），入口带着当前筛选条件 #}
+    <a class="btn" href="{{ stats_url }}"><i class="bi bi-bar-chart-line"></i> 发货统计</a>
+    <a class="btn primary" href="/orders?supplier_status=pending">去推单（单笔）</a>
+  {% endif %}
+{% endblock %}
+{% block content %}
+
+{# 每行的「保存记录 / 通知记录」：取该订单最近几条发货日志（列表页一次查询、按订单分组给过来） #}
+{% macro shipping_records(saves, notifies, order) %}
+  {% if saves %}
+  <div class="tracking-rec">保存记录：{% for r in saves[:2] %}{{ human_time(r.created_at) }} {{ r.detail }}{% if not loop.last %}；{% endif %}{% endfor %}</div>
+  {% endif %}
+  {% if notifies %}
+  <div class="tracking-rec">通知记录：{% for r in notifies[:2] %}{{ human_time(r.created_at) }} {{ r.detail }}{% if not loop.last %}；{% endif %}{% endfor %}</div>
+  {% elif order and order.tracking_synced_at %}
+  {# 早期版本同步群没逐条留痕，但订单上有同步时间：把这条时间当「通知记录」显示，别看着像没通知过 #}
+  <div class="tracking-rec">通知记录：{{ human_time(order.tracking_synced_at) }} 已同步群（早期记录未逐条留痕）</div>
+  {% endif %}
+{% endmacro %}
+
+{% if view == 'history' %}
+<div class="note muted">
+  单笔推单模式下不再生成新批次，这里仅保留历史批次记录与导出；日常发货记录请到「已推单记录」维护物流单号。
+</div>
+
+<div class="card">
+  <form class="filters" method="get" action="/batches">
+    <input type="hidden" name="view" value="history">
+    <div class="field"><label>批次状态</label>
+      <select name="status">
+        <option value="">全部</option>
+        {% for v,l in [('draft','草稿'),('pushed','已推送'),('done','已完成'),('cancelled','已取消')] %}
+        <option value="{{ v }}" {{ 'selected' if status == v }}>{{ l }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if batches %}
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th class="num">序号</th><th>批次号</th><th>供应商</th><th class="num">单数</th><th class="num">销售额</th><th class="num">成本</th><th>状态</th><th>创建时间</th><th></th></tr></thead>
+      <tbody>
+      {% for b in batches %}
+        <tr>
+          <td class="num muted">{{ (page - 1) * per_page + loop.index }}</td>
+          <td class="mono"><a href="/batches/{{ b.id }}">{{ b.batch_no }}</a></td>
+          <td>{{ b.supplier_name }}</td>
+          <td class="num">{{ b.item_count }}</td>
+          <td class="num">¥{{ money(b.total_sale) }}</td>
+          <td class="num">¥{{ money(b.total_cost) }}</td>
+          <td>
+            {% set labels = {'draft':'草稿','pushed':'已推送','done':'已完成','cancelled':'已取消'} %}
+            <span class="badge {{ b.status }}">{{ labels.get(b.status, b.status) }}</span>
+          </td>
+          <td class="nowrap muted">{{ human_time(b.created_at) }}</td>
+          <td class="nowrap">
+            <a class="btn sm" href="/batches/{{ b.id }}">明细</a>
+            <a class="btn sm" href="/batches/{{ b.id }}/export.csv">CSV</a>
+            <a class="btn sm" href="/batches/{{ b.id }}/export.xlsx">Excel</a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">暂无历史批次。</div>
+  {% endif %}
+</div>
+{% else %}
+
+{# 三张卡片是本页的重点，一眼看完进度：推了多少单 → 供应商已发货多少 → 还有多少没回单。
+   数字是**全量口径**（不随筛选变），筛选出多少条在列表上方单独说 ——
+   以前卡片用当前列表行数，点了「待填回单」后「已推单」从 93 掉到 21，看着像数据少了。 #}
+<section class="grid grid-3 stat-grid" style="max-width:960px">
+  <a class="stat accent" href="/batches" title="全部已推单记录（含供应商已发货的；不含已关闭完成）">
+    <div class="label">已推单记录</div>
+    <div class="value">{{ pushed_count }} <span class="hint">单</span></div>
+    <div class="hint">订单已同步给供应链侧（含已发货）</div>
+  </a>
+  <a class="stat" href="/batches?tracking=has" title="订单供应商已发货：物流单号已回填，点进去只看这些单">
+    <div class="label">供应商已发货</div>
+    <div class="value">{{ shipped_count }} <span class="hint">单</span></div>
+    <div class="hint">订单供应商已发货（已回填物流单号）</div>
+  </a>
+  <a class="stat {{ 'danger' if missing_tracking else 'ok' }}" href="/batches?tracking=none"
+     title="已推单但供应商还没给物流单号：点进去只看这些单">
+    <div class="label">待填回单</div>
+    <div class="value">{{ missing_tracking }} <span class="hint">单</span></div>
+    <div class="hint">{% if missing_tracking %}还差这么多单没填物流单号{% else %}全部已填，没有待回单{% endif %}</div>
+  </a>
+</section>
+
+<div class="note muted">
+  <span>顶部三个数字都是<b>全量口径</b>，不随下面的筛选变：<b>已推单记录 = 供应商已发货 + 待填回单</b>。
+  本页只列要发货 / 等回单的单；<b>退单、撤回的单不在这里</b>（它们不发货、也不用催回单），
+  请到 <a href="/orders?refund=pending">待拦截退单</a> / <a href="/orders?refund=all">已退单</a> 跟进。</span>
+</div>
+
+<div class="note muted">
+  <span>这里是<b>已推单记录</b>，代表订单已同步给供应链侧里，后续要完成“填写/修改物流单号”后，系统会
+  <b>自动在该订单的飞书群里 @ 订单发送人同步物流单号</b>；只想存档不想发群时，取消勾选「同步到群」即可。
+  目前订单还有<b>{{ pending }} 单待推单发货</b>，去<a href="/orders?supplier_status=pending">订单管理</a>复制推单信息即可标记已推单。</span>
+  {{ help_btn('push', '推单流程说明', '推单从头到尾怎么走、每个状态什么意思') }}
+</div>
+{# 已关闭完成的订单默认收起：钱货都处理完了，留在列表里只会让人以为还要催回单、填单号 #}
+{% if closed_count %}
+<div class="note">
+  <span>{% if show_closed %}下面已包含 <b>{{ closed_count }}</b> 单「已关闭完成」（灰底显示）：这些单子<b>无需任何操作</b>。
+  {% else %}还有 <b>{{ closed_count }}</b> 单「已关闭完成」已收起 —— 钱货都处理完了，<b>无需再操作</b>；要翻旧账就勾选右边「显示已关闭 / 已完成」。{% endif %}</span>
+</div>
+{% endif %}
+{% if not notify_enabled %}
+<div class="note warn"><span>系统设置里已<b>关闭飞书下发</b>，物流单号只会保存到系统，不会同步到群里。</span></div>
+{% endif %}
+
+<div class="card">
+  <form class="filters" method="get" action="/batches">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="订单号 / 产品名称 / 收货人 / 手机号 / 物流单号">
+    </div>
+    <div class="field"><label>供应商</label>
+      <select name="supplier">
+        <option value="">全部</option>
+        {% for s in suppliers %}
+        <option value="{{ s }}" {{ 'selected' if filters.supplier == s }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>是否转账</label>
+      <select name="transfer">
+        <option value="">全部</option>
+        <option value="paid" {{ 'selected' if filters.transfer == 'paid' }}>已转账</option>
+        <option value="unpaid" {{ 'selected' if filters.transfer == 'unpaid' }}>未转账</option>
+      </select>
+    </div>
+    <div class="field"><label>物流单号</label>
+      <select name="tracking">
+        <option value="">全部</option>
+        <option value="none" {{ 'selected' if filters.tracking == 'none' }}>未填写</option>
+        <option value="has" {{ 'selected' if filters.tracking == 'has' }}>已填写</option>
+      </select>
+    </div>
+    {# —— 时间维度（2026-10-06）：先看「按哪个时间算」，再填起止日期；日期是北京时间 —— #}
+    <div class="field"><label>时间口径</label>
+      <select name="date_field" title="按哪个时间筛选：推单时间=推给供应商的时间，发货时间=供应商发货、单号回填的时间">
+        {% for k, v in time_fields.items() %}
+        <option value="{{ k }}" {{ 'selected' if date_field == k }}>{{ v[0] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field"><label>起始日期</label>
+      <input type="date" name="date_from" value="{{ filters.date_from }}" max="{{ today }}">
+    </div>
+    <div class="field"><label>结束日期</label>
+      <input type="date" name="date_to" value="{{ filters.date_to }}">
+    </div>
+    <div class="field"><label>已关闭完成</label>
+      <label class="check" title="已关闭完成的订单钱货都处理完了，无需再操作，默认收起">
+        <input type="checkbox" name="show_closed" value="1" {{ 'checked' if show_closed }}> 显示（{{ closed_count }}）
+      </label>
+    </div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+  {# 快捷区间：点了直接把起止日期带进链接，不用手填；日期框里还能接着改 #}
+  <div class="batch-quick" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:10px">
+    <span class="muted">快捷时间：</span>
+    {% for key, label in range_presets.items() %}
+    <a class="btn sm {{ 'primary' if range_key == key }}"
+       href="/batches?date_field={{ date_field }}&date_from={{ range_links[key][0] }}&date_to={{ range_links[key][1] }}">{{ label }}</a>
+    {% endfor %}
+    {% if has_date %}<a class="btn sm" href="/batches?date_field={{ date_field }}">全部时间</a>{% endif %}
+  </div>
+</div>
+
+{# —— 当前筛选下的统计：与下面的列表是同一批单（列表最多 500 行，统计走 SQL 汇总不会少算）——
+   成本项放在最显眼的位置：这段时间发货花了多少成本、单均多少，一眼能对账。 #}
+<div class="card">
+  <div class="card-head">
+    <div>
+      <b>当前筛选统计</b>
+      <span class="muted">
+        {% if has_date %}按{{ time_fields[date_field][0] if date_field in time_fields else '推单时间' }} {{ filters.date_from or '最早' }} ~ {{ filters.date_to or '今天' }}
+        {% else %}全部时间{% endif %}
+        {% if show_closed %}（含已关闭完成）{% else %}（不含已关闭完成）{% endif %}
+      </span>
+    </div>
+    <div>
+      <a class="btn sm" href="{{ stats_url }}" title="按天 / 按月看走势，带着当前筛选条件">按天 / 按月明细 →</a>
+    </div>
+  </div>
+  <div class="grid grid-4" style="margin-top:8px">
+    <div class="stat">
+      <div class="label">发货单数</div>
+      <div class="value">{{ stats.count }} <span class="hint">单</span></div>
+      <div class="hint">已发货 {{ stats.shipped }} · 待回单 {{ stats.pending }}</div>
+    </div>
+    <div class="stat accent">
+      <div class="label">采购成本合计</div>
+      <div class="value">¥{{ money(stats.cost) }}</div>
+      <div class="hint">单均成本 ¥{{ money(stats.avg_cost) }}</div>
+    </div>
+    <div class="stat">
+      <div class="label">销售额合计</div>
+      <div class="value">¥{{ money(stats.sale) }}</div>
+      <div class="hint">成本占销售额 {{ stats.cost_rate }}%</div>
+    </div>
+    <div class="stat {{ 'ok' if stats.profit >= 0 else 'danger' }}">
+      <div class="label">账面毛利</div>
+      <div class="value">¥{{ money(stats.profit) }}</div>
+      <div class="hint">运费 ¥{{ money(stats.freight) }} · 平台服务费 ¥{{ money(stats.fee) }}</div>
+    </div>
+  </div>
+  <div class="note muted" style="margin-top:8px">
+    <span>口径：销售额 − 采购成本 − 运费 − 平台技术服务费 = 账面毛利，<b>不含退款</b>
+    （退了的钱按单在资金 / 退单页看）。成本取订单的采购成本价，没维护成本的订单按 0 计。</span>
+  </div>
+</div>
+
+{# 按天 / 按月的走势表已搬到「发货统计」子页面（右上角按钮，带着当前筛选条件） #}
+
+{% if has_filter %}
+{# 筛选出多少条在这里说清楚：顶部三张卡片是全量口径，不跟着筛选变 #}
+<div class="note">
+  <span>当前筛选出 <b>{{ filtered_count }}</b> 条记录{% if filtered_missing and filtered_missing != filtered_count %}，其中要催回单的 <b>{{ filtered_missing }}</b> 条（差额是退单 / 撤回的单，不发货、不用催）{% endif %}。
+  <a href="/batches">清除筛选，看全部 {{ pushed_count }} 条</a></span>
+</div>
+{% endif %}
+
+<div class="card flush">
+  {% if orders %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th class="num">序号</th>
+          <th>推单时间</th><th>订单 / 产品</th><th>收货人</th><th>供应商</th>
+          <th class="num">成本</th><th>转账</th><th>物流单号</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for o in orders %}
+        <tr{% if o.is_closed %} class="row-closed" title="已关闭完成：钱货都处理完了，无需任何操作"{% endif %}>
+          <td class="num muted">{{ loop.index }}</td>
+          <td class="nowrap muted">{{ human_time(o.pushed_at) or '-' }}</td>
+          <td>
+            <a class="mono" href="/orders/{{ o.id }}">{{ o.order_no }}</a>
+            {% if o.is_closed %}<span class="badge closed">已关闭完成</span>{% endif %}
+            <div class="muted">{{ o.product_name or '-' }}{% if o.quantity and o.quantity > 1 %} ×{{ o.quantity }}{% endif %}</div>
+          </td>
+          <td>
+            {{ o.receiver_name or '-' }}
+            <div class="muted">{{ o.receiver_phone or '' }}</div>
+          </td>
+          <td>{{ o.supplier_name or '未指定' }}</td>
+          <td class="num">
+            {% if o.cost_amount and o.cost_amount > 0 %}¥{{ money(o.cost_amount) }}
+            {% else %}<span class="cost-zero" title="成本未维护">¥0.00</span>{% endif %}
+          </td>
+          <td>
+            {% if o.transfer_status == 'paid' %}<span class="badge done">已转账</span>
+            {% else %}<span class="badge pending">未转账</span>{% endif %}
+          </td>
+          {# 未填：直接给输入框；已填：只读显示 + 「编辑」按钮（点了才出输入框），最多改 {{ tracking_max_edit }} 次 #}
+          <td class="tracking-cell">
+            {% set can_edit = (not o.tracking_no) or ((o.tracking_edit_count or 0) < tracking_max_edit) %}
+            {% set company = o.tracking_company or (guess_company(o.tracking_no) if guess_company else '') %}
+            {% set recs = (logs_by_order.get(o.id) if logs_by_order else []) or [] %}
+            {% set saves = recs | selectattr('action', 'equalto', '回填物流单号') | list %}
+            {% set notifies = recs | selectattr('action', 'equalto', '通知发货群') | list %}
+            {% if o.is_closed %}
+            {# 已关闭完成：不用再填 / 催单号，只读显示，免得手滑又发一次群 #}
+            <div class="tracking-line">
+              <span class="tracking-no mono">{{ o.tracking_no or '—' }}</span>
+              <span class="tracking-company">{{ company or '物流公司未识别' }}</span>
+            </div>
+            {{ shipping_records(saves, notifies, o) }}
+            <div class="tracking-sub">已关闭完成，无需操作</div>
+            {% elif o.tracking_no and not can_edit %}
+            <div class="tracking-line">
+              <span class="tracking-no mono">{{ o.tracking_no }}</span>
+              <span class="tracking-company">{{ company or '物流公司未识别' }}</span>
+            </div>
+            {{ shipping_records(saves, notifies, o) }}
+            <div class="tracking-sub">已改过 {{ o.tracking_edit_count or 0 }} 次，不能再改（填错请联系管理员）</div>
+            {% else %}
+            {% if o.tracking_no %}
+            {# 单号 + 物流公司 + 「编辑」在同一行：改单号的动作贴着单号，一眼知道点哪儿 #}
+            <div class="tracking-view">
+              <div class="tracking-line">
+                <span class="tracking-no mono">{{ o.tracking_no }}</span>
+                <span class="tracking-company">{{ company or '物流公司未识别' }}</span>
+                <button type="button" class="btn sm js-edit-tracking">编辑</button>
+              </div>
+              {# 同步时间不在这儿重复写一遍：下面的「通知记录」里已经有「已同步群 时间」 #}
+              {{ shipping_records(saves, notifies, o) }}
+              <div class="tracking-sub">还能再改 {{ tracking_max_edit - (o.tracking_edit_count or 0) }} 次，改完自动锁定</div>
+            </div>
+            {% endif %}
+            {# 编辑态用内联 display 切换：不依赖外部 CSS，样式没刷到也不会两个状态一起露出来 #}
+            <form class="tracking-form js-tracking-form{{ ' js-tracking-form-hidden' if o.tracking_no }}" method="post"
+                  action="/batches/tracking/{{ o.id }}"{% if o.tracking_no %} style="display:none"{% endif %}>
+              <input type="hidden" name="back" value="{{ request.url.path }}?{{ request.url.query }}">
+              <div class="tracking-row">
+                <input type="text" name="tracking_no" value="{{ o.tracking_no or '' }}" placeholder="运单号" aria-label="物流单号">
+                <button class="btn sm primary">保存</button>
+                {% if o.tracking_no %}<button type="button" class="btn sm js-cancel-tracking">取消</button>{% endif %}
+              </div>
+              <div class="tracking-row">
+                <label class="check" title="保存后自动在飞书群里 @ 订单发送人同步物流单号">
+                  <input type="checkbox" name="sync" value="1" checked> 同步到群
+                </label>
+              </div>
+              <div class="tracking-sub">请及时填写物流单号，保存后勾选同步到群，会通知订单发起人{% if o.tracking_no %}（再勾选会以「物流单号更新」通知群里）{% endif %}。</div>
+            </form>
+            {% endif %}
+          </td>
+          <td class="nowrap"><a class="btn sm" href="/orders/{{ o.id }}/shipping">发货详情</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty">还没有已推单记录。在订单详情复制「推单信息」后，订单会标记为已推单并出现在这里。</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{{ help_modal('push') }}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 物流单号：默认只读显示，点「编辑」才把输入框放出来（单号改一次少一次，不能一直摊着让人随手改）。
+// 用内联 style.display 切换，不依赖 CSS 文件 —— 万一样式是缓存里的旧版本，也不会两个状态同时露出来。
+(function () {
+  function cellOf(el) { return el.closest('.tracking-cell'); }
+
+  function show(el, on) { if (el) { el.style.display = on ? '' : 'none'; } }
+
+  document.addEventListener('click', function (e) {
+    var edit = e.target.closest('.js-edit-tracking');
+    if (edit) {
+      var cell = cellOf(edit);
+      if (!cell) return;
+      show(cell.querySelector('.tracking-view'), false);
+      var form = cell.querySelector('.js-tracking-form');
+      show(form, true);
+      if (form) {
+        var input = form.querySelector('input[name="tracking_no"]');
+        if (input) { input.focus(); input.select(); }
+      }
+      return;
+    }
+    var cancel = e.target.closest('.js-cancel-tracking');
+    if (cancel) {
+      var c2 = cellOf(cancel);
+      if (!c2) return;
+      show(c2.querySelector('.js-tracking-form'), false);
+      show(c2.querySelector('.tracking-view'), true);
+    }
+  });
+})();
+</script>
+{% endblock %}

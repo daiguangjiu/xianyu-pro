@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}引流名片{% endblock %}
+{% block heading %}引流名片{% endblock %}
+{% block sub %}填一次生成一张带封面图的 H5 卡片，复制长链接贴到抖音群，对方看到的就是卡片而不是一串网址{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/share-cards/new">+ 新建名片</a>
+{% endblock %}
+{% block content %}
+
+{% if not site_https %}
+  <div class="note warn">
+    对外域名配的是 <b>{{ site_base or '（还没配）' }}</b> —— <b>不是 HTTPS</b>。
+    抖音爬虫对 http 地址基本不抓，卡片出不来。去「系统设置」把「对外访问地址」
+    改成 https 开头的（域名要已备案），再来建名片。
+  </div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin:0 0 8px;font-size:14.5px;">怎么用</h3>
+  <p class="help" style="margin:0 0 8px;">
+    ① 点「新建名片」填标题 / 简介 / 封面图 → ② 回到这页<b>复制长链接</b> →
+    ③ 粘到抖音群里，抖音后台爬虫来抓页面，几秒后链接就变成一张卡片。
+  </p>
+  <p class="help" style="margin:0 0 6px;">
+    <b>三条硬规矩</b>：域名要已备案 + 走 HTTPS；封面图必须是公网能直接打开的
+    HTTPS 绝对地址（系统里上传的图自动满足）、且是<b>横图 ≥1200×630</b>；OG 标签由服务端
+    写死在源码里 —— 抖音爬虫<b>不执行 JS</b>，靠脚本动态塞的一律抓不到。
+  </p>
+  <p class="help" style="margin:0 0 6px;">
+    ⚠️ <b>发出去只有一条纯文本链接、没变成卡片？</b>按顺序查：① 下面「封面」列有没有标
+    <span class="badge failed">图不合规</span>——<b>竖图和小于 1200×630 的图，抖音常常干脆不渲染卡片</b>；
+    ② 换了封面图后用「重新抓取」链接换个地址再发一次（抖音会缓存卡片）；
+    ③ 都合规还是只有纯文本，那就是抖音对普通外链本身就不展开卡片（平台侧行为，不认域名和 OG），
+    同一条链接发到<b>微信群</b>一般能出卡片。
+  </p>
+  <p class="help" style="margin:0;">
+    ⚠️ <b>风控提醒</b>：落地页里出现「微信 / vx / 加我 / 扫码」这类引流话术，
+    抖音可以吞卡片、拦截消息，严重的限制账号。系统<b>只提醒不拦</b>，用不用你自己掂量，
+    别拿它大规模群发。
+  </p>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>名片</th>
+          <th>长链接（复制到抖音群）</th>
+          <th>封面</th>
+          <th>状态</th>
+          <th>被打开</th>
+          <th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in rows %}
+        <tr>
+          <td>
+            <div style="font-weight:600">{{ c.name }}</div>
+            <div class="help" style="margin:2px 0 0;">{{ c.og_title }}{% if hits_of(c.og_title, c.og_desc, c.body_text) %} <span class="badge pending">有引流话术</span>{% endif %}</div>
+          </td>
+          <td>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+              <code class="mono-sm" style="word-break:break-all;">{{ card_url(c) }}</code>
+              <button type="button" class="btn sm" onclick="scCopy('{{ card_url(c) }}', this)">复制</button>
+            </div>
+            <div class="help" style="margin:4px 0 0;">
+              改了内容抖音还显示旧卡片？用这个换地址强制重新抓取：
+              <a href="javascript:void(0)" onclick="scCopy('{{ fresh_url(c) }}', this)">复制「重新抓取」链接</a>
+            </div>
+          </td>
+          <td>
+            {% if c.og_image %}
+              <img src="{{ c.og_image }}" alt="" style="width:64px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--c-line,#e5e7eb)">
+              {% set info = cover_info(c.og_image) %}
+              {% if info.width %}
+                <div class="help" style="margin:4px 0 0;">
+                  {{ info.width }}×{{ info.height }}
+                  {% if not info.ok %}<span class="badge failed" title="{{ info.advice }}">图不合规</span>{% endif %}
+                </div>
+              {% endif %}
+            {% else %}
+              <span class="help">没有封面图，卡片出不来</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if c.enabled %}<span class="badge done">在用</span>
+            {% else %}<span class="badge ignored">已停用</span>{% endif %}
+          </td>
+          <td class="mono-sm">{{ c.hits }}</td>
+          <td class="table-actions">
+            <a class="btn sm" href="/share-cards/{{ c.id }}/preview" target="_blank">预览</a>
+            <a class="btn sm" href="/share-cards/{{ c.id }}/edit">编辑</a>
+            <form method="post" action="/share-cards/{{ c.id }}/toggle" style="display:inline;">
+              <button class="btn sm" type="submit">{{ '停用' if c.enabled else '启用' }}</button>
+            </form>
+            <form method="post" action="/share-cards/{{ c.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('删除名片「{{ c.name }}」？链接会立刻失效。');">
+              <button class="btn sm" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p class="help" style="margin:0;">还没有名片：点右上「新建名片」填一张，长链接复制出来就能贴。</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function scCopy(text, btn) {
+  var done = function () {
+    var old = btn.dataset.old || btn.textContent;
+    btn.dataset.old = old;
+    btn.textContent = '已复制';
+    setTimeout(function () { btn.textContent = old; }, 1600);
+  };
+  // 非 HTTPS 页面上剪贴板 API 可能不可用，退回「选中让用户自己复制」
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(done, function () { prompt('复制这个链接：', text); });
+  } else {
+    prompt('复制这个链接：', text);
+  }
+}
+</script>
+{% endblock %}

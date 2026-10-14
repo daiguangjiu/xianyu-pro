@@ -1,0 +1,292 @@
+{# 采购节点：渔货栈「货源广场」顶部那份活动日历（日期窗口 + 图标 + 关键词） #}
+{% extends "base.html" %}
+{% block title %}采购节点{% endblock %}
+{% block heading %}采购节点{% endblock %}
+{% block sub %}渔货栈货源广场顶部的活动运营位：窗口内的节点排前面，点某个节点就直接按它的关键词过滤货源{% endblock %}
+{% block actions %}
+  <a class="btn" href="/sourcing">渔货栈发布管理</a>
+  <a class="btn" href="/products/new">去发布商品</a>
+{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>节点怎么起作用</b>
+      <div class="scope-note">改完渔货栈最多 60 秒生效</div>
+    </div>
+    <p class="help" style="margin:0;max-width:720px;">
+      ① 日期窗口决定节点是「进行中 / 即将开始 / 已结束」，渔货栈取最靠前的 3 个展示；
+      <b>结束日期早于开始日期</b>视为跨年（如年货节 12-25 ~ 01-20 自动落到次年）。<br>
+      ② <b>关键词</b>决定这个节点里能看到哪些货：商品标题命中任一关键词即归入该节点
+      （留空 = 通吃全品类）。用户在渔货栈点这个活动，feed 就按这些关键词过滤。<br>
+      ③ 除了关键词，运营还可以<b>手动配置</b>这个节点推哪几款（下面「手动配置的商品」）：
+      手动配置的<b>排在最前面</b>（当置顶用），关键词那套系统规则一点不变。
+    </p>
+  </div>
+</div>
+
+<div class="card">
+  <form method="post" action="/purchase-nodes/create">
+    <div class="field-row auto">
+      <div class="field"><label>节点名</label>
+        <input type="text" name="name" required maxlength="64" placeholder="如：双11大促">
+      </div>
+      <div class="field"><label>标识（可留空）</label>
+        <input type="text" name="node_key" maxlength="32" placeholder="如 double11">
+        <p class="help">留空按节点名自动生成；它出现在活动链接里，建好尽量别改</p>
+      </div>
+      <div class="field"><label>图标</label>
+        <select name="icon">
+          {% for value, text in icon_choices %}<option value="{{ value }}">{{ text }}（{{ value }}）</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>开始（MM-DD）</label>
+        <input type="text" name="start_md" required maxlength="5" placeholder="11-01">
+      </div>
+      <div class="field"><label>结束（MM-DD）</label>
+        <input type="text" name="end_md" required maxlength="5" placeholder="11-11">
+      </div>
+      <div class="field"><label>排序</label>
+        <input type="number" name="sort_order" value="100">
+        <p class="help">数字小的排前面</p>
+      </div>
+      <div class="field"><label>开启</label>
+        <label class="check"><input type="checkbox" name="enabled" value="1" checked> 在渔货栈展示</label>
+      </div>
+    </div>
+    <div class="field">
+      <label>关键词（一行一个，也可以逗号分隔）</label>
+      <textarea name="keywords" rows="2" placeholder="年货&#10;坚果&#10;礼盒&#10;红包"></textarea>
+      <p class="help">商品标题命中任一关键词即归入该节点；留空 = 通吃全品类（大促节点常这么用）</p>
+    </div>
+    <div class="field">
+      <label>备注</label>
+      <input type="text" name="note" maxlength="255" placeholder="如：今年双11 从 10-24 开始预售，到 11-13 收尾">
+    </div>
+    <div class="field-row">
+      <div class="field"><label>&nbsp;</label><button class="btn primary" type="submit">新增节点</button></div>
+    </div>
+  </form>
+</div>
+
+{# 当前状态预览：与渔货栈货源广场的排序口径完全一致 #}
+<div class="card">
+  <div class="row-between">
+    <b>当前状态（渔货栈看到的样子）</b>
+    <span class="help">共 {{ windows|length }} 个窗口，渔货栈只取前 3 个</span>
+  </div>
+  <div class="table-wrap" style="margin-top:10px;">
+    <table>
+      <thead>
+        <tr><th>顺序</th><th>节点</th><th>日期</th><th>状态</th><th>关键词数</th></tr>
+      </thead>
+      <tbody>
+        {% for w in windows %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td><i class="bi {{ w.icon }}"></i> {{ w.name }}</td>
+          <td class="mono-sm">{{ w.date_text }}</td>
+          <td>
+            {% if w.status == 'ongoing' %}<span class="badge done">进行中 · 剩 {{ w.days_left }} 天</span>
+            {% elif w.status == 'upcoming' %}<span class="badge pending">还有 {{ w.days_to_start }} 天</span>
+            {% else %}<span class="badge ignored">已结束</span>{% endif %}
+          </td>
+          <td>{{ w.keywords|length }}{% if not w.keywords %}（通吃全品类）{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="help">还没有节点：上面新增一个，或者重启一次让内置节点播种。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# 行内编辑的空表单（form 不能塞在 tr 里，统一提到表格前面用 form= 关联） #}
+{% for n in rows %}
+  <form method="post" action="/purchase-nodes/{{ n.id }}/edit" id="nodeEdit{{ n.id }}"></form>
+{% endfor %}
+
+<div class="card">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>节点名</th><th>标识</th><th>图标</th><th>开始</th><th>结束</th>
+          <th>关键词</th><th>排序</th><th>状态</th><th class="table-actions">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for n in rows %}
+        <tr>
+          <td><input form="nodeEdit{{ n.id }}" type="text" name="name" value="{{ n.name }}"
+                     maxlength="64" style="width:110px;"></td>
+          <td><input form="nodeEdit{{ n.id }}" type="text" name="node_key" value="{{ n.node_key }}"
+                     maxlength="32" style="width:110px;"></td>
+          <td>
+            <select form="nodeEdit{{ n.id }}" name="icon" style="width:120px;">
+              {% for value, text in icon_choices %}
+                <option value="{{ value }}" {% if value == n.icon %}selected{% endif %}>{{ text }}</option>
+              {% endfor %}
+              {% if n.icon and n.icon not in icon_choices|map('first')|list %}
+                <option value="{{ n.icon }}" selected>{{ n.icon }}（自定义）</option>
+              {% endif %}
+            </select>
+          </td>
+          <td><input form="nodeEdit{{ n.id }}" type="text" name="start_md" value="{{ n.start_md }}"
+                     maxlength="5" style="width:66px;"></td>
+          <td><input form="nodeEdit{{ n.id }}" type="text" name="end_md" value="{{ n.end_md }}"
+                     maxlength="5" style="width:66px;"></td>
+          <td><input form="nodeEdit{{ n.id }}" type="text" name="keywords" value="{{ n.keywords }}"
+                     maxlength="255" style="width:100%;min-width:200px;"></td>
+          <td><input form="nodeEdit{{ n.id }}" type="number" name="sort_order" value="{{ n.sort_order }}"
+                     style="width:70px;"></td>
+          <td>
+            {% if n.enabled %}<span class="badge done">展示中</span>
+            {% else %}<span class="badge ignored">已关闭</span>{% endif %}
+            {% if n.seeded %}<span class="badge template">内置</span>{% endif %}
+          </td>
+          <td class="table-actions">
+            <button class="btn" type="submit" form="nodeEdit{{ n.id }}">保存</button>
+            <form method="post" action="/purchase-nodes/{{ n.id }}/toggle" style="display:inline;">
+              <button class="btn" type="submit">{{ '关闭' if n.enabled else '开启' }}</button>
+            </form>
+            <form method="post" action="/purchase-nodes/{{ n.id }}/delete" style="display:inline;"
+                  onsubmit="return confirm('删除节点「{{ n.name }}」？');">
+              <button class="btn" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="help">还没有节点。</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="help" style="margin-top:12px;">
+    行内编辑：改完点这一行的「保存」。关键词语义是「标题包含」，所以别填太宽泛的词（如「的」）；
+    大促类节点留空关键词最省事 —— 所有货源都算这个活动的货。
+  </p>
+</div>
+
+{# —— 手动配置的商品（2026-10-11）：运营指定「这个活动就推这几款」，渔货栈里排最前 —— #}
+<div class="card">
+  <div class="row-between">
+    <div>
+      <b>手动配置的商品（置顶）</b>
+      <div class="scope-note">手动配置的排在这个活动的最前面；关键词匹配那套系统规则不变，两组去重后一起展示</div>
+    </div>
+    <span class="help">共 {{ item_options|length }} 款在架货源可选</span>
+  </div>
+
+  {% if rows %}
+    {% for n in rows %}
+    {% set mine = items_by_node.get(n.id, []) %}
+    <div style="border-top:1px solid var(--c-line, #e5e7eb);padding-top:10px;margin-top:12px;">
+      <div class="row-between">
+        <div>
+          <i class="bi {{ n.icon }}"></i> <b>{{ n.name }}</b>
+          <span class="muted">（{{ n.start_md }} ~ {{ n.end_md }}）已配 {{ mine|length }} 款</span>
+        </div>
+      </div>
+
+      {% if mine %}
+      <div class="table-wrap" style="margin-top:8px;">
+        <table>
+          <thead>
+            <tr><th style="width:44px;">顺序</th><th>商品</th><th>编号</th><th>状态</th><th class="table-actions">操作</th></tr>
+          </thead>
+          <tbody>
+            {% for it in mine %}
+            <tr>
+              <td class="muted">{{ loop.index }}</td>
+              <td>
+                {{ it.title or it.item_id }}
+                {% if it.note %}<div class="muted">{{ it.note }}</div>{% endif %}
+              </td>
+              <td class="mono-sm">{{ it.item_id }}</td>
+              <td>
+                {% if it.enabled %}<span class="badge done">置顶中</span>
+                {% else %}<span class="badge ignored">已停用（走关键词）</span>{% endif %}
+              </td>
+              <td class="table-actions">
+                <form method="post" action="/purchase-nodes/items/{{ it.id }}/move" style="display:inline;">
+                  <input type="hidden" name="dir" value="up">
+                  <button class="btn sm" type="submit" title="往上挪一位">↑</button>
+                </form>
+                <form method="post" action="/purchase-nodes/items/{{ it.id }}/move" style="display:inline;">
+                  <input type="hidden" name="dir" value="down">
+                  <button class="btn sm" type="submit" title="往下挪一位">↓</button>
+                </form>
+                <form method="post" action="/purchase-nodes/items/{{ it.id }}/toggle" style="display:inline;">
+                  <button class="btn sm" type="submit">{{ '停用' if it.enabled else '启用' }}</button>
+                </form>
+                <form method="post" action="/purchase-nodes/items/{{ it.id }}/remove" style="display:inline;"
+                      onsubmit="return confirm('把「{{ it.title or it.item_id }}」从节点「{{ n.name }}」撤下？');">
+                  <button class="btn sm" type="submit">撤下</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="help" style="margin:6px 0;">还没手动配商品：这个节点现在只看关键词（{% if n.keywords %}命中标题{% else %}通吃全品类{% endif %}）。</p>
+      {% endif %}
+
+      <form method="post" action="/purchase-nodes/{{ n.id }}/items/add" class="field-row" style="margin-top:8px;align-items:flex-end;">
+        <div class="field grow">
+          <label>加一款货进这个节点</label>
+          <input type="text" name="item_id" list="itemOptionList" placeholder="输入商品名 / 商家编码选一款（下拉是渔货栈在架货源）"
+                 oninput="nodeItemSearch(this)" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>备注（可留空）</label>
+          <input type="text" name="note" maxlength="255" placeholder="如：今年主推这款">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="btn primary" type="submit">加进节点</button>
+        </div>
+      </form>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="help" style="margin-top:10px;">还没有节点：上面新增一个之后，就能给它手动配商品。</p>
+  {% endif %}
+
+  <datalist id="itemOptionList">
+    {% for o in item_options %}
+    <option value="{{ o.item_id }}" label="{{ o.title }}（{{ o.item_code or o.item_id }}）"></option>
+    {% endfor %}
+  </datalist>
+  <p class="help" style="margin-top:12px;">
+    下拉里是渔货栈<b>在架</b>的货源（最多 {{ item_options|length }} 款，按最近同步排）；
+    下拉里翻不到就直接在框里填它的<b>商品编号</b>（如 hub-prd-14），编号不对会拦下来不会配错。
+    撤下只是不让它置顶，货源本身一点不动。
+  </p>
+</div>
+
+<script>
+  /* 下拉翻不到时按关键字现搜（下拉默认只带最近的一批） */
+  function nodeItemSearch(input) {
+    var word = (input.value || '').trim();
+    if (word.length < 1) { return; }
+    fetch('/purchase-nodes/item-options?keyword=' + encodeURIComponent(word))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var list = document.getElementById('itemOptionList');
+        if (!list) { return; }
+        list.innerHTML = '';
+        (data.items || []).forEach(function (it) {
+          var opt = document.createElement('option');
+          opt.value = it.item_id;
+          opt.label = it.title + '（' + (it.item_code || it.item_id) + '）';
+          list.appendChild(opt);
+        });
+      });
+  }
+</script>
+
+{% endblock %}

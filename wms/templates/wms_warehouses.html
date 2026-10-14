@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}仓库与货架{% endblock %}
+{% block sub %}仓库 → 区 → 货架 → 层 → 位：在这里维护，其它页面的仓库与库位都从它出（只能下拉选）{% endblock %}
+{% block actions %}<a class="btn" href="/wms/items">库存台账</a>{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 一项一行：左边固定「层级 / 名称 / 编码 / 挂着多少货」，右边一行控件 + 靠右的动作按钮组
+     （跟「商品字段」页一个套路，仓库一多也不会横七竖八） */
+  .wh-row { display: grid; grid-template-columns: 235px minmax(0, 1fr); gap: 10px 18px;
+    align-items: start; border-bottom: 1px solid var(--c-border); padding: 14px 0; margin: 0; }
+  .wh-row:last-child { border-bottom: none; }
+  .wh-meta .wh-name { font-size: 14px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+  .wh-meta .wh-code { font-family: var(--font-mono); font-size: 11px; color: var(--c-text-muted);
+    margin-top: 3px; overflow-wrap: anywhere; }
+  .wh-meta .wh-stat { font-size: 11.5px; color: var(--c-text-subtle); margin-top: 4px; line-height: 1.7; }
+  .wh-edit { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; }
+  .wh-edit .field { min-width: 108px; margin-bottom: 0; }
+  .wh-edit .field.grow { flex: 1 1 190px; }
+  .wh-edit select { width: auto; min-width: 108px; }
+  .wh-edit .check { white-space: nowrap; padding-bottom: 9px; }
+  .wh-acts { display: flex; gap: 6px; align-items: center; margin-left: auto; padding-bottom: 1px; }
+  @media (max-width: 900px) {
+    .wh-row { grid-template-columns: minmax(0, 1fr); }
+    .wh-acts { margin-left: 0; flex-wrap: wrap; width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="card">
+  <h2>怎么用</h2>
+  <p class="d">
+    五级：<b>仓库</b> → <b>区</b> → <b>货架</b> → <b>层</b> → <b>位</b>。默认 7 个仓
+    （待检仓 / 可售仓 / 维修仓 / 报修仓 / 拆机件仓 / 危废区 / 退货暂存区）是系统内置的；
+    货品的「所在仓」取第 1 级，「货架位置」取第 2 级往后。其它页面（移库 / 出库 / 盘点 / 检测台）
+    里的仓库与库位**都从这里出下拉**，现场只能选、不能手打。
+  </p>
+  <p class="d">
+    三条硬规矩：<b>内置 7 仓不能删</b>（分级路由按它入仓，可以改名 / 停用）；
+    <b>编码与层级建好就不能改</b>（货品、库存流水、批次、盘点单上都存着编码）——
+    要换编码或换层级，就「停用旧的 + 新建一个」；
+    <b>还在被引用的不能删</b>（有下级 / 有货挂着 / 有批次 / 有盘点单），改用「停用」。
+  </p>
+</div>
+
+{# 新增：层级决定上级候选（前端按 data-level 过滤，后端再校验一次） #}
+<div class="card">
+  <h2>新增仓库 / 区 / 货架</h2>
+  <form class="filters" method="post" action="/wms/warehouses">
+    <div class="field"><label for="n-level">层级</label>
+      <select id="n-level" name="level">
+        {% for lv in levels %}<option value="{{ lv.value }}" title="{{ lv.hint }}">{{ lv.label }}</option>{% endfor %}
+      </select></div>
+    <div class="field"><label for="n-parent">上级</label>
+      <select id="n-parent" name="parent_code">
+        <option value="">—（仓库不用选）</option>
+        {% for r in all_rows %}<option value="{{ r.code }}" data-level="{{ r.level }}">{{ r.full_path }}</option>{% endfor %}
+      </select></div>
+    <div class="field"><label for="n-code">编码（留空自动）</label>
+      <input id="n-code" type="text" name="code" placeholder="如 SALE-Q1 / SALE-A-01"></div>
+    <div class="field grow"><label for="n-name">名称</label>
+      <input id="n-name" type="text" name="name" placeholder="如 A 区 / 03 号货架 / 2 层"></div>
+    <div class="field"><label for="n-zone">等级区</label>
+      <select id="n-zone" name="grade_zone"><option value="">—（不限）</option>
+        {% for code, label in zones %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+      </select></div>
+    <div class="field" style="max-width:118px"><label for="n-sort">排序</label>
+      <input id="n-sort" type="number" name="sort" placeholder="留空排最后"></div>
+    <div class="field"><label>&nbsp;</label>
+      <label class="check"><input type="checkbox" name="can_out" value="1"> 可出库</label></div>
+    <button class="btn primary">新增</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>现有 {{ rows|length }} 项</h2>
+
+  <form class="filters" method="get" action="/wms/warehouses">
+    <div class="field grow"><label for="f-q">搜索</label>
+      <input id="f-q" type="text" name="q" value="{{ q }}" placeholder="编码 / 名称 / 上级"></div>
+    <div class="field"><label for="f-level">层级</label>
+      <select id="f-level" name="level">
+        <option value="0">全部层级</option>
+        {% for lv in levels %}<option value="{{ lv.value }}" {{ 'selected' if level == lv.value }}>{{ lv.label }}</option>{% endfor %}
+      </select></div>
+    <button class="btn">筛选</button>
+  </form>
+
+  {% for r in rows %}
+  {# 一行一项：保存 / 上下移 / 停用 / 删除都并进这一个表单（formaction 分流） #}
+  <form class="wh-row" method="post" action="/wms/warehouses">
+    <input type="hidden" name="wh_id" value="{{ r.row.id }}">
+    <div class="wh-meta">
+      <div class="wh-name">
+        <span class="badge muted">{{ r.level_label }}</span>
+        {{ r.name }}
+        {% if r.builtin %}<span class="badge processing2" title="分级路由按它入仓，不能删">内置</span>{% endif %}
+        {% if not r.enabled %}<span class="badge muted">已停用</span>{% endif %}
+      </div>
+      <div class="wh-code">{{ r.code }}</div>
+      <div class="wh-stat">
+        {{ r.full_path }}<br>
+        {{ r.item_count }} 台货挂着它{% if r.child_count %} · {{ r.child_count }} 个下级{% endif %}
+        {% if r.grade_zone %} · {{ r.grade_zone }} 区{% endif %}
+        {% if r.can_out %} · 可出库{% endif %}
+        {% if r.note %}<br>{{ r.note }}{% endif %}
+      </div>
+    </div>
+    <div class="wh-edit">
+      <div class="field grow"><label for="nm-{{ r.row.id }}">名称</label>
+        <input id="nm-{{ r.row.id }}" type="text" name="name" value="{{ r.name }}"></div>
+      <div class="field"><label for="pa-{{ r.row.id }}">上级</label>
+        <select id="pa-{{ r.row.id }}" name="parent_code">
+          {% if r.level == 1 %}<option value="">—（仓库不用选）</option>{% endif %}
+          {% for p in all_rows %}{% if p.level == r.level - 1 %}<option value="{{ p.code }}" {{ 'selected' if p.code == r.parent_code }}>{{ p.full_path }}</option>{% endif %}{% endfor %}
+        </select></div>
+      <div class="field" style="max-width:118px"><label for="zo-{{ r.row.id }}">等级区</label>
+        <select id="zo-{{ r.row.id }}" name="grade_zone"><option value="">—</option>
+          {% for code, label in zones %}<option value="{{ code }}" {{ 'selected' if r.grade_zone == code }}>{{ label }}</option>{% endfor %}
+        </select></div>
+      <div class="field" style="max-width:96px"><label for="so-{{ r.row.id }}">排序</label>
+        <input id="so-{{ r.row.id }}" type="number" name="sort" value="{{ r.sort }}"></div>
+      <div class="field"><label>&nbsp;</label>
+        <label class="check"><input type="checkbox" name="can_out" value="1" {{ 'checked' if r.can_out }}> 可出库</label></div>
+      <div class="field"><label>&nbsp;</label>
+        <label class="check"><input type="checkbox" name="enabled" value="1" {{ 'checked' if r.enabled }}> 启用</label></div>
+      <div class="wh-acts">
+        <button class="btn primary">保存</button>
+        <button class="btn" formaction="/wms/warehouses/{{ r.row.id }}/move?dir=up" formnovalidate
+                title="同层上移一位">↑</button>
+        <button class="btn" formaction="/wms/warehouses/{{ r.row.id }}/move?dir=down" formnovalidate
+                title="同层下移一位">↓</button>
+        <button class="btn" formaction="/wms/warehouses/{{ r.row.id }}/toggle" formnovalidate
+                title="停用后新作业的下拉里不再出现，历史货品与流水照旧">{{ '停用' if r.enabled else '启用' }}</button>
+        <button class="btn danger" formaction="/wms/warehouses/{{ r.row.id }}/delete" formnovalidate
+                onclick="return confirm('删除「{{ r.name }}」？有下级或有货挂着的删不掉（会提示改用停用）。')">删除</button>
+      </div>
+    </div>
+  </form>
+  {% endfor %}
+  {% if not rows %}{{ bits.empty('没有匹配的仓库 / 货架 —— 换个关键词，或上面新增一个') }}{% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 新增时「上级」只留正好小一级的候选：区（2 级）的上级只能是仓库（1 级），以此类推
+(function () {
+  var level = document.getElementById('n-level');
+  var parent = document.getElementById('n-parent');
+  if (!level || !parent) return;
+  function sync() {
+    var want = String(Number(level.value) - 1);
+    var firstOk = '';
+    Array.prototype.forEach.call(parent.options, function (opt) {
+      var ok = opt.dataset.level === want;
+      opt.hidden = !ok;
+      opt.disabled = !ok;
+      if (ok && !firstOk) firstOk = opt.value;
+    });
+    parent.disabled = want === '0';
+    if (want === '0') {
+      parent.value = '';
+    } else if (parent.selectedOptions.length === 0 || parent.selectedOptions[0].disabled) {
+      parent.value = firstOk;
+    }
+  }
+  level.addEventListener('change', sync);
+  sync();
+})();
+</script>
+{% endblock %}

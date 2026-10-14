@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}{{ '编辑商品' if item else '发布商品' }} · 商家后台{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="page-title">
+    <h1>{{ '编辑商品' if item else '发布商品' }}</h1>
+    <span class="page-subtitle">
+      提交后进入平台审核，审核通过自动上架到货源广场
+      {% if item and item.audit_status == 'approved' %}
+        — <strong style="color:var(--c-warning);">修改后会重新进入待审核并暂时下架</strong>
+      {% endif %}
+    </span>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/self/merchant/items" class="btn btn-outline-secondary">
+      <i class="bi bi-arrow-left"></i> 返回列表
+    </a>
+  </div>
+</div>
+
+<form method="post" action="{% if item %}/merchant/items/{{ item.item_id }}/edit{% else %}/merchant/items/new{% endif %}" autocomplete="off">
+  <div class="publish-layout">
+    <div class="publish-main">
+
+      <section class="form-section">
+        <header><span class="step">1</span> 商品类目</header>
+        <div class="section-body">
+          <div class="field">
+            <label>类目 <span class="req">*</span></label>
+            <select name="category_id" required>
+              <option value="">请选择类目</option>
+              {% for c in categories %}
+                <option value="{{ c.value }}" {% if item and item.category_id == c.value %}selected{% endif %}>{{ c.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <header><span class="step">2</span> 商品信息</header>
+        <div class="section-body">
+          <div class="field">
+            <label>商品标题 <span class="req">*</span></label>
+            <input type="text" name="title" required maxlength="80" placeholder="如：新款雪纺连衣裙 夏季女装"
+                   value="{{ item.title if item else '' }}">
+          </div>
+
+          <div class="field">
+            <label>卖点</label>
+            <input type="text" name="selling_points" placeholder="如：显瘦百搭 · 不起球 · 支持一件代发"
+                   value="{{ item.selling_points if item else '' }}">
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>商家编码</label>
+              <input type="text" name="item_code" placeholder="本店内部货号，便于对账"
+                     value="{{ item.item_code if item else '' }}">
+            </div>
+            <div class="field">
+              <label>主图地址（多张用英文逗号分隔）</label>
+              <input type="text" name="images" placeholder="https://... , https://..."
+                     value="{{ item.images|join(',') if item and item.images else '' }}">
+            </div>
+          </div>
+
+          <div class="field">
+            <label>图文详情</label>
+            <textarea name="detail_html" rows="4" placeholder="商品详情描述">{{ item.detail_html if item else '' }}</textarea>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <header><span class="step">3</span> 价格与库存</header>
+        <div class="section-body">
+          <div class="field-row four">
+            <div class="field">
+              <label>供货价 <span class="req">*</span></label>
+              <input type="number" step="0.01" min="0" name="cost_price" required
+                     value="{{ item.cost_price if item else '' }}">
+            </div>
+            <div class="field">
+              <label>渔货价</label>
+              <input type="number" step="0.01" min="0" name="fish_price"
+                     placeholder="学员看到的进货价，就是这个价"
+                     value="{{ item.fish_price if item and item.fish_price else '' }}">
+            </div>
+            <div class="field">
+              <label>售价 <span class="req">*</span></label>
+              <input type="number" step="0.01" min="0" name="sale_price" required
+                     value="{{ item.sale_price if item else '' }}">
+            </div>
+            <div class="field">
+              <label>划线价</label>
+              <input type="number" step="0.01" min="0" name="market_price"
+                     value="{{ item.market_price if item else '' }}">
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>库存 <span class="req">*</span></label>
+              <input type="number" min="0" name="stock" required
+                     value="{{ item.stock if item else 0 }}">
+            </div>
+            <div class="field">
+              <label>承诺发货时效（天）</label>
+              <input type="number" min="1" name="delivery_days"
+                     value="{{ item.delivery_days if item else 2 }}">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <header><span class="step">4</span> 物流与售后</header>
+        <div class="section-body">
+          <div class="field-row">
+            <div class="field">
+              <label>运费模板</label>
+              <input type="text" name="freight_template" placeholder="如：江浙沪包邮"
+                     value="{{ item.freight_template if item else '' }}">
+            </div>
+            <div class="field">
+              <label>售后说明</label>
+              <input type="text" name="after_sale" value="{{ item.after_sale if item else '7天无理由退换' }}">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div style="margin-top: var(--s-4); display:flex; gap: var(--s-2);">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-send"></i> {{ '保存修改' if item else '提交发布' }}
+        </button>
+        <a href="/self/merchant/items" class="btn btn-outline-secondary">取消</a>
+      </div>
+    </div>
+  </div>
+</form>
+{% endblock %}
