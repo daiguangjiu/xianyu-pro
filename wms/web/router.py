@@ -63,6 +63,7 @@ from ..models import (
     CATEGORY_LABELS,
     CATEGORY_MAPPING,
     CATEGORY_TREE,
+    GRADE_C,
     GRADE_CHOICES,
     GRADE_LABELS,
     LABEL_TYPES,
@@ -1169,6 +1170,8 @@ def wms_item_detail(request: Request, item_id: int, db: Session = Depends(get_db
         logs=wms_audit.of_entity(db, "item", item.id),
         part_rows=parts_service.of_item(db, item.id),
         part_choices=[[p, PART_LABELS[p]] for p in PART_CHOICES],
+        # C 档货：详情页给「开报修单」入口；已经开过单在走的直接给「查看报修单」（2026-10-14）
+        repair_order=repairs_service.open_order_of(db, item.id),
         warehouses=_warehouses(db),
         # 库位只能从「仓库与货架」维护的表里选（手打错了货就挂到一个不存在的库位上）
         locations=warehouse_service.location_options(db),
@@ -1671,8 +1674,26 @@ async def wms_api_submit(request: Request, db: Session = Depends(get_db)):
             "safety": record.safety_hit,
             "grade_label": grade_label(record.final_grade or record.suggest_grade),
             "item_url": f"/wms/items/{item.id}",
+            # C 档提示「去开报修单」：检测员手上就是这台货，别让人跳两级菜单去找（2026-10-14）
+            "repair": _repair_hint_of(db, item, record.final_grade or record.suggest_grade),
         }
     )
+
+
+def _repair_hint_of(db: Session, item: WmsItem, grade: str) -> dict | None:
+    """C 档提交后给检测台一个落点：这台货下一步就是寄修（2026-10-14）。
+
+    已经有单在走的给「看进度」，没单的给「开报修单」并把这台货带进开单页 ——
+    检测员手里拿着的就是这台，不让他再回列表里去认货。
+    """
+    if str(grade or "").upper() != GRADE_C:
+        return None
+    row = repairs_service.open_order_of(db, item.id)
+    if row:
+        return {"exists": True, "url": f"/wms/repairs/{row.id}", "no": row.order_no,
+                "text": f"这台已经在报修中（{row.order_no}）—— 去看进度"}
+    return {"exists": False, "url": f"/wms/repairs/new?item_id={item.id}", "no": "",
+            "text": "下一步：开报修单（寄出去之前先把凭证号留好）"}
 
 
 # ---------------------------------------------------------------- 检测台的即时打标签
@@ -2471,16 +2492,42 @@ def wms_repairs(request: Request, q: str = "", status: str = "", timeout: str = 
     )
 
 
+@router.get("/wms/repairs/new", response_class=HTMLResponse)
+def wms_repair_new(request: Request, item_id: int = 0, db: Session = Depends(get_db)):
+    """C 档货一键开报修单（2026-10-14）：从检测台 / 货品详情页带 `?item_id=` 直接落到这里。
+
+    货已经选好了，序列号从货品档案带出来 —— 现场不用再在一长串下拉里找货。
+    同一台货已经有单在走的（待送修 / 在途 / 已修回），页面顶部给提示并给「看这张单」。
+    """
+    item = db.get(WmsItem, _form_int(item_id))
+    existing = repairs_service.open_order_of(db, item.id) if item else None
+    return render(
+        "wms_repair_form.html",
+        request,
+        heading="开报修工单",
+        sub=(f"{item.display_code} · {item.title}" if item else "选一台要报修的 C 档货"),
+        crumb_path="/wms/repairs",
+        crumb_leaf="开单",
+        item=item,
+        existing=existing,
+        # 没带 item_id 时才需要挑货（列表页那张卡仍可就地开单）
+        candidates=[] if item else intake.list_items(db, grade="C", limit=200),
+        channels=list(REPAIR_CHANNEL_LABELS.items()),
+    )
+
+
 @router.post("/wms/repairs")
 async def wms_repair_create(request: Request, db: Session = Depends(get_db)):
     form = await request.form()
     item = db.get(WmsItem, _form_int(form.get("item_id")))
+    # 从「一键开单」页来的，校验不过要把人送回那一页（填的内容还在页面上，别丢）
+    back = str(form.get("return_to") or "/wms/repairs")
     if not item:
-        return _redirect("/wms/repairs", "请选择要报修的货品", "warn")
+        return _redirect(back, "请选择要报修的货品", "warn")
     try:
         row = repairs_service.create(db, item, form, operator=_user(request))
     except ValueError as exc:
-        return _redirect("/wms/repairs", str(exc), "warn")
+        return _redirect(back, str(exc), "warn")
     return _redirect(f"/wms/repairs/{row.id}", f"报修单 {row.order_no} 已创建")
 
 
@@ -2526,6 +2573,11 @@ async def wms_repair_action(request: Request, repair_id: int, db: Session = Depe
             repairs_service.close(db, repair_id, operator=operator,
                                   note=str(form.get("note") or ""))
             msg = "工单已结案"
+        elif action == "parts":
+            # 官方判不可修 / 修回来还不如拆：一次做完「判 D 档 + 转残值池 + 关单」
+            repairs_service.to_parts(db, repair_id, operator=operator,
+                                     note=str(form.get("note") or ""))
+            msg = "已转拆机件：货进拆机件仓，工单同步结案 —— 去「拆机件残值」登记主板 / 屏 / 电池残值"
         else:
             raise ValueError("未知动作")
     except ValueError as exc:

@@ -24,6 +24,14 @@
 </style>
 {% endblock %}
 {% block actions %}
+  {# C 档（2026-10-14）：这条路的下一站就是寄修，按钮给到手边 —— 有单在走就改成「看进度」 #}
+  {% if item.grade == 'C' %}
+    {% if repair_order %}
+    <a class="btn primary" href="/wms/repairs/{{ repair_order.id }}"><i class="bi bi-wrench"></i> 查看报修单（{{ repair_order.order_no }}）</a>
+    {% else %}
+    <a class="btn primary" href="/wms/repairs/new?item_id={{ item.id }}"><i class="bi bi-wrench-adjustable-circle"></i> 开报修单</a>
+    {% endif %}
+  {% endif %}
   <a class="btn primary" href="/wms/items/{{ item.id }}/edit">编辑货品</a>
   <a class="btn" href="/wms/inspect?code={{ item.barcode }}">去检测 / 复检</a>
   <a class="btn" href="/wms/labels">打标签</a>

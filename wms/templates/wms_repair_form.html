@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}开报修工单{% endblock %}
+{% block sub %}{{ sub }}{% endblock %}
+{% block actions %}<a class="btn" href="/wms/repairs">返回列表</a>{% endblock %}
+
+{% block content %}
+{% if existing %}
+<div class="note warn">
+  <b>这台货已经有单在走：</b><a href="/wms/repairs/{{ existing.id }}">{{ existing.order_no }}</a>
+  （状态 {{ existing.status }}）—— 同一台货不允许开第二张，去看那张的进度。
+</div>
+{% endif %}
+
+{% if not item and not candidates %}
+  {{ bits.empty('现在没有 C 档货（检测判到 C 之后这里才会出现可报修的货）') }}
+{% else %}
+<div class="grid grid-2">
+  {% if item %}
+  <div class="card">
+    <h2>这台货</h2>
+    <div class="kv">
+      <b>显示编码</b><span><a href="/wms/items/{{ item.id }}">{{ item.display_code }}</a></span>
+      <b>条码</b><span class="mono">{{ item.barcode }}</span>
+      <b>产品</b><span>{{ item.title }}</span>
+      <b>序列号 / IMEI</b><span class="mono">{{ item.serial_no or '—' }}</span>
+      <b>等级</b><span>{{ bits.grade_badge(item.grade) }}</span>
+    </div>
+    <p class="d">
+      序列号没带出来的要当场抄机身 / 包装箱 —— <b>官方没序列号不受理</b>，寄出去再补就来不及了。
+    </p>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h2>报修信息</h2>
+    <p class="d">
+      C1 线上（京东 / 400）<b>必须填凭证号</b>；C2 线下（授权网点）<b>必须留网点电话</b> —— 送修前先电话确认受理。
+    </p>
+    <form method="post" action="/wms/repairs">
+      <input type="hidden" name="return_to" value="/wms/repairs/new?item_id={{ item.id if item else 0 }}">
+      {% if item %}
+        <input type="hidden" name="item_id" value="{{ item.id }}">
+      {% else %}
+      <div class="field"><label for="r-item">要报修的货品</label>
+        <select id="r-item" name="item_id" required>
+          {% for it in candidates %}<option value="{{ it.id }}">{{ it.display_code }} · {{ it.title }}</option>{% endfor %}
+        </select></div>
+      {% endif %}
+      <div class="field-row auto">
+        <div class="field"><label for="r-ch">报修渠道</label>
+          <select id="r-ch" name="channel">{% for v, t in channels %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+        <div class="field grow"><label for="r-v">渠道 / 网点</label>
+          <input id="r-v" type="text" name="vendor" placeholder="京东服务 / XX 授权网点" required></div>
+        <div class="field"><label for="r-t">凭证号（C1 必填）</label>
+          <input id="r-t" type="text" name="ticket_no" placeholder="工单号 / 寄修单号"></div>
+      </div>
+      <div class="field-row auto">
+        <div class="field"><label for="r-sn">序列号 / IMEI</label>
+          <input id="r-sn" type="text" name="serial_no" value="{{ item.serial_no or '' }}" required></div>
+        <div class="field"><label for="r-cn">网点联系人</label>
+          <input id="r-cn" type="text" name="contact_name" placeholder="张师傅"></div>
+        <div class="field"><label for="r-cp">网点电话（C2 必填）</label>
+          <input id="r-cp" type="text" name="contact_phone" placeholder="寄修前先电话确认受理"></div>
+      </div>
+      <div class="field-row auto">
+        <div class="field"><label for="r-d">承诺时效（天）</label>
+          <input id="r-d" type="number" name="promise_days" value="15" min="1"></div>
+        <div class="field"><label for="r-p">垫付金额</label>
+          <input id="r-p" type="number" step="0.01" name="paid_amount" value="0"></div>
+        <div class="field grow"><label for="r-a">网点地址</label>
+          <input id="r-a" type="text" name="contact_addr" placeholder="寄修地址（选填）"></div>
+      </div>
+      <div class="field"><label for="r-f">故障描述（争议时是唯一凭证）</label>
+        <textarea id="r-f" name="fault_desc" rows="3" required placeholder="如：开机不充电，插充电器无反应，电池鼓包"></textarea></div>
+      <button class="btn primary"><i class="bi bi-wrench-adjustable-circle"></i> 开单</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

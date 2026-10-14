@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .timeutil import now as _now
 from .models import (
+    GRADE_D,
     REPAIR_C1,
     REPAIR_C2,
     REPAIR_CANCELLED,
@@ -21,7 +22,9 @@ from .models import (
     REPAIR_OPEN,
     REPAIR_RETURNED,
     REPAIR_SENT,
+    REPAIR_STATUS_LABELS,
     REPAIR_TIMEOUT_DAYS,
+    STATUS_OUT_REPAIR,
     STATUS_REWORK,
     WH_PENDING,
     WmsItem,
@@ -212,6 +215,72 @@ def close(session: Session, repair_id: int, operator: str = "", note: str = "") 
     row.updated_at = _now()
     audit.log(session, "repair", row.id, "repair", after="结案", operator=operator, note=note)
     session.commit()
+    return row
+
+
+def open_order_of(session: Session, item_id) -> WmsRepairOrder | None:
+    """这台货有没有还没收尾的报修单（待送修 / 在途 / 已修回）。
+
+    一键入口靠它判两件事：重复的给「查看报修单」，没单的才给「开报修单」——
+    同一台货不允许出现两张同时在走的单（钱垫两遍、回来对不上账）。
+    """
+    stmt = (
+        select(WmsRepairOrder)
+        .where(
+            WmsRepairOrder.item_id == item_id,
+            WmsRepairOrder.status.in_((REPAIR_OPEN, REPAIR_SENT, REPAIR_RETURNED)),
+        )
+        .order_by(WmsRepairOrder.id.desc())
+    )
+    return session.scalars(stmt).first()
+
+
+def to_parts(session: Session, repair_id: int, operator: str = "",
+             note: str = "") -> WmsRepairOrder:
+    """报修收尾的另一条出口：官方判不可修 / 修回来还不如拆 —— 关单 + 判 D 档 + 转残值池。
+
+    以前这步要两处跑：先在报修页结案，再跑去货品详情页点「转拆机件」，中间还夹一道
+    「只有 D 档能转」的拦 —— C 档点一下就被拒，人不知道下一步干嘛。这里一次做完：
+
+      ① 货还在外面（OUT_REPAIR）不让转 —— 手上有货才谈得上拆；
+      ② 不是 D 档的先判成 D（不可修的货不能挂着 C 档继续算账），并写清理由；
+      ③ 走 parts.to_parts 写 SCRAP 流水进拆机件仓；
+      ④ 关单（「转拆机件」本身就是结案，别让人再点一次结案）。
+    等级改过 → 全量重放流水把余额搬正（别指望增量补账，ledger.rebuild 是唯一准的）。
+    """
+    from . import parts as parts_service      # 延迟 import：parts 不依赖 repairs，防环
+
+    row = session.get(WmsRepairOrder, repair_id)
+    if not row:
+        raise ValueError("报修工单不存在")
+    if row.status in (REPAIR_CLOSED, REPAIR_CANCELLED):
+        raise ValueError(f"这张单已经{REPAIR_STATUS_LABELS.get(row.status, row.status)}了，不能再转拆机件")
+    item = session.get(WmsItem, row.item_id)
+    if not item:
+        raise ValueError("这台货已经不在库里了（可能已出库 / 核销）")
+    if str(item.status or "").upper() == STATUS_OUT_REPAIR:
+        raise ValueError("货还在外面（在途），先登记修回或撤单 —— 手上没货拆不了件")
+
+    reason = str(note or "").strip() or "官方判不可修 / 无维修价值"
+    if str(item.grade or "").upper() != GRADE_D:
+        item.grade = GRADE_D
+        item.grade_reason = reason
+        item.updated_at = _now()
+        audit.log(session, "item", item.id, "grade", after="判 D 档（报修不可修）",
+                  operator=operator, note=reason)
+
+    parts_service.to_parts(session, item, operator=operator,
+                           remark=f"报修转拆机件：{reason}")
+
+    row.status = REPAIR_CLOSED
+    row.closed_at = _now()
+    row.result_note = f"转拆机件：{reason}"
+    row.timeout_flag = False
+    row.updated_at = _now()
+    audit.log(session, "repair", row.id, "repair", after="结案转拆机件",
+              operator=operator, note=f"{item.display_code} → 拆机件仓")
+    session.commit()
+    ledger.rebuild(session)                    # 等级变了，余额必须重放
     return row
 
 

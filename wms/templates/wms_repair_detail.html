@@ -55,7 +55,16 @@
       <div class="field"><label for="x-r">撤单原因（必填，主管审批）</label><input id="x-r" type="text" name="reason"></div>
       <button class="btn danger">撤单（货回仓后需重新检测定级）</button>
     </form>
+    <h3 style="margin-top:16px">官方判不可修 / 修回来还不如拆</h3>
+    <form method="post" action="/wms/repairs/{{ order.id }}/actions"
+          onsubmit="return confirm('一次做完三件事：\n\n· 这台货判成 D 档（不可修的货不能挂着 C 档继续算账）\n· 写拆机件流水，货进拆机件仓\n· 本工单同步结案\n\n确定？')">
+      <input type="hidden" name="action" value="parts">
+      <div class="field"><label for="p-n">说明</label><input id="p-n" type="text" name="note" placeholder="如：官方判主板进水不可修"></div>
+      <button class="btn danger"><i class="bi bi-cpu"></i> 结案并转拆机件残值</button>
+    </form>
     <div class="note">
+      货<b>还在外面（在途）</b>时不能转 —— 手上有货才拆得成；转完去「拆机件残值」登记主板 / 屏 / 电池，
+      没有残值明细这台货关不了工时。<br>
       修回 / 撤单回仓<b>必须重新检测定级</b>，不得沿用送修前等级（维修过程可能引入新伤）。
     </div>
   </div>

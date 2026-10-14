@@ -382,6 +382,11 @@
         <span id="recheckText"></span>
         <button type="button" class="btn sm" id="rcSwitch" style="display:none">我要重新检测（覆盖上一轮）</button>
       </div>
+      {# 判到 C 档：提交后这里长出「去开报修单」按钮（2026-10-14）—— 检测员手里就是这台货 #}
+      <div class="note" id="repairBar" style="display:none">
+        <span id="repairText"></span>
+        <a class="btn sm" id="repairGo" href="#">去开报修单</a>
+      </div>
       {# 判「?」存疑（2026-10-11 用户：这一条要重点强调，否则没人知道要干什么）：
          它是提交前最后一道「拿不准怎么办」的出口 —— 做成橙色高亮卡片，勾上整块变实心橙。
          放在提交按钮正上方，视线不用来回找。 #}
@@ -628,6 +633,8 @@ async function load(code) {
   $('missing').checked = false; delete $('missing').dataset.user;
   $('inhouse').checked = false; $('official').checked = false;
   $('zoneFix').classList.remove('urge'); $('repairHint').innerHTML = '';
+  // 上一台的「去开报修单」条不能带到下一台（只有这台判 C 才会再长出来）
+  if ($('repairBar')) $('repairBar').style.display = 'none';
   $('autoPassNote').style.display = 'none';
   $('manualPrice').value = '';
   $('manualPrice').dataset.below = '';
@@ -1381,6 +1388,21 @@ async function submit() {
   if (!d.ok) { banner(d.message, 'err'); return; }
   banner(d.message + (d.safety ? ' —— 已按安全红线处置，禁止充电（先修不先废，修完重新评级）' : ''),
     d.safety ? 'warn' : 'ok');
+  // C 档直接给落点：这台货下一步就是寄修（一下就从检测台跳到开单页，货已经带过去）
+  {
+    const bar = $('repairBar');
+    if (bar) {
+      if (d.repair) {
+        $('repairText').textContent = d.repair.text;
+        $('repairGo').textContent = d.repair.exists ? '查看报修单' : '去开报修单';
+        $('repairGo').href = d.repair.url;
+        bar.style.display = '';
+      } else {
+        bar.style.display = 'none';
+        $('repairGo').href = '#';
+      }
+    }
+  }
   RESULTS = {}; DESCS = {}; PHOTOS = []; renderPhotos();
   $('finalGrade').value = ''; $('override').value = ''; $('uncertain').checked = false;
   wmsLocSet('location', '');
