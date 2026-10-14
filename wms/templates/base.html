@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   {# 2026-10-14 用户拍板：标签页标题统一带【渔集】前缀（渔枢 / 渔货栈同批加各自的） #}
   <title>【渔集】{% block title %}{% endblock %} · {{ system_name }}</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  {# 图标字体改成本地静态资源（2026-10-15）：以前引的是 cdn.jsdelivr.net，
+     国内网络下 TTFB 实测 0.5~2.5 秒、字体还得再取一次，每进一个页面都要先等它；
+     同一个文件本来就在 /static/vendor 里（3ms 出），直接用，不再出门。 #}
+  <link rel="stylesheet" href="/static/vendor/bootstrap-icons.css">
   <style>
     /* ============================================================
        货品检测入库出库管理系统（检测仓）· 设计系统
