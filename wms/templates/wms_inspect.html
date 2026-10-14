@@ -147,6 +147,10 @@
   .kv-cell .v.fish-hot { color:var(--c-primary); font-size:16px; font-weight:800;
     font-family:var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
     letter-spacing:.3px; }
+  /* 渔货号可点（2026-10-14）：虚线下划线 + 悬停变实线，点开是这一款的货品明细 */
+  .kv-cell .v.fish-hot a.fish-link { color:inherit; text-decoration:underline;
+    text-decoration-style:dotted; text-underline-offset:3px; }
+  .kv-cell .v.fish-hot a.fish-link:hover { text-decoration-style:solid; color:var(--c-primary-hover); }
   /* 同款归属弹窗的候选列表（2026-10-14）：一行一个可选渔货号 */
   .fm-list { display:flex; flex-direction:column; gap:8px; max-height:240px; overflow:auto; }
   .fm-it { display:grid; grid-template-columns:20px minmax(0,auto) minmax(0,1fr) auto;
@@ -171,9 +175,13 @@
   .photo-count { font-size:12px; color:var(--c-text-muted); margin-top:6px; display:flex;
     gap:8px; align-items:center; flex-wrap:wrap; }
   /* 检修后条码 + 打标签：现场是「填码 → 打标 → 贴标 → 提交」，一个格子里做完 */
-  .own-row { display:flex; gap:8px; align-items:center; }
+  .own-row { display:flex; gap:8px; align-items:stretch; }
   .own-row input { flex:1 1 auto; min-width:0; }
   .own-row .btn { white-space:nowrap; }
+  /* 打印标签按钮（2026-10-14 用户要求「明显显示」）：主色实心 + 打印机图标，
+     禁用态只压到 .8 —— 按钮在哪、能不能点，一眼就看得出来 */
+  #btnPrintLabel { font-weight:600; height:auto; }
+  #btnPrintLabel[disabled] { opacity:.75; }
   .label-state { color: var(--c-primary); font-weight:600; }
   .label-box { margin-top:8px; border:1px solid var(--c-border); border-radius:8px; padding:6px 10px 10px; }
   .label-box summary { cursor:pointer; font-size:12.5px; }
@@ -329,8 +337,10 @@
         <div class="field"><label for="ownBarcode">检修后条码（规整完贴自己的码）</label>
           <div class="own-row">
             <input id="ownBarcode" type="text" placeholder="贴完扫进来；没贴就留空">
-            <button type="button" class="btn sm" id="btnPrintLabel" disabled
-                    title="按当前建议档打一张标签：打完贴到机器上">打印标签</button>
+            {# 打印标签（2026-10-14 用户要求「明显显示」）：主色实心 + 打印机图标，
+               不再是个灰扑扑的小按钮；禁用态也只压到 .8，位置永远看得见 #}
+            <button type="button" class="btn primary" id="btnPrintLabel" disabled
+                    title="按当前建议档打一张标签：打完贴到机器上"><i class="bi bi-printer"></i> 打印标签</button>
           </div>
           <span class="own-state" id="ownCodeState"></span>
           <div class="hint">打完贴到机器上；
@@ -906,7 +916,7 @@ $('btnPrintLabel').addEventListener('click', async () => {
   if (!CUR || !CUR.item) { banner('先扫一台货再打标签', 'warn'); return; }
   const btn = $('btnPrintLabel');
   btn.disabled = true;
-  btn.textContent = '打印中…';
+  btn.innerHTML = '<i class="bi bi-printer"></i> 打印中…';
   try {
     const res = await fetch('/wms/api/label/print', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -941,7 +951,7 @@ $('btnPrintLabel').addEventListener('click', async () => {
     banner('标签没打成：网络不通（' + err + '）', 'warn');
   } finally {
     btn.disabled = false;
-    btn.textContent = '打印标签';
+    btn.innerHTML = '<i class="bi bi-printer"></i> 打印标签';
   }
 });
 
@@ -961,8 +971,12 @@ function renderHead(item, extraRows) {
   const qty = Number(item.qty || 1);
   const cells = [
     // 渔货号（2026-10-14 用户要求「检测台重点显示」）：商品维度的主 key，
-    // 一款一号 —— 摆在第一格并高亮（主色 + 加粗），扫进来第一眼看见的就是它
-    ['渔货号', item.fish_code || '—（还没补号）', '', 'fish-hot'],
+    // 一款一号 —— 摆在第一格并高亮（主色 + 加粗），扫进来第一眼看见的就是它。
+    // 2026-10-14 新加：有号就直接链到「货品明细」，点开看这一款挂着哪些条码商品
+    ['渔货号', item.fish_code
+      ? '<a class="fish-link" href="/wms/goods/' + encodeURIComponent(item.fish_code) + '"'
+        + ' target="_blank" title="点开看这一款下面挂着哪些条码商品">' + esc(item.fish_code) + '</a>'
+      : '—（还没补号）', '', 'fish-hot'],
     ['进货货号', item.sku_code || '—'],
     // 数量（2026-10-10）：同一个条码底下有几台 —— 台数错了整批都错，做成胶囊重点摆出来
     ['数量', '<span class="qty-pill' + (qty > 1 ? ' many' : '') + '">' + qty +
@@ -990,8 +1004,8 @@ function renderHead(item, extraRows) {
     '</span><span class="v' + (vcls ? ' ' + vcls : '') + '"' +
     (vcls === 'price-hot'
       ? ' title="渔货价 = 基准价 × 该档价格系数（在「分级规则 → 价格系数」里配）"' : '') +
-    // 数量格带胶囊徽标（HTML），其余一律转义后再进 DOM
-    '>' + (vcls === 'qty-hot' ? v : esc(v)) + '</span></div>').join('');
+    // 数量格带胶囊徽标、渔货号是个链接（HTML），其余一律转义后再进 DOM
+    '>' + (vcls === 'qty-hot' || vcls === 'fish-hot' ? v : esc(v)) + '</span></div>').join('');
   const rows = (extraRows || []).filter(r => String(r.value || '').trim());
   if (rows.length) {
     html += '<div class="kv-sep">导入沉淀的商品字段（' + rows.length +
