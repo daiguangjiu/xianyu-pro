@@ -85,11 +85,12 @@
 {% endblock %}
 
 {% block content %}
-{% set badge_map = {'pending_pay': 'bg-warning text-dark', 'paid': 'bg-info text-dark',
+{% set badge_map = {'pending_pay': 'bg-warning text-dark', 'confirming': 'bg-warning text-dark',
+                    'paid': 'bg-info text-dark',
                     'shipped': 'bg-primary', 'completed': 'bg-success', 'cancelled': 'bg-secondary'} %}
 
 {% if request.query_params.get('paid') %}
-  <div class="alert alert-success"><i class="bi bi-check-circle"></i> 支付成功，采购单已转入「待发货」，平台会照收货地址发货。</div>
+  <div class="alert alert-success"><i class="bi bi-check-circle"></i> 支付登记成功，采购单已转入「待确认」——运营经理确认收到转账后开始发货。</div>
 {% endif %}
 
 <div class="page-header">
@@ -270,6 +271,10 @@
           <div class="po-row"><span class="k">支付方式</span><span>{{ pay_methods.get(order.pay_method, '—') }}</span></div>
           <div class="po-row"><span class="k">支付流水号</span><span class="mono-sm">{{ order.pay_no or '—' }}</span></div>
           <div class="po-row"><span class="k">支付时间</span><span class="mono-sm">{{ order.paid_at | dt('%Y-%m-%d %H:%M') }}</span></div>
+          {% if order.status == 'confirming' %}
+            <div class="alert alert-warning mt-2 mb-0 py-2 small"><i class="bi bi-hourglass-split"></i>
+              等待运营经理确认收到转账；确认后本单转入「待发货」。</div>
+          {% endif %}
         {% else %}
           <div class="text-secondary small">还没付款{{ '（订单已取消）' if order.status == 'cancelled' else '，去收银台完成支付后平台才会发货' }}。</div>
         {% endif %}
@@ -281,6 +286,16 @@
       <div class="card-body d-flex flex-column gap-2">
         {% if order.status == 'pending_pay' %}
           <a href="{{ self_url('/pay/' ~ order.order_no) }}" class="btn btn-primary btn-sm">去支付 {{ money(order.pay_amount) }}</a>
+        {% endif %}
+        {% if order.status == 'confirming' %}
+          {# 运营经理核对线下转账到账后点这里，单子才算已支付 #}
+          <form method="post" action="{{ self_url('/purchases/' ~ order.order_no ~ '/actions') }}"
+                onsubmit="return confirm('确认已收到这笔转账？确认后采购单转入「待发货」')">
+            <input type="hidden" name="action" value="confirm_pay">
+            <button class="btn btn-success btn-sm w-100" type="submit">
+              <i class="bi bi-check2-circle"></i> 运营经理确认收款（转入待发货）
+            </button>
+          </form>
         {% endif %}
         {% if order.status == 'paid' and subs %}
           {# 合并单：发货要在子单上做（各发各的地址） #}
@@ -306,7 +321,7 @@
             <button class="btn btn-success btn-sm w-100" type="submit">确认收货，完成采购单</button>
           </form>
         {% endif %}
-        {% if order.status in ('pending_pay', 'paid') %}
+        {% if order.status in ('pending_pay', 'confirming', 'paid') %}
           <form method="post" action="{{ self_url('/purchases/' ~ order.order_no ~ '/actions') }}"
                 onsubmit="return confirm('确定取消这笔采购单？已支付的会按原路退款处理')" class="row g-2">
             <input type="hidden" name="action" value="cancel">

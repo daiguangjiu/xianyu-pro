@@ -19,7 +19,41 @@ class HealthOut(BaseModel):
     env: str
 
 
+# ====== Auth ======
+class AuthLoginOut(BaseModel):
+    authorize_url: str
+
+
+class AuthCallbackIn(BaseModel):
+    code: str
+    state: str | None = None
+
+
+class ShopOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    shop_id: str
+    shop_name: str | None
+    channel: str
+    is_active: bool
+    expires_at: datetime | None
+
+
 # ====== Goods ======
+class GoodsSyncRequest(BaseModel):
+    """手动触发商品同步任务时使用。"""
+
+    supplier_id: str | None = None
+    item_ids: list[str] | None = None
+    full: bool = False
+
+
+class GoodsSyncResponse(BaseModel):
+    task_id: str
+    accepted: int
+
+
 class SupplierItemOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -148,6 +182,18 @@ class GoodsAuditResultOut(BaseModel):
     failed_item_ids: list[str] = Field(default_factory=list)
 
 
+class GoodsSyncResultOut(BaseModel):
+    """同步任务结果汇总。"""
+
+    synced: int
+    created: int
+    updated: int
+    oversold: int
+    changed: int
+    failed: int
+    failure_items: list[str] = Field(default_factory=list)
+
+
 # ====== Selection ======
 class SelectionRunRequest(BaseModel):
     item_ids: list[str] | None = None  # None = 全量
@@ -236,14 +282,17 @@ class PurchaseConfirmPaidIn(BaseModel):
 
 # ====== Logistics ======
 class LogisticsCallbackIn(BaseModel):
-    """物流回写 webhook payload（人工推送 tracking 号的接入点）。"""
+    """1688 物流回写 webhook payload。
+
+    现阶段 1688 webhook 本身未启用；接口作为人工接入点。
+    """
 
     downstream_order_id: str | None = None
     ali_order_id: str | None = None
     shipping_no: str
     carrier: str | None = None
     status: str = "shipped"
-    source: str | None = "manual"
+    source: str | None = "1688"
     extra: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}{{ (head.product_name or head.title or '商品') }} · {{ fish_code }}{% endblock %}
+{% block sub %}渔货号 <b class="mono">{{ fish_code }}</b> —— 这一款下面挂着 {{ items | length }} 个条码商品 ·
+  合计 {{ total_qty }} 台 · 可售 {{ sellable_qty }} 台{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/wms/inspect?code={{ items[0].barcode }}">去检测这一款</a>
+  <a class="btn" href="/wms/items?q={{ fish_code }}">在库存台账里筛</a>
+  <a class="btn" href="/wms/goods">返回台账</a>
+{% endblock %}
+
+{% block content %}
+{# 商品维度四个数（2026-10-14）：这一款「有几个条码商品 / 一共几台 / 能卖几台」 ——
+   跟 /wms/items/{id}（一台货的页）那四个数对齐，看款与看台是同一套口径。 #}
+<div class="grid grid-4">
+  <div class="stat"><div class="label">渔货号</div>
+    <div class="value sm mono">{{ fish_code }}</div>
+    <div class="hint">一款一号 · 渔枢建档认它</div></div>
+  <div class="stat"><div class="label">条码商品</div>
+    <div class="value">{{ items | length }}</div>
+    <div class="hint">这一款下的物理条数</div></div>
+  <div class="stat"><div class="label">合计台数</div>
+    <div class="value">{{ total_qty }}</div>
+    <div class="hint">每条百货自带的数量加起来</div></div>
+  <div class="stat {{ 'bad' if sellable_qty == 0 else '' }}"><div class="label">可售台数</div>
+    <div class="value">{{ sellable_qty }}</div>
+    <div class="hint">渔枢 / 渔货栈的商品库存就是这个数</div></div>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <h2>商品信息</h2>
+    <div class="kv">
+      <b>渔货号</b><span class="mono">{{ fish_code }}</span>
+      <b>商品名称</b><span>{{ head.product_name or head.title or '—' }}</span>
+      <b>品牌</b><span>{{ head.brand or '—' }}</span>
+      <b>品类</b><span>{{ wms_category_label(head.category) }}</span>
+      <b>型号</b><span>{{ head.model or '—' }}</span>
+      <b>规格</b><span>{{ head.spec or '—' }}</span>
+      <b>市场价（基准价）</b><span>¥{{ money(head.base_price) }}</span>
+      <b>建议售价</b><span>{% if head.suggest_price %}¥{{ money(head.suggest_price) }}
+        <span class="muted" style="font-weight:400">（人工填过）</span>{% else %}—
+        <span class="muted" style="font-weight:400">（按等级系数算）</span>{% endif %}</span>
+      <b>进货价（参考）</b><span>¥{{ money(head.purchase_cost) }}</span>
+      <b>涉及批次</b><span>{% if facts.batches %}{% for b in facts.batches %}<span class="mono">{{ b }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% else %}—{% endif %}</span>
+      <b>建档时间</b><span>{{ head.created_at | dt }}</span>
+    </div>
+    <p class="d">商品维度的字段取这一款下<b>第一台</b>的值（同款多台各存一份，改某一台的请去它自己的库存台账页）。</p>
+  </div>
+
+  <div class="card">
+    <h2>库存分布</h2>
+    <div class="kv">
+      {% for w in facts.by_wh %}<b>{{ w.label }}</b><span class="num">{{ w.qty }} 台</span>{% endfor %}
+    </div>
+    <h3>按等级</h3>
+    <div class="kv">
+      {% for g in facts.by_grade %}<b>{{ g.label }}</b><span class="num">{{ g.qty }} 台</span>{% endfor %}
+    </div>
+    <h3>按状态</h3>
+    <div class="kv">
+      {% for s in facts.by_status %}<b>{{ s.label }}</b><span class="num">{{ s.qty }} 台</span>{% endfor %}
+    </div>
+    <p class="d">按<b>台数</b>算（一条百货可能自带好几台）；渔枢那边的商品库存只认「可售台数」。</p>
+  </div>
+</div>
+
+<div class="card flush">
+  <h2 style="padding:12px 14px 0;margin:0">这一款下的条码商品（{{ items | length }}）</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>条码</th><th>显示编码</th><th>进货货号</th>
+      <th class="num">数量</th><th>等级</th><th>状态</th><th>所在仓</th><th>批次</th>
+      <th class="num">进货价</th><th class="num">渔货价</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="num muted">{{ loop.index }}</td>
+        <td class="mono">{{ it.barcode or '—' }}</td>
+        <td class="nowrap"><a href="/wms/items/{{ it.id }}">{{ it.display_code }}</a></td>
+        <td class="mono">{{ it.sku_code or '—' }}</td>
+        <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}">{{ it.qty or 1 }}</span></td>
+        <td>{{ bits.grade_badge(it.grade) }}</td>
+        <td>{{ bits.status_badge(it.status) }}</td>
+        <td class="nowrap">{{ wms_warehouse_label(it.warehouse_code) }}{% if it.location_code %}
+          <div class="loc-sub" title="库位">{{ wms_location_label(it.location_code) }}</div>{% endif %}</td>
+        <td class="mono muted">{{ it.batch_no or '—' }}</td>
+        <td class="num">{{ bits.money_cell(it.purchase_cost) }}</td>
+        <td class="num">{{ bits.money_cell(it.selling_price) }}</td>
+        <td class="nowrap">
+          <a class="btn sm" href="/wms/items/{{ it.id }}/edit">改</a>
+          {% if op and 'wms.item.manage' in op.perms %}
+          {# 换绑：填目标渔货号 = 并进那一款；留空点「拆出来」= 从这一款里分出去单独发号 #}
+          <form method="post" action="/wms/items/{{ it.id }}/fish-code" class="inline-form">
+            <input type="hidden" name="fish_code" value="">
+            <button class="btn sm" title="从这一款里拆出来，单独给它发一个渔货号"
+                    onclick="return confirm('把 {{ it.display_code }} 从这一款里拆出来，单独发一个渔货号？')">拆出来</button></form>
+          <form method="post" action="/wms/items/{{ it.id }}/fish-code" class="inline-form">
+            <input type="text" name="fish_code" class="fish-input" placeholder="并入 YS…"
+                   title="填一个已存在的渔货号，这台货就归到那一款下面">
+            <button class="btn sm">并入</button></form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if op and 'wms.item.manage' in op.perms %}
+<div class="card">
+  <h2 style="margin:0 0 8px">整款合并</h2>
+  <p class="d">把这一款下的 {{ items | length }} 个条码商品一起挪到另一个渔货号下面（填了就是目标号，留空 = 整组重新发一个号）。
+    合并过去以后，那一款的可售台数会把这几台一起算进去。</p>
+  <form method="post" action="/wms/goods/{{ fish_code }}/merge" class="filters" style="margin-top:8px">
+    <div class="field grow"><label for="mg-t">目标渔货号</label>
+      <input id="mg-t" type="text" name="fish_code" placeholder="YS202610140001（留空则整组重新发号）"></div>
+    <div class="field"><label>&nbsp;</label>
+      <button class="btn primary" onclick="return confirm('整款合并后这一款的渔货号会变，确定？')">合并过去</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 行内「并入…」的输入框：跟着按钮走，别把操作列撑成两行 */
+  .fish-input{width:132px;display:inline-block;height:32px;padding:0 8px;margin-right:4px;
+    border:1px solid var(--c-border);border-radius:var(--r-input);font-size:12px;vertical-align:middle}
+  tbody td form.inline-form + form.inline-form{margin-left:6px}
+  /* 库存分布：一格一项，右对齐的数字好看 */
+  .card .kv .num{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+{% endblock %}

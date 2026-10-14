@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,8 @@ _VIEW_FIELDS = (
     "receiver_name",
     "receiver_phone",
     "receiver_address",
+    # 飞书发送人（运营姓名）——「我要录单」按它跟渔货栈对账（2026-10-14）
+    "sender_name",
     "xianyu_account",
     "sale_amount",
     "deal_amount",
@@ -140,3 +142,102 @@ def push_to_hub(db, dso) -> tuple[Any, str]:
     from app.services.dso_sync import sync_downstream_order
 
     return sync_downstream_order(db, dso)
+
+
+# ---------------------------------------------------------------- 飞书群报单 → 渔货栈录单
+# 2026-10-14「我要录单」（用户口径）：内部自营同学在飞书群发的单与渔货栈要一致 ——
+# 群里报了，录单列表里也有，按「运营姓名」（飞书发送人）对齐。
+GROUP_SYNC_DAYS = 7      # 只回看最近几天的群报单（再老的属于历史数据，不补建）
+GROUP_SYNC_LIMIT = 200   # 单轮最多搬多少条，防首屏查询被历史大表拖死
+
+
+def sync_group_orders(db, *, days: int = GROUP_SYNC_DAYS, limit: int = GROUP_SYNC_LIMIT) -> int:
+    """把飞书群报进渔枢系统的单同步成渔货栈录单（幂等，返回本次新建笔数）。
+
+    单号落成 ``FS-<渔枢系统单号>``，按它查重 —— 群里同一单同步多少遍都只建一条；
+    运营姓名取渔枢系统订单的 ``sender_name``（飞书发送人，收单时已解析）。
+    任何异常都吞掉：这是「锦上添花」的同步，不能把订单列表页打挂。
+    """
+    if not available() or _HubOrder is None:
+        return 0
+    from datetime import timedelta
+
+    from ..models import DownstreamOrder
+
+    created = 0
+    try:
+        from app.timeutil import now as _bj_now  # noqa: PLC0415
+
+        with _hub_session() as hub:
+            since = _hub_now() - timedelta(days=max(int(days or 7), 1))
+            rows = hub.scalars(
+                select(_HubOrder)
+                .where(_HubOrder.created_at >= since)
+                # 群里撤回的留档单不参与业务（沿用渔枢侧口径）
+                .where(or_(_HubOrder.is_recalled.is_(False), _HubOrder.is_recalled.is_(None)))
+                .order_by(_HubOrder.id.desc())
+                .limit(max(int(limit or 1), 1))
+            ).all()
+        for row in rows:
+            no = str(getattr(row, "order_no", "") or "").strip()
+            if not no:
+                continue
+            dso_no = f"FS-{no}"
+            exists = db.scalar(
+                select(DownstreamOrder).where(
+                    DownstreamOrder.downstream_order_id == dso_no
+                )
+            )
+            if exists is not None:
+                continue
+            operator = str(getattr(row, "sender_name", "") or "")
+            paid = float(getattr(row, "deal_amount", 0) or 0) or float(
+                getattr(row, "sale_amount", 0) or 0
+            )
+            msg_at = getattr(row, "msg_time", None) or getattr(row, "ordered_at", None)
+            note_bits = [f"飞书群报单同步（运营：{operator or '未知'}）"]
+            if msg_at is not None:
+                note_bits.append(f"报单时间 {msg_at:%Y-%m-%d %H:%M}")
+            dso = DownstreamOrder(
+                downstream_order_id=dso_no[:64],
+                channel="xianyu",
+                channel_sku_id="",
+                buyer_name=str(getattr(row, "receiver_name", "") or "")[:64],
+                buyer_phone=str(getattr(row, "receiver_phone", "") or "")[:32],
+                address=str(getattr(row, "receiver_address", "") or ""),
+                qty=max(int(getattr(row, "quantity", 0) or 1), 1),
+                sale_price=round(paid, 2),
+                fish_price=0,
+                status="pending",
+                raw_json={
+                    "source": "feishu_group",
+                    "owner": "",
+                    "operator": operator[:64],
+                    "title": str(getattr(row, "product_name", "") or "")[:255],
+                    "spec": str(getattr(row, "spec", "") or ""),
+                    "shop_name": str(getattr(row, "xianyu_account", "") or ""),
+                    "hub_order_no": no,
+                    "note": "；".join(note_bits),
+                    "images": [],
+                },
+                created_at=_bj_now(),
+                updated_at=_bj_now(),
+            )
+            db.add(dso)
+            created += 1
+        if created:
+            db.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("飞书群报单同步渔货栈失败（跳过）：%s", exc)
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+    return created
+
+
+def _hub_now():
+    """渔枢系统订单表的 created_at 是 UTC naive（与渔货栈同 clock），比较要同口径。"""
+    from app.timeutil import utc_now  # noqa: PLC0415
+
+    return utc_now().replace(tzinfo=None)

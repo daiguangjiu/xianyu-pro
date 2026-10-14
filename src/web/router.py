@@ -111,6 +111,7 @@ from src.self_purchase import (
     cart_count,
     cart_summary,
     complete_order,
+    confirm_pay,
     create_order,
     create_split_order,
     default_address,
@@ -1427,7 +1428,7 @@ def harbor_leaves() -> JSONResponse:
 
 
 # =====================================================================
-# 2.9 我要下单 /orders/new（选品商品订单 + 其他订单）
+# 2.9 我要录单 /orders/new（选品商品订单 + 其他订单）
 # =====================================================================
 # 「其他订单」的录入模板：与飞书群里报单的格式一致（照着填就不会漏字段）
 OTHER_ORDER_TEMPLATE = """【闲鱼订单】
@@ -1449,7 +1450,7 @@ def order_new_page(
     shop_id: str = "",
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """我要下单：闲鱼出单后在这儿补一笔在线订单。
+    """我要录单：闲鱼出单后在这儿录一笔在线订单。
 
     - 带 item_id 进来 = 选品商品订单（从「我的店铺商品」点的「下单」），商品自动带出来；
     - 不带 = 其他订单，按飞书群模板填，或传一张闲鱼订单详情图让系统认。
@@ -1490,7 +1491,7 @@ def order_new_page(
         _common_ctx(
             request, "orders", db=db,
             active_sub="orders:new",
-            nav_crumb=["交易", "订单", "我要下单"],
+            nav_crumb=["交易", "订单", "我要录单"],
             owner_name=name,
             shops=_my_shop_options(request),
             goods=goods,
@@ -1631,17 +1632,18 @@ async def order_create(request: Request, db: Session = Depends(get_db)) -> Redir
             shop_name=shop_name,
             note=val("note"),
             images=images,
+            operator=val("operator") or _name,
             source=(
                 manual_order.SOURCE_SHOP_GOODS if item_id else manual_order.SOURCE_OTHER
             ),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("手工下单落库失败：%s", exc)
-        return _redirect("/orders/new", f"下单失败：{exc}", "err")
+        logger.warning("手工录单落库失败：%s", exc)
+        return _redirect("/orders/new", f"录单失败：{exc}", "err")
 
     return _redirect(
         f"/orders/{row.downstream_order_id}",
-        f"订单已建（{row.downstream_order_id}）：待确认，确认后推给渔枢系统采购",
+        f"录单已建（{row.downstream_order_id}）：待确认，确认接单后进「待发货」",
     )
 
 
@@ -1662,6 +1664,13 @@ def orders_list(
     这里按单号把渔枢系统侧的事实取回来合并展示（只读，见 `src/web/hub_orders.py`）；
     单子还没推到渔枢系统就显示「未建档」，页面上能一键补推。
     """
+    # 2026-10-14「我要录单」：内部自营同学在飞书群报的单也按运营姓名同步进来，
+    # 幂等（同单号只建一次）；桥断了不挡订单列表。
+    try:
+        hub_orders.sync_group_orders(db)
+    except Exception:  # noqa: BLE001
+        logger.debug("飞书群报单同步失败（不挡订单列表）", exc_info=True)
+
     stmt = select(DownstreamOrder).order_by(DownstreamOrder.created_at.desc())
     if status:
         stmt = stmt.where(DownstreamOrder.status == status)
@@ -2496,6 +2505,48 @@ def _item_image_sets(item) -> tuple[list[str], list[str]]:
     return mains[:MAX_ZIP_IMAGES], _dedup_urls(details)[:MAX_ZIP_IMAGES]
 
 
+_IMAGE_MAGICS = (  # 常见位图的文件头：写包前验一遍，别再把 HTML 错误页当 jpg 打包
+    b"\xff\xd8\xff",              # JPEG
+    b"\x89PNG\r\n\x1a\n",         # PNG
+    b"GIF8",                      # GIF87a / GIF89a
+    b"RIFF",                      # WEBP（RIFF....WEBP）
+)
+
+
+def _looks_like_image(data: bytes | None) -> bool:
+    if not data:
+        return False
+    if any(data.startswith(m) for m in _IMAGE_MAGICS):
+        return True
+    return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
+def _read_local_image(url: str) -> bytes | None:
+    """站内图（``/media/...``）不走 HTTP 回环、直接读本地 media 目录。
+
+    以前 ``_images_zip_of`` 对站内图也发 httpx 回环请求 —— /media 没进免登录前缀，
+    服务端裸抓被鉴权中间件 303 到登录页，跟随重定向拿到 200 的 HTML 原样存成
+    jpg，解压出来全是空白图。站内图本来就在同一台机器的磁盘上，直接读又快又稳。
+    """
+    path = str(url or "").split("?", 1)[0].split("#", 1)[0]
+    if not path.startswith("/media/"):
+        return None
+    try:
+        from app.config import settings  # noqa: PLC0415
+
+        root = Path(str(getattr(settings, "media_path", ""))).resolve()
+        if not str(root):
+            return None
+        target = (root / path[len("/media/"):]).resolve()
+        if root != target and root not in target.parents:
+            return None  # 越出 media 目录的路径一律不给读
+        if not target.is_file():
+            return None
+        return target.read_bytes()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _abs_image_url(url: str, request: Request | None = None) -> str:
     """把图补成能抓的绝对地址。
 
@@ -2533,8 +2584,12 @@ def _images_zip_of(item, request: Request | None = None) -> tuple[bytes, str]:
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for folder, urls in (("主图", mains), ("详情图", details)):
             for index, url in enumerate(urls, 1):
-                data = _fetch(_abs_image_url(url, request))
-                if data is None:
+                # 站内 /media 图直接读本地磁盘（httpx 回环会被鉴权 303 到登录页，
+                # 登录页 HTML 存成 jpg 就是用户看到的「空白图」）；外链图才走抓取
+                data = _read_local_image(url)
+                if data is None and not url.startswith("/media/"):
+                    data = _fetch(_abs_image_url(url, request))
+                if not _looks_like_image(data):
                     failed.append(f"{folder} {index:02d}  {url}")
                     continue
                 zf.writestr(f"{folder}/{index:02d}{_ext_of(url)}", data)
@@ -3312,6 +3367,8 @@ async def purchase_action(request: Request, order_no: str, db: Session = Depends
     action = str(form.get("action") or "").strip().lower()
     if action == "cancel":
         cancel_order(db, order, str(form.get("reason") or ""))
+    elif action == "confirm_pay":
+        confirm_pay(db, order)
     elif action == "ship":
         mark_shipped(
             db, order,

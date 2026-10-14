@@ -2703,7 +2703,7 @@
           {% set order_subs = [
             ('orders:all',       self_url('/orders'),                  '全部订单', 'dso_total'),
             ('orders:pending',   self_url('/orders?status=pending'),   '待确认',   'pending'),
-            ('orders:confirmed', self_url('/orders?status=confirmed'), '待推单',   'confirmed'),
+            ('orders:confirmed', self_url('/orders?status=confirmed'), '待发货',   'confirmed'),
             ('orders:pushed',    self_url('/orders?status=pushed'),    '已推单',   'pushed'),
             ('orders:completed', self_url('/orders?status=completed'), '已完成',   'completed'),
             ('orders:exception', self_url('/orders?status=exception'), '异常单',   'exception'),
@@ -2800,10 +2800,10 @@
         ('harbor_rank', '热销榜单', self_url('/harbor?tab=hot'), 'bi-fire', '', 'harbor:rank'),
       ]),
       ('交易 · 订单', [
-        ('orders', '我要下单', self_url('/orders/new'), 'bi-cart-plus', '', 'orders:new'),
+        ('orders', '我要录单', self_url('/orders/new'), 'bi-pencil-square', '', 'orders:new'),
         ('orders', '全部订单', self_url('/orders'), 'bi-receipt', 'dso_total', 'orders:all'),
         ('orders', '待确认', self_url('/orders?status=pending'), 'bi-hourglass-split', 'pending', 'orders:pending'),
-        ('orders', '待推单', self_url('/orders?status=confirmed'), 'bi-send', 'confirmed', 'orders:confirmed'),
+        ('orders', '待发货', self_url('/orders?status=confirmed'), 'bi-send', 'confirmed', 'orders:confirmed'),
         ('orders', '已推单', self_url('/orders?status=pushed'), 'bi-truck', 'pushed', 'orders:pushed'),
         ('orders', '已完成', self_url('/orders?status=completed'), 'bi-check2-circle', 'completed', 'orders:completed'),
         ('orders', '异常单', self_url('/orders?status=exception'), 'bi-exclamation-octagon', 'exception', 'orders:exception'),

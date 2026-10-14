@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{# 我要下单（2026-10-11）：闲鱼出单后在这儿补一笔在线订单 —— 选品商品订单 / 其他订单
+{# 我要录单（2026-10-11 建，2026-10-14 改名）：闲鱼出单后在这儿补一笔在线订单 —— 选品商品订单 / 其他订单
    2026-10-12 重排：一张表塞不下那么多东西，改成「一块一件事」——
    ① 哪种单 ② 卖了什么 ③ 买家收货信息 ④ 备注与凭证；右边单独一栏盯着钱
    （成交价 / 渔货价 / 毛利），成交价低于渔货价当场红字提醒。 #}
-{% block title %}我要下单 · 渔货栈{% endblock %}
+{% block title %}我要录单 · 渔货栈{% endblock %}
 
 {% block head_extra %}
 <style>
@@ -89,10 +89,11 @@
 {# 页头走全站统一的 .page-header：标题 + 一行说明 + 右侧动作（别再自己造一个卡） #}
 <div class="page-header">
   <div class="page-title">
-    <h1>我要下单</h1>
+    <h1>我要录单</h1>
     <span class="page-subtitle">
-      闲鱼出单后在这儿补一笔：先选哪种单 → 填卖了什么 → 买家收货信息 → 核钱提交。
-      提交后进「全部订单」，状态是<b>待确认</b>，确认后才推给渔枢系统采购。
+      闲鱼出单后在这儿录一笔：先选哪种单 → 填卖了什么 → 买家收货信息 → 核钱提交。
+      提交后进「全部订单」，状态是<b>待确认</b>；确认接单后进「待发货」——
+      没上渔货栈的货直接发货，店里的货也可以推给渔枢系统采购。
     </span>
   </div>
   <div class="page-actions">
@@ -174,6 +175,12 @@
                 {% endfor %}
               </select>
               <input type="hidden" name="shop_name" id="fShopName" value="">
+            </div>
+            <div class="field">
+              <label for="fOperator">运营姓名</label>
+              <input type="text" name="operator" id="fOperator" value="{{ owner_name or '' }}"
+                     placeholder="谁录的这单（与飞书群报单人一致）">
+              <span class="help">在飞书群里发过单的写同一个名字，两边对得上账。</span>
             </div>
             <div class="field">
               <label for="fQty">数量</label>

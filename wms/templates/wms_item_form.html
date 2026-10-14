@@ -44,10 +44,12 @@
   /* —— ① 识别行（2026-10-12 用户要求重新排位）：货号带按钮所以宽一格，
         品牌 / 分类跟着排在它右边，产品 / 商品名称单独占一整行 —— */
   .field-row.id-row{grid-template-columns:minmax(300px,1.35fr) minmax(120px,.65fr) minmax(160px,1fr)}
+  /* 渔货号（2026-10-14）：商品维度的主 key，单独一行摆在最上面，别跟进货货号挤在一行 */
+  .field-row.fish-row{grid-template-columns:minmax(320px,1fr)}
   /* 系统生成货号：主色实心、跟输入框一样高，一眼能看见（原来是灰描边小按钮，人找不到） */
   .sku-btn{flex:0 0 auto;white-space:nowrap;min-height:38px;font-weight:600}
   @media (max-width:760px){
-    .field-row.id-row{grid-template-columns:minmax(0,1fr)}
+    .field-row.id-row,.field-row.fish-row{grid-template-columns:minmax(0,1fr)}
     .sku-btn{width:100%}
   }
 
@@ -122,22 +124,36 @@
     {# ==================== ① 货号与品类（高亮） ==================== #}
     <div class="frm-sec">
       <div class="frm-sec-head"><span class="num">1</span> 货号与品类
-        <span class="tip">扫码检测认的是<b>货号</b>；货上没号（非扫码场景）点「系统生成货号」让系统发一个</span></div>
+        <span class="tip"><b>渔货号是我们自己的商品货号</b>（一款一号）；货上没号就点「系统生成渔货号」让系统发一个</span></div>
       <div class="hl-box">
         <div class="frm-sub"><i class="bi bi-upc-scan"></i> 识别 · 货号（扫货与条码都靠它）</div>
+        {# —— 渔货号（2026-10-14）：商品维度的主 key，一款货一个号。
+           建档时就能指定：填了归到那一款下面（同款合并）；留空 = 提交时按商品名在全库
+           认亲（库里有同款就并进去，没有才发新号）。 —— #}
+        <div class="field-row fish-row">
+          <div class="field key"><label for="m-fishcode">渔货号
+            <span class="d" style="font-weight:400">（留空 = 按商品名自动归入同款）</span></label>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input id="m-fishcode" type="text" name="fish_code" class="mono"
+                     value="{{ values.fish_code }}" placeholder="YS202610140001"
+                     title="我们自己的商品货号：一款一个号，渔枢建档与库存都认它">
+              {% if mode == 'create' %}
+              {# 系统生成渔货号（2026-10-14 用户要求「升级为渔货号」）：
+                 以前这个按钮发的是进货货号（YC + 年月 + 流水，供应商那套外部编号），
+                 现在发渔货号（YS + 日期 + 当天流水）—— 商品维度的号才是主 key。
+                 规则见 wms/intake.py::next_fish_code #}
+              <button type="button" class="btn primary sku-btn" onclick="genFishCode()"
+                      title="系统发一个渔货号（YS + 日期 + 当天流水）；进货货号还空着时一并填上，免得卡住提交">
+                <i class="bi bi-magic"></i> 系统生成渔货号</button>
+              {% endif %}
+            </div></div>
+        </div>
         <div class="field-row id-row">
-          <div class="field key"><label for="m-sku">货号 <span class="req">*</span></label>
+          <div class="field key"><label for="m-sku">进货货号 <span class="req">*</span></label>
             <div style="display:flex;gap:6px;align-items:center">
               <input id="m-sku" type="text" name="sku_code" required value="{{ values.sku_code }}"
-                     placeholder="扫码商品的货号或条码，如果没有点击生成系统货号"
+                     placeholder="供应商清单上的编号（没有就点上面生成渔货号）"
                      oninput="renderSpecTable && renderSpecTable()">
-              {% if mode == 'create' %}
-              {# 系统生成货号（2026-10-12 用户要求）：货上没有清单号那种非扫码场景，
-                 点一下让系统按「YC + 年月 + 流水」发一个（规则见 wms/intake.py::next_sku_code） #}
-              <button type="button" class="btn primary sku-btn" onclick="genSkuCode()"
-                      title="货上没贴清单号时点它，系统发一个唯一货号（YC + 年月 + 流水）">
-                <i class="bi bi-magic"></i> 系统生成货号</button>
-              {% endif %}
             </div></div>
           <div class="field"><label for="m-brand">品牌</label>
             <input id="m-brand" type="text" name="brand" value="{{ values.brand }}" placeholder="美的"></div>
@@ -356,20 +372,24 @@
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function val(id) { var el = document.getElementById(id); return el ? String(el.value || '').trim() : ''; }
 
-  // —— 系统生成货号（2026-10-12 用户要求）——
-  // 非扫码场景：货上没贴清单号，点按钮让系统发一个「YC + 年月 + 4 位流水」的货号。
-  // 号由服务端查库发（同前缀取最大 +1），两个人同时点也不会撞。
-  function genSkuCode() {
-    var el = document.getElementById('m-sku');
+  // —— 系统生成渔货号（2026-10-14 用户要求：原来那个「系统生成货号」升级成发渔货号）——
+  // 渔货号是我们自己的商品货号（YS + 日期 + 当天 4 位流水，一款一号），非扫码场景
+  // 货上没号就点它让系统发一个。号由服务端查库发（同前缀取最大 +1），两个人同时点也不会撞。
+  function genFishCode() {
+    var el = document.getElementById('m-fishcode');
     if (!el) { return; }
-    fetch('/wms/batches/{{ batch.id }}/next-sku', { headers: { 'Accept': 'application/json' } })
+    fetch('/wms/batches/{{ batch.id }}/next-fish', { headers: { 'Accept': 'application/json' } })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        if (!d || !d.sku_code) { throw new Error('empty'); }
-        el.value = d.sku_code;
+        if (!d || !d.fish_code) { throw new Error('empty'); }
+        el.value = d.fish_code;
+        // 进货货号（供应商清单编号）还空着时就先用它顶上 —— 那格是必填，
+        // 没外部编号的货不该卡在这里交不上去。
+        var sku = document.getElementById('m-sku');
+        if (sku && !String(sku.value || '').trim()) { sku.value = d.fish_code; }
         renderSpecTable();     // 多规格那列的货号派生提示跟着刷新
       })
-      .catch(function () { alert('生成货号失败 —— 刷新页面再点一次'); });
+      .catch(function () { alert('生成渔货号失败 —— 刷新页面再点一次'); });
   }
   function hasSpecs() {
     return defs.filter(function (d) { return d.name && d.values.length; }).length > 0;

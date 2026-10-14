@@ -66,6 +66,8 @@ NAV_SECTIONS: tuple[NavSection, ...] = (
         "库存与出库",
         [
             NavItem("库存台账", "/wms/items", icon="bi-boxes", view="wms.item.view", write="wms.item.manage"),
+            # 货品台账（2026-10-14）：以渔货号为维度看「这一款货」，条码台账看的是「这一台货」
+            NavItem("货品台账", "/wms/goods", icon="bi-collection", view="wms.item.view", write="wms.item.manage"),
             NavItem("库存账本", "/wms/ledger", icon="bi-journal-text", view="wms.ledger.view"),
             NavItem("出库管理", "/wms/outbound", icon="bi-box-arrow-up", view="wms.outbound.view", write="wms.outbound.manage"),
         ],
@@ -121,6 +123,8 @@ _API_PERMS: dict[str, str] = {
     "/wms/api/label/preview": "wms.inspect.view",
     "/wms/api/label/print": "wms.inspect.manage",
     "/wms/api/label/check-code": "wms.inspect.view",
+    # 检测台里「并进这一款」（2026-10-14）：改的是货品的商品归属，按货品管理收口
+    "/wms/api/item/fish-code": "wms.item.manage",
 }
 
 # 谁都能进的路径（不需要任何检测仓权限，登录即可）

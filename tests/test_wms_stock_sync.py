@@ -3,7 +3,10 @@
 用户口径：**数量就是库存数** —— 渔集那边一台货卖出去（销售出库核销），渔枢商品档案的库存
 与渔货栈（货还在池子里）的库存都要跟着减；买家退货召回（货回来了）要加回去。
 
-认货靠条码：渔枢建档时「商家编码」直接复用渔集的条码，所以 ``Product.code == 条码``。
+**认货靠渔货号**（2026-10-14 起）：以前渔枢建档时「商家编码」直接复用渔集那台货的条码，
+同款多台就分散在好几个编码上；现在统一认渔集内部发的渔货号（``YS + 日期 + 流水``），
+``Product.code == 渔货号``，库存 = 这个渔货号下所有条码商品的合计台数。
+入口仍是条码（现场扫的就是它），``wms.bridge.push_stock`` 负责换算 + 同款合并。
 """
 from __future__ import annotations
 
@@ -69,8 +72,11 @@ class WmsStockSyncTest(unittest.TestCase):
         self.client.cookies.set(COOKIE_NAME, make_session(1)[0])
 
     # ------------------------------------------------------------ 造数据
-    def _wms_item(self, qty: int = 2) -> tuple[int, str]:
-        """渔集一条货：可售、S 档、在可售仓（出库要用的前置条件）。返回 (id, 条码)。"""
+    def _wms_item(self, qty: int = 2) -> tuple[int, str, str]:
+        """渔集一条货：可售、S 档、在可售仓（出库要用的前置条件）。
+
+        返回 ``(id, 条码, 渔货号)`` —— 渔货号是建档时自动认亲发出来的。
+        """
         with SessionLocal() as s:
             batch = intake.create_batch(
                 s, {"category": "HA", "source_type": "recycle", "qty_expected": qty,
@@ -89,10 +95,10 @@ class WmsStockSyncTest(unittest.TestCase):
             row.warehouse_code = "SALE"
             row.selling_price = 250.0
             s.commit()
-            return int(row.id), str(row.barcode)
+            return int(row.id), str(row.barcode), str(row.fish_code or "")
 
     def _product(self, code: str, stock: int = 2, skus: tuple[int, ...] = ()) -> int:
-        """渔枢商品：商家编码 = 渔集条码（扫条码建档就是这个口径）。"""
+        """渔枢商品：**商家编码 = 渔货号**（2026-10-14 起扫渔集货品建档写的就是它）。"""
         with SessionLocal() as s:
             product = Product(
                 name="测试破壁机", code=code, brand="美的", stock=stock,
@@ -123,11 +129,12 @@ class WmsStockSyncTest(unittest.TestCase):
 
     # ------------------------------------------------------------ 桥 / 服务
     def test_10_push_stock_hits_product_and_harbor(self):
-        """直接推一次：渔枢商品库存与渔货栈货源库存一起减。"""
-        _, code = self._wms_item(qty=1)
-        product_id = self._product(code, stock=2)
-        item_id = self._harbor_item(product_id, code, stock=2)
+        """直接推一次：**扫条码**进去，桥把它换成渔货号，渔枢与渔货栈库存一起减。"""
+        _, code, fish = self._wms_item(qty=1)
+        product_id = self._product(fish, stock=2)
+        item_id = self._harbor_item(product_id, fish, stock=2)
         report = wms_bridge.push_stock([(code, -1)])
+        self.assertTrue(fish.startswith("YS"), "建档要自动发渔货号")
         self.assertEqual(report["updated"], 1, report)
         self.assertEqual(report["missing"], [])
         with SessionLocal() as s:
@@ -135,9 +142,9 @@ class WmsStockSyncTest(unittest.TestCase):
             self.assertEqual(int(s.get(SupplierItem, item_id).stock or 0), 1)
 
     def test_15_missing_and_unmanaged(self):
-        """认不到的条码记进 missing；不管理库存（-1）的商品一个数字都不动。"""
-        _, code = self._wms_item(qty=1)
-        product_id = self._product(code, stock=-1)
+        """认不到的渔货号记进 missing；不管理库存（-1）的商品一个数字都不动。"""
+        _, code, fish = self._wms_item(qty=1)
+        product_id = self._product(fish, stock=-1)
         report = wms_bridge.push_stock([("NO-SUCH-CODE", -1), (code, -1)])
         self.assertEqual(report["missing"], ["NO-SUCH-CODE"])
         self.assertEqual(report["updated"], 0)
@@ -146,10 +153,13 @@ class WmsStockSyncTest(unittest.TestCase):
             self.assertEqual(int(s.get(Product, product_id).stock or 0), -1)
 
     def test_17_skus_absorb_the_change(self):
-        """有规格的商品：先扣规格、再回算商品级（商品级 = 各规格之和）。"""
-        _, code = self._wms_item(qty=1)
-        product_id = self._product(code, stock=5, skus=(2, 3))
-        wms_stock.apply_stock_deltas([(code, -3)])
+        """有规格的商品：先扣规格、再回算商品级（商品级 = 各规格之和）。
+
+        这里直接调渔枢自己的服务（不经过桥），所以传的就是渔货号本身。
+        """
+        _, code, fish = self._wms_item(qty=1)
+        product_id = self._product(fish, stock=5, skus=(2, 3))
+        wms_stock.apply_stock_deltas([(fish, -3)])
         with SessionLocal() as s:
             rows = list(s.scalars(select(ProductSku).where(
                 ProductSku.product_id == product_id).order_by(ProductSku.id)))
@@ -159,9 +169,10 @@ class WmsStockSyncTest(unittest.TestCase):
     # ------------------------------------------------------------ 出库 / 召回
     def test_20_sale_outbound_syncs_stock(self):
         """销售出库核销：货没了 → 渔枢与渔货栈库存跟着减（真的走一遍出库动作）。"""
-        item_id, code = self._wms_item(qty=2)
-        product_id = self._product(code, stock=2)
-        harbor_id = self._harbor_item(product_id, code, stock=2)
+        item_id, code, fish = self._wms_item(qty=2)
+        self.assertTrue(fish)
+        product_id = self._product(fish, stock=2)
+        harbor_id = self._harbor_item(product_id, fish, stock=2)
         with SessionLocal() as s:
             item = s.get(WmsItem, item_id)
             order = outbound.create(s, {"type": "SALE", "warehouse_code": "SALE",
@@ -176,8 +187,8 @@ class WmsStockSyncTest(unittest.TestCase):
             self.assertEqual(int(s.get(SupplierItem, harbor_id).stock or 0), 0)
 
     def test_25_missing_product_does_not_break_outbound(self):
-        """渔枢没这款商品（没扫过条码就建的货）：出库照旧成功，只是没得同步。"""
-        item_id, code = self._wms_item(qty=1)
+        """渔枢没这款商品（扫了渔集货品但没在渔枢建档）：出库照旧成功，只是没得同步。"""
+        item_id, code, fish = self._wms_item(qty=1)
         with SessionLocal() as s:
             item = s.get(WmsItem, item_id)
             order = outbound.create(s, {"type": "SALE", "warehouse_code": "SALE",
@@ -187,13 +198,14 @@ class WmsStockSyncTest(unittest.TestCase):
             order = outbound.ship(s, order.id, operator="t", waybill_no="SF123457")
             self.assertEqual(s.get(WmsItem, item_id).status, "SOLD")
         self.assertEqual(int(order.hub_sync.get("updated") or 0), 0)
-        self.assertEqual(order.hub_sync.get("missing"), [code])
+        # 报出来的是渔货号（渔枢那边的认货凭据就是这个）
+        self.assertEqual(order.hub_sync.get("missing"), [fish])
 
     def test_30_recall_adds_stock_back(self):
         """买家退货召回：货回到手上 → 渔枢与渔货栈库存加回去（终态唯一的出口）。"""
-        item_id, code = self._wms_item(qty=2)
-        product_id = self._product(code, stock=0)
-        harbor_id = self._harbor_item(product_id, code, stock=0)
+        item_id, code, fish = self._wms_item(qty=2)
+        product_id = self._product(fish, stock=0)
+        harbor_id = self._harbor_item(product_id, fish, stock=0)
         with SessionLocal() as s:
             row = s.get(WmsItem, item_id)
             row.status = "SOLD"

@@ -34,6 +34,12 @@
     border-radius: var(--r-input, 8px); padding: 9px 12px; }
   .fix-cat-row { display: flex; gap: 10px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
   .fix-cat-row select { min-width: 220px; }
+  /* 渔货号归并（2026-10-14）：导入前先把「这张表进来后会归成几款」摆出来 */
+  .fix-fish { margin: 10px 0 12px; font-size: 13px; line-height: 1.7;
+    background: var(--c-primary-soft, #eaf6f4); border: 1px solid var(--c-primary, #0d7f74);
+    border-radius: var(--r-input, 8px); padding: 9px 12px; }
+  .fix-fish .fp-it { display: inline-block; background: #fff; border: 1px solid var(--c-border);
+    border-radius: 4px; padding: 1px 7px; margin: 0 4px 4px 0; font-size: 12px; }
   @media (max-width: 900px) {
     .fields-table .hide-sm { display: none; }
   }
@@ -89,6 +95,29 @@
         {% for u in preview_unknown[1:4] %}「{{ u.raw | truncate(16, True, '…') }}」{% endfor %}
         {% if preview_unknown | length > 4 %}……{% endif %}</div>
       {% endif %}
+    </div>
+    {% endif %}
+    {# 渔货号归并（2026-10-14）：导入是按单品一行一台导的，同一款在清单里出现几次就是几行 ——
+       这里先把「这张表进来后会归成几款、几款并进已有的号」摆出来，并留出「整批并入指定号」
+       的口子（同一款被拆成几张表导、或者名字写走样了认错亲时用）。 #}
+    {% if fish_plan and fish_plan.total %}
+    <div class="fix-fish">
+      <div>这张表按<b>商品名</b>归并后是 <b>{{ fish_plan.total }} 款</b>：
+        其中 <b>{{ fish_plan.reuse }} 款</b>并进库里已有的渔货号，<b>{{ fish_plan.fresh }} 款</b>要新发号。
+        （导入是一行一台，同一款出现几次就是几行 —— 它们会并到同一个渔货号下面，按汇总算库存。）</div>
+      {% if fish_plan.groups %}
+      <div style="margin-top:6px">
+        {% for g in fish_plan.groups[:6] %}<span class="fp-it">{{ g.name or '（没名字）' }}
+          <b>{{ g.qty }}</b> 台 → {% if g.fish_code %}<span class="mono">{{ g.fish_code }}</span>{% else %}<span class="muted">新发号</span>{% endif %}</span>
+        {% endfor %}
+        {% if fish_plan.groups | length > 6 %}<span class="muted" style="font-size:12px">……还有 {{ fish_plan.groups | length - 6 }} 款</span>{% endif %}
+      </div>
+      {% endif %}
+      <div class="fix-cat-row">
+        <input type="text" name="fish_code" class="key-input" style="min-width:240px"
+               placeholder="整批并入指定渔货号（选填）YS202610140001">
+        <span class="muted">填了就不按名字认亲 —— 整批落进这一个号（同一款被拆成几张表导时用）</span>
+      </div>
     </div>
     {% endif %}
     {% if preview_errors %}

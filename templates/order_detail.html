@@ -73,6 +73,7 @@
         <div class="col-md-3"><div class="kpi-label">物流单号</div><div class="mono">{{ hub.tracking_no or '—' }}</div></div>
         <div class="col-md-6"><div class="kpi-label">商品</div><div>{{ hub.product_name or (dsos[0].raw_json.get('title') if dsos[0].raw_json else '') or '—' }}{% if hub.spec %} <span class="text-secondary">/ {{ hub.spec }}</span>{% endif %}</div></div>
         <div class="col-md-6"><div class="kpi-label">收货</div><div class="small">{{ hub.receiver_name or '—' }} {{ hub.receiver_phone or '' }}<span class="text-secondary d-block">{{ hub.receiver_address or '' }}</span></div></div>
+        <div class="col-md-3"><div class="kpi-label">运营</div><div>{{ hub.sender_name or (dsos[0].raw_json.get('operator') if dsos[0].raw_json else '') or '—' }}</div></div>
       </div>
       <div class="text-secondary mt-3" style="font-size:12px;">
         金额与推单状态由渔枢系统维护（那边是订单中台），渔货栈只读展示；要对账 / 改金额请到那边操作。

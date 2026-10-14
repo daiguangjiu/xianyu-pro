@@ -1654,16 +1654,18 @@
     var levels = (it.category_levels && it.category_levels.length)
       ? it.category_levels : (it.category_1688 || it.category_local || []);
     var matched = wmsSetCategory(levels);
-    // 商家编码直接复用渔集条码（终身唯一）：**锁死不可改** —— 它是渔集与渔枢之间的唯一关联键，
-    // 改了以后出库就没法把库存同步回这款商品了。SKU 编码跟着变成「条码-01」。
+    // 商家编码写的是**渔货号**（2026-10-14 起）：一款货一个号，渔集出库 / 退货召回按它
+    // 认回来改库存，库存 = 这个渔货号下所有条码商品的合计台数。**锁死不可改** ——
+    // 改了以后出库就没法把库存同步回这款商品了。SKU 编码跟着变成「渔货号-01」。
+    // （老货品还没补渔货号时退回条码，保证带得出来，统一补号之后就都是渔货号了）
     var codeInput = document.getElementById('codeInput');
-    if (codeInput && it.barcode) {
-      codeInput.value = it.barcode;
-      // 渔集带出来的条码锁死：它是两边唯一的关联键，改了库存就同步不回这款商品
+    var wmsCode = it.fish_code || it.barcode;
+    if (codeInput && wmsCode) {
+      codeInput.value = wmsCode;
       codeInput.setAttribute('readonly', 'readonly');
-      codeInput.setAttribute('title', '渔集条码（关联键，不可手改）');
+      codeInput.setAttribute('title', '渔集渔货号（关联键，不可手改）');
       var preview = document.getElementById('codePreview');
-      if (preview) { preview.textContent = it.barcode; }
+      if (preview) { preview.textContent = wmsCode; }
       if (typeof renderSkuTable === 'function') { renderSkuTable(); }
     }
     syncPreview();

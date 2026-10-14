@@ -130,6 +130,8 @@ _NEW_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
         # 2026-10-12：建议售价 —— 手工建档 / 编辑时人工填的建议零售价（照渔枢的价格口径）。
         # 留空（0）就按「市场价 × 建议售价系数」算；渔枢按条码带出资料时优先用它。
         ("suggest_price", "FLOAT DEFAULT 0", "FLOAT DEFAULT 0"),
+        # 2026-10-14：渔货号 —— 商品款编码（YS + 日期 + 当天流水），一个渔货号挂多个条码商品
+        ("fish_code", "VARCHAR(32) DEFAULT ''", "VARCHAR(32) DEFAULT ''"),
     ),
     # 注意：这张表以前在同一个 dict 里写了两次（后一次把前一次覆盖，mixed 补不上），
     # 现在合并成一个键，两列都会补。

@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 from sqlalchemy import func, or_, select
@@ -86,6 +87,180 @@ def next_sku_code(session: Session, at: datetime | None = None) -> str:
         if tail.isdigit():
             top = max(top, int(tail))
     return f"{prefix}{top + 1:04d}"
+
+
+FISH_PREFIX = "YS"
+# 认亲指纹里保留的字符：中英文数字，其余（空格 / 标点 / 全角符号）统统压掉
+_FISH_KEEP = re.compile(r"[^0-9a-z一-鿿]+")
+
+
+def fish_name_key(name: str) -> str:
+    """商品名指纹：**同一款货要不要认成同一个渔货号，全看它**。
+
+    同一款货在不同批次、不同供应商清单里写出来的名字常常只差一两个符号
+    （``飞利浦电动牙刷 HX2431`` 与 ``飞利浦电动牙刷HX2431 `` 必须是一款），
+    所以比对前先把大小写、空格、标点、全角符号全去掉，只留字。
+    """
+    return _FISH_KEEP.sub("", str(name or "").strip().lower())
+
+
+def next_fish_code(
+    session: Session,
+    at: datetime | None = None,
+    used: "Iterable[str] | None" = None,
+) -> str:
+    """渔货号：``YS + 建档日期(8 位) + 当天 4 位流水``（例 ``YS202610140001``）。
+
+    ``used`` 是**这次还没落库就已经用掉的号**（批量回填场景）：批量补号时几百行
+    要一次发几百个号，库里 read 出来的最大流水还是 0 —— 不把它们算进来，
+    一整批货会全挤在同一个渔货号上。
+
+    三套号各管一段，互不干涉：
+      ``barcode``   条码 ``QC…``     入库顺序 + 品类，终身不变（物理的那台货）
+      ``sku_code``  进货货号         供应商清单上的外部编号（一台一个，去重不了）
+      ``fish_code`` 渔货号 ``YS…``   渔集自己的**商品款**（同款多台挂一个）
+    """
+    moment = at or _now()
+    prefix = f"{FISH_PREFIX}{moment.strftime('%Y%m%d')}"
+    top = 0
+    for code in session.scalars(
+        select(WmsItem.fish_code).where(WmsItem.fish_code.like(f"{prefix}%"))
+    ).all():
+        tail = str(code or "")[len(prefix):]
+        if tail.isdigit():
+            top = max(top, int(tail))
+    for code in used or ():
+        raw = str(code or "")
+        if raw.startswith(prefix):
+            tail = raw[len(prefix):]
+            if tail.isdigit():
+                top = max(top, int(tail))
+    return f"{prefix}{top + 1:04d}"
+
+
+def fish_index(session: Session) -> dict[str, str]:
+    """把库里的「商品名指纹 → 渔货号」一次性捞出来（建档批量认亲用）。
+
+    有了它 ``register`` 就一行也不用再查一次全表 —— 直接拿字典比对。
+    """
+    out: dict[str, str] = {}
+    for fish, name in session.execute(
+        select(WmsItem.fish_code, WmsItem.product_name).where(WmsItem.fish_code != "")
+    ).all():
+        key = fish_name_key(name)
+        if key and key not in out:
+            out[key] = str(fish or "")
+    return out
+
+
+def resolve_fish_code(
+    session: Session,
+    name: str,
+    index: dict[str, str] | None = None,
+    at: datetime | None = None,
+) -> str:
+    """给一行新货定渔货号：**先认亲**（库里有同款就挂进去），认不到才发新号。
+
+    ``index`` 传 ``fish_index(session)`` 的结果以避免逐行查库（建档批量场景）。
+    没有商品名的货（老数据 / 手录）认不了亲，一律发新号 —— 事后可以在台账页合并。
+    """
+    pool = fish_index(session) if index is None else index
+    key = fish_name_key(name)
+    if key:
+        hit = pool.get(key)
+        if hit:
+            return hit
+    code = next_fish_code(session, at=at)
+    if key:
+        pool[key] = code
+    return code
+
+
+def set_fish_code(session: Session, item: WmsItem, code: str, operator: str = "") -> WmsItem:
+    """把一台货挂到某个渔货号上 —— **台账页的合并 / 拆分就靠它**。
+
+    ``code`` 传一个已存在的渔货号 = 并进去；传空串 = **拆出来**单独发一个新渔货号
+    （同一款货其实是两台不同的东西，比如成色差得多不想放在一起卖）。
+    渔货号只认现有 / 新发两种，不校验存在性（挂到不存在的号上没有意义，但也不至于出错）。
+    """
+    raw = str(code or "").strip().upper()
+    if not raw:
+        raw = next_fish_code(session)
+    before = str(item.fish_code or "")
+    if raw == before:
+        return item
+    item.fish_code = raw
+    item.updated_at = _now()
+    audit.log(session, "item", item.id, "fish_code", before=before, after=raw,
+              operator=operator, note="渔货号换绑" if before else "补发渔货号")
+    session.commit()
+    return item
+
+
+def find_items_by_fish(session: Session, code: str) -> list[WmsItem]:
+    """一个渔货号下挂着的所有条码商品（台账详情 / 检测台挑货用）。"""
+    raw = str(code or "").strip().upper()
+    if not raw:
+        return []
+    return list(
+        session.scalars(
+            select(WmsItem).where(WmsItem.fish_code == raw).order_by(WmsItem.id)
+        ).all()
+    )
+
+
+def fish_groups(session: Session) -> dict[str, dict]:
+    """**每个渔货号一行概览**：``{渔货号: {name, brand, items, qty, keys}}``。
+
+    一次扫全表攒出来（几千台也就一遍），检测台的「同款候选」与台账都靠它，
+    免得逐款回库再查一次。``keys`` 是这个号下面出现过的**商品名指纹**集合 ——
+    同一款下面几台货的名字可能写得略有出入（多个空格、多一个后缀），都得认。
+    """
+    out: dict[str, dict] = {}
+    for row in session.scalars(
+        select(WmsItem).where(WmsItem.fish_code != "").order_by(WmsItem.id)
+    ).all():
+        code = str(row.fish_code or "").strip().upper()
+        slot = out.get(code)
+        if slot is None:
+            slot = out[code] = {
+                "fish_code": code,
+                "name": str(row.product_name or ""),
+                "brand": str(row.brand or ""),
+                "items": 0, "qty": 0, "keys": set(),
+            }
+        slot["items"] += 1
+        slot["qty"] += int(row.qty or 0) or 1
+        key = fish_name_key(row.product_name)
+        if key:
+            slot["keys"].add(key)
+    return out
+
+
+def fish_candidates(session: Session, item: WmsItem, limit: int = 5) -> list[dict]:
+    """「这台货是不是跟库里某一款其实是同一个东西」—— 检测台的归属弹窗靠它。
+
+    导入是**按单品一行一台**导进来的，同一款货写了几个略有出入的名字就会被发成
+    好几个渔货号。扫到这种货时给检测员一句提醒：库里还有 N 个号跟它同名，
+    要不要并进去（并进去 = 那一款下面多一台、它的库存跟着加）。
+
+    只认**别的**渔货号（自己现在挂的那个不算），按那一款下面已有的台数倒序。
+    """
+    if item is None:
+        return []
+    key = fish_name_key(getattr(item, "product_name", "") or "")
+    if not key:
+        return []   # 没有商品名的货认不了亲，别乱提示
+    cur = str(getattr(item, "fish_code", "") or "").strip().upper()
+    hits = []
+    for code, group in fish_groups(session).items():
+        if code == cur or key not in group["keys"]:
+            continue
+        hits.append({"fish_code": code, "name": group["name"],
+                     "brand": group["brand"], "items": group["items"],
+                     "qty": group["qty"]})
+    hits.sort(key=lambda x: (-int(x["items"]), x["fish_code"]))
+    return hits[:max(1, int(limit or 1))]
 
 
 def next_batch_no(session: Session, at: datetime | None = None) -> str:
@@ -292,6 +467,7 @@ def register(
     yymm = (_now()).strftime("%y%m")
     created: list[WmsItem] = []
     seq_pool: dict[str, int] = {}  # 一级品类 → 下一个流水（本批内自己往上加，不重复查库）
+    fish_pool = fish_index(session)  # 商品名指纹 → 渔货号（本批认亲用，同款挂同一个渔货号）
     for raw in rows:
         # 品类按行定（混合批次）：条码里的品类码跟着这一行走，不是整批一个
         category = str(raw.get("category") or "").strip().upper() or batch.category
@@ -304,6 +480,8 @@ def register(
         barcode = barcode_of(category, yymm, seq)
         if session.scalar(select(WmsItem).where(WmsItem.barcode == barcode)):
             raise ValueError(f"条码重复（{barcode}），请重试")
+        # 渔货号：行里显式带了就认它（历史数据迁移 / 手工指定），否则按商品名认亲
+        product_name = str(raw.get("product_name") or "").strip()
         item = WmsItem(
             barcode=barcode,
             display_code=display_code_of(barcode),
@@ -312,7 +490,9 @@ def register(
             inbound_order_id=inbound_order_id,
             category=category,
             brand=str(raw.get("brand") or "").strip(),
-            product_name=str(raw.get("product_name") or "").strip(),
+            product_name=product_name,
+            fish_code=str(raw.get("fish_code") or "").strip().upper()
+            or resolve_fish_code(session, product_name, index=fish_pool),
             model=str(raw.get("model") or "").strip(),
             spec=str(raw.get("spec") or "").strip(),
             serial_no=str(raw.get("serial_no") or "").strip(),
@@ -381,6 +561,7 @@ def register_bulk(
     sku_code: str = "",
     own_barcode: str = "",
     extra: dict | None = None,
+    fish_code: str = "",
 ) -> list[WmsItem]:
     """按型号批量：同型号多台，只有序列号不同（Excel 导入的序列号走这里）。
 
@@ -415,6 +596,8 @@ def register_bulk(
             "selling_price": selling_price, "suggest_price": suggest_price,
             "category": category, "sku_code": sku_code, "own_barcode": own_barcode,
             "extra": dict(extra or {}),
+            # 渔货号（2026-10-14）：整批同型号 = 同一款，指定/认亲都走 register
+            "fish_code": str(fish_code or "").strip().upper(),
         }
         for value in cleaned
     ]
@@ -443,6 +626,13 @@ def find_item(session: Session, code: str) -> WmsItem | None:
     if row:
         return row
     row = session.scalar(select(WmsItem).where(WmsItem.sku_code == raw))
+    if row:
+        return row
+    # 渔货号（2026-10-14）：扫的是「这一款」而不是某一台 —— 认到里面挂的第一台，
+    # 检测台要靠 ``find_items_by_fish`` 把同款的几台列出来让人挑（与扫货号同一条规矩）。
+    row = session.scalar(
+        select(WmsItem).where(WmsItem.fish_code == raw.upper()).order_by(WmsItem.id)
+    )
     if row:
         return row
     return session.scalar(select(WmsItem).where(WmsItem.serial_no == raw))
@@ -671,6 +861,7 @@ def _items_query(
                 WmsItem.spec.like(like),
                 WmsItem.serial_no.like(like),
                 WmsItem.sku_code.like(like),
+                WmsItem.fish_code.like(like),
                 WmsItem.own_barcode.like(like),
                 WmsItem.batch_no.like(like),
             )

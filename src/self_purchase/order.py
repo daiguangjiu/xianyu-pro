@@ -28,12 +28,15 @@ logger = logging.getLogger(__name__)
 
 STATUS_TEXT = {
     "pending_pay": "待支付",
+    # 2026-10-14 用户拍板：支付不走线上，用户付完款（转账）后要运营经理确认钱到没到，
+    # 确认完才算「已支付（待发货）」——所以 paid 前面多一个「待确认」。
+    "confirming": "待确认",
     "paid": "待发货",
     "shipped": "已发货",
     "completed": "已完成",
     "cancelled": "已取消",
 }
-STATUS_ORDER = ["pending_pay", "paid", "shipped", "completed", "cancelled"]
+STATUS_ORDER = ["pending_pay", "confirming", "paid", "shipped", "completed", "cancelled"]
 
 PAY_METHODS = {
     "balance": "账户余额",
@@ -366,6 +369,8 @@ def sync_parent_status(db: Session, parent: StockOrder, *, commit: bool = True) 
         parent.cancel_reason = parent.cancel_reason or "子单全部取消"
     elif any(s == "pending_pay" for s in statuses):
         parent.status = "pending_pay"
+    elif any(s == "confirming" for s in statuses):
+        parent.status = "confirming"
     elif any(s in ("paid", "shipped") for s in statuses):
         parent.status = "shipped" if any(s == "shipped" for s in statuses) else "paid"
         parent.shipped_at = parent.shipped_at or next(
@@ -430,10 +435,11 @@ def status_counts(db: Session, owner: str) -> dict[str, int]:
 
 
 def pay_order(db: Session, order: StockOrder, method: str, *, commit: bool = True):
-    """模拟支付：只有待支付能付；成功后状态转「待发货」并记支付流水号。
+    """模拟支付：只有待支付能付；付完转「待确认」，运营经理确认到账后才进「待发货」。
 
-    合并单（2026-10-12）：母单付一次钱，下面的子单跟着一起变成「待发货」——
-    各子单分别发货，钱还是只收这一次。
+    支付不走线上（2026-10-14 用户拍板）：用户线下转账后在这里登记支付方式 / 流水号，
+    运营经理核实钱确实到账了，点「确认收款」单子才算已支付。合并单（2026-10-12）：
+    母单付一次钱，下面的子单跟着一起进「待确认」——各子单分别发货，钱还是只收这一次。
     """
     if order.status != "pending_pay":
         return False, f"当前是「{status_text(order.status)}」，不能支付"
@@ -443,7 +449,7 @@ def pay_order(db: Session, order: StockOrder, method: str, *, commit: bool = Tru
         beijing_now().strftime("%Y%m%d%H%M%S"), random.randint(0, 9999)
     )
     order.paid_at = utc_now()
-    order.status = "paid"
+    order.status = "confirming"
     db.flush()
 
     subs: list[StockOrder] = []
@@ -456,6 +462,35 @@ def pay_order(db: Session, order: StockOrder, method: str, *, commit: bool = Tru
             sub.pay_method = pay_method
             sub.pay_no = order.pay_no
             sub.paid_at = order.paid_at
+            sub.status = "confirming"
+            db.flush()
+
+    if commit:
+        db.commit()
+        db.refresh(order)
+    else:
+        db.flush()
+
+    extra = f"，已拆成 {len(subs)} 张子单分别发货" if len(subs) > 1 else ""
+    return True, (
+        f"支付登记成功（{pay_method_text(pay_method)}），等待运营经理确认收款{extra}"
+    )
+
+
+def confirm_pay(db: Session, order: StockOrder, *, commit: bool = True):
+    """运营经理确认收到转账 → 单子转「已支付（待发货）」，并记进渔枢系统资金页。
+
+    合并单：确认母单 = 全部子单一起确认（钱是同一笔）。
+    """
+    if order.status != "confirming":
+        return False, f"当前是「{status_text(order.status)}」，不用确认收款"
+    order.status = "paid"
+    db.flush()
+
+    subs: list[StockOrder] = []
+    if str(order.order_kind or "normal") == "main":
+        subs = [sub for sub in sub_orders(db, order) if sub.status == "confirming"]
+        for sub in subs:
             sub.status = "paid"
             db.flush()
 
@@ -465,12 +500,12 @@ def pay_order(db: Session, order: StockOrder, method: str, *, commit: bool = Tru
     else:
         db.flush()
 
-    # 付款后把这笔采购记进渔枢系统的资金页（应付流水），否则那边只看到销售订单的钱。
+    # 确认到账才算这笔采购应付发生：把这笔采购记进渔枢系统的资金页（应付流水）。
     # 合并单：按**子单**各记一条（母单再记一遍钱就重了）
     for row in (subs or [order]):
         _sync_paid_to_hub(row)
-    extra = f"，已拆成 {len(subs)} 张子单分别发货" if len(subs) > 1 else ""
-    return True, f"支付成功（{pay_method_text(pay_method)}），等待平台发货{extra}"
+    extra = f"，{len(subs)} 张子单一并确认" if len(subs) > 1 else ""
+    return True, f"已确认收款，采购单转入「待发货」{extra}"
 
 
 def _sync_paid_to_hub(order) -> None:
@@ -517,7 +552,7 @@ def cancel_order(db: Session, order: StockOrder, reason: str = "", *, commit: bo
         return False, f"当前是「{status_text(order.status)}」，不能取消"
     if order.status == "shipped":
         return False, "已发货的采购单不能直接取消，请联系平台处理"
-    paid = order.status == "paid"
+    paid = order.status in ("paid", "confirming")  # 待确认＝钱已转出，取消同样按退款处理
     order.status = "cancelled"
     order.cancelled_at = utc_now()
     order.cancel_reason = (reason or "").strip() or ("已支付，取消后退款" if paid else "未支付取消")
@@ -614,7 +649,8 @@ def progress_of(order: StockOrder, subs: list[StockOrder] | None = None) -> list
         ship_label = f"分批发货 {shipped_cnt}/{sub_total}"
     flow = [
         ("pending_pay", "提交订单", order.created_at),
-        ("paid", "支付完成", order.paid_at),
+        ("confirming", "支付完成 · 待确认", order.paid_at),
+        ("paid", "已确认收款", order.paid_at),
         ("shipped", ship_label, order.shipped_at),
         ("completed", "已完成", order.completed_at),
     ]

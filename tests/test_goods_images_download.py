@@ -55,16 +55,21 @@ class GoodsImagesDownloadTest(unittest.TestCase):
             s.query(ChannelListing).delete()
             s.query(SupplierItem).delete()
             s.commit()
-        # zip 里的图是 httpx 抓的：这里替掉抓图函数，回一张最小的 PNG
-        from src.self_purchase import shop_pool
+        # 2026-10-14 起站内 /media 图不再 httpx 回环抓（那是「空白图」的根因），
+        # 打包直接读本地磁盘 —— 测试里把真图落进 media 目录，走的线上同一条链路
+        from app.config import settings
 
-        self._origin_fetch = shop_pool._fetch
-        shop_pool._fetch = lambda url: PNG
+        self._media_dir = Path(str(settings.media_path)) / "test"
+        self._media_dir.mkdir(parents=True, exist_ok=True)
+        self._made_files = []
+        for name in ("main.jpg", "2.jpg", "3.jpg", "d1.jpg", "d2.jpg"):
+            target = self._media_dir / name
+            target.write_bytes(PNG)
+            self._made_files.append(target)
 
     def tearDown(self) -> None:
-        from src.self_purchase import shop_pool
-
-        shop_pool._fetch = self._origin_fetch
+        for made in getattr(self, "_made_files", []):
+            made.unlink(missing_ok=True)
         with SessionLocal() as s:
             s.query(SupplierItem).delete()
             s.commit()

@@ -967,6 +967,8 @@ class WmsItem(Base):
         Index("ix_wms_item_warehouse", "warehouse_code"),
         # 货号：供应商清单 / Excel 里带来的编号，扫码枪扫它就是扫这台货
         Index("ix_wms_item_sku", "sku_code"),
+        # 渔货号：点进台账认这一款货（一个渔货号下挂着 N 条码商品）
+        Index("ix_wms_item_fish", "fish_code"),
         # 检修后自己贴的码（扫码也要认它）
         Index("ix_wms_item_own", "own_barcode"),
         Index("ix_wms_item_import", "import_id"),
@@ -994,9 +996,15 @@ class WmsItem(Base):
     # 口径：**流转整台走**（入库 / 出库 / 报修 / 核销都按整台的数量进出，不拆分），
     # 库存余额与流水 qty_delta 都用这个数（见 ledger.apply）。
     qty: Mapped[int] = mapped_column(Integer, default=1)
-    # 货号（2026-10-08）：Excel 导入带来的供应商货号 / 款号 —— 现场检测**扫货号**就认这台货，
-    # 与系统条码 QC… 是两套号：条码终身不变、货号是外部编号（可以重复，按批内唯一校验）。
+    # 进货货号（2026-10-08，原名「货号」2026-10-14 改名）：Excel 导入带来的供应商货号 / 款号
+    # —— 现场检测**扫货号**就认这台货，与系统条码 QC… 是两套号：条码终身不变、
+    # 货号是**外部编号**（一台一个，同一个供应商货号不能去重），所以内部认「款」不用它。
     sku_code: Mapped[str] = mapped_column(String(64), default="")
+    # 渔货号（2026-10-14）：渔集自己的**商品款**编码 —— ``YS + 建档日期 + 当天 4 位流水``。
+    # 它是一个款级别的概念：**一个渔货号对应多个条码商品**（同款多台、多次收货、多批次），
+    # 货品台账以它为维度（见 ``intake.next_fish_code`` / ``resolve_fish_code``）。
+    # 渔枢系统的商品档案（商家编码）与库存也认它：库存 = 该渔货号下所有条码商品的合计台数。
+    fish_code: Mapped[str] = mapped_column(String(32), default="")
     # 检修后条码（2026-10-08）：检修规整完**自己重新贴的码**（不再用供应商那个）——
     # 供应商货号可能重号 / 磨花，自有码一码一台、终身唯一，复检与出库扫它就够。
     own_barcode: Mapped[str] = mapped_column(String(64), default="")

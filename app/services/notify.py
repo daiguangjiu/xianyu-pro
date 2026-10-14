@@ -1068,6 +1068,52 @@ def sync_tracking_to_group(
 
 
 # ------------------------------------------------------------------ 主入口
+def _already_receipted(session, order_id: int, message_id: str) -> str:
+    """同一订单是不是已经发过归档回执了（返回那条消息的 id，没有则空串）。"""
+    stmt = (
+        select(RawMessage.message_id)
+        .where(
+            RawMessage.order_id == order_id,
+            RawMessage.notify_status == "sent",
+            RawMessage.notify_kind == "receipt",
+            RawMessage.message_id != message_id,
+        )
+        .limit(1)
+    )
+    if session is not None:
+        return str(session.scalar(stmt) or "")
+    with SessionLocal() as own:
+        return str(own.scalar(stmt) or "")
+
+
+def _ensure_formal_order_no(session, order) -> str:
+    """订单号还是临时编号时，拿已归档的订单截图再认一次正式单号。
+
+    返回补齐后的订单号（没认出来则返回原值）。异常一律吞掉：回执下发不能
+    被这个兜底动作拖死；OCR 没启用时 reocr_order 自己会返回 False。
+    """
+    no = str(getattr(order, "order_no", "") or "")
+    if not no or not no.startswith(("TMP-", "AUTO-")):
+        return no
+    try:
+        from . import ingest as ingest_service  # 延迟导入，避开 notify <-> ingest 循环依赖
+
+        if session is not None:
+            upgraded, _note = ingest_service.reocr_order(session, order)
+            return str(getattr(order, "order_no", "") or "") if upgraded else no
+        with SessionLocal() as own:
+            own_order = own.get(Order, order.id)
+            if own_order is None:
+                return no
+            upgraded, _note = ingest_service.reocr_order(own, own_order)
+            if own_order.order_no:
+                order.order_no = own_order.order_no
+            return str(own_order.order_no or "") if upgraded else no
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("回执前补识别订单号失败 order=%s: %s", getattr(order, "id", ""), exc)
+    return no
+
+
 def _send_receipt(
     msg: RawMessage,
     order: Order,
@@ -1099,8 +1145,22 @@ def _send_receipt(
     # 幂等：同一条消息只回执一次
     if not force and msg.notify_status == "sent":
         return "skipped", "已回执过，跳过重复下发"
+    # 幂等：同一订单的归档回执只发一次
+    # 群里常有「一条模板 + 多张截图」，图片会拆成多条消息逐条重跑归档流程，
+    # 逐条各回执一份就是同一单在群里连刷好几条（线上实例 2026-10-14：一单刷了 3 条）。
+    # 退单 / 撤单 / 重复单提醒不走这条：它们各有自己的提醒用途，且关键度高。
+    if not force and kind == "receipt" and order.id:
+        dup = _already_receipted(session, order.id, msg.message_id)
+        if dup:
+            return "skipped", f"同订单归档回执已下发过（{dup[:12]}…），跳过重复下发"
     if is_bot_message(msg.sender_type, msg.raw_text):
         return "skipped", "机器人自身消息不下发"
+
+    # 回执前把订单号补齐：模板消息先到、订单截图晚一步时，此刻单号常常还是临时编号，
+    # 回执模板里「订单号」那一行就会被判空整行拿掉 —— 群里看着像「还是临时单号」。
+    # 截图已经配上了，就用它们再认一次正式单号（2026-10-14）。
+    if order.id:
+        _ensure_formal_order_no(session, order)
 
     # 订单号还没补全（订单截图未解析完）：先挂起，等正式单号到了再回执
     # 退单 / 撤单不压着：这两类回执是催人来拦截、来补理由的，压住既耽误处理，
@@ -1172,6 +1232,9 @@ def notify_processed(
     notify_status：sent 已发 / held 挂起等待补发 / skipped 跳过 / failed 失败
     force=True 为管理员手动补发：忽略时段、间隔与限流（关闭下发仍然生效）。
     """
+    # 截图常常晚一步到：渲染文案前先把订单号补齐（缺了它，回执里的「订单号」整行留空，
+    # 群里看着就像这一单还是临时单号 —— 2026-10-14 线上实例）
+    _ensure_formal_order_no(session, order)
     return _send_receipt(
         msg,
         order,
@@ -1193,6 +1256,7 @@ def notify_duplicate(
     if not settings.dedupe_notify:
         return "skipped", "未开启重复提醒"
     # 不受最小回执间隔限制：用户重复发了，就该明确告诉他「已收到过」
+    _ensure_formal_order_no(session, order)
     return _send_receipt(
         msg,
         order,
@@ -1215,6 +1279,7 @@ def notify_refund(
     """退单回执：@ 发送人确认收到 + @ 供应链对接人告知处理口径（不受最小回执间隔限制）。"""
     if not settings.refund_notify:
         return "skipped", "未开启退单提醒"
+    _ensure_formal_order_no(session, order)
     return _send_receipt(
         msg,
         order,

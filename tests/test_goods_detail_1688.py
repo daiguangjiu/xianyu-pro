@@ -129,14 +129,13 @@ class GoodsDetail1688Test(unittest.TestCase):
         """页面标题不再挂「（1688 版式）」（2026-10-11 用户拍板）。
 
         详情页只有这一版，写个版式后缀会让人以为还有别的版本可以切。
-        2026-10-14 起标题统一带系统前缀【渔货栈】（见 templates/base.html）。
         """
         html = self.client.get(f"/self/goods/detail/{ITEM_ID}").text
         # 只断言 <title>：base.html 的 CSS 注释里还写着「1688 版式」（注释会原样输出，
         # 拿整页 assertNotIn 会误命中）
         end = html.find("</title>") + len("</title>")
         title = html[html.find("<title>") : end]
-        self.assertEqual(title, f"<title>【渔货栈】{ITEM_TITLE} · 商品详情</title>", title)
+        self.assertEqual(title, f"<title>{ITEM_TITLE} · 商品详情</title>", title)
         self.assertNotIn("版式", title)
 
     def test_20_price_uses_same_numbers(self):
