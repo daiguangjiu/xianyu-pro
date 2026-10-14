@@ -543,6 +543,7 @@ class GuidePref(Base):
 # ====== 商家入驻 / 资金结算模型（独立文件，见 src/models/merchant.py） ======
 # 注意：必须在 Base 与上述模型定义完成之后 import，否则 merchant.py 里的
 # `from src.models import Base` 会因循环导入拿不到 Base。
+from src.models.external_identity import ExternalIdentity  # noqa: E402,F401
 from src.models.merchant import (  # noqa: E402
     APPLY_STATUS,
     MERCHANT_STATUS,
