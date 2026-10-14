@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import pathlib
+
 import json
 import sys
 import unittest
@@ -2148,7 +2150,11 @@ class WmsTest(unittest.TestCase):
         self.assertIn("不写等级、不进可售仓", page)
         self.assertLess(page.index('id="uncertainBox"'), page.index('id="submitBtn"'))
         # ② 库位下拉：宽度给足 + 由 JS 量着视口定位（老写法窄屏会被裁掉）
-        self.assertIn("width:max(100%,480px)", page)
+        # 2026-10-15：宽度那条规则随设计系统搬到了外部样式表，这里查样式表 + 确认页面引了它
+        css = pathlib.Path(__file__).resolve().parents[1].joinpath(
+            "app", "static", "wms_design.css").read_text(encoding="utf-8")
+        self.assertIn("/static/wms_design.css", page, "页面要引这张外部样式表")
+        self.assertIn("width:max(100%,480px)", css, "下拉宽度由这一条保证")
         self.assertIn("LIST_MIN_W", page)
         self.assertIn("function place()", page)
         self.assertIn('role="option" title="', page, "每行给全路径 title：再长也能看全")

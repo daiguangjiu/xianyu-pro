@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import pathlib
+
 import sys
 import unittest
 from pathlib import Path
@@ -203,9 +205,14 @@ class WmsTableNoWrapTest(unittest.TestCase):
 
     def test_10_body_cells_never_wrap(self):
         shell = self.client.get("/wms/items").text
-        self.assertIn("tbody td{white-space:nowrap}", shell, "列表一律一格一行")
-        self.assertIn("td.wrap2{white-space:normal", shell, "长字段才准换行")
-        self.assertIn("-webkit-line-clamp:2", shell, "长字段最多两行")
+        # 2026-10-15：设计系统 CSS 从 base.html 内联搬到了外部静态文件（能被浏览器缓存），
+        # 这几条规则的守护改成查那张样式表，再确认页面确实引了它 —— 规则一条都不能丢。
+        css = pathlib.Path(__file__).resolve().parents[1].joinpath(
+            "app", "static", "wms_design.css").read_text(encoding="utf-8")
+        self.assertIn("/static/wms_design.css", shell, "页面要引这张外部样式表")
+        self.assertIn("tbody td{white-space:nowrap}", css, "列表一律一格一行")
+        self.assertIn("td.wrap2{white-space:normal", css, "长字段才准换行")
+        self.assertIn("-webkit-line-clamp:2", css, "长字段最多两行")
 
     def test_20_ledger_name_cell_is_two_lines(self):
         """台账的「产品名称」是唯一的例外：最多两行，第三行省略。"""
