@@ -134,14 +134,16 @@
   </div>
 
   <div class="row g-3">
-    {# ====== DSO 信息 ====== #}
-    <div class="col-lg-6">
+    {# ====== 学员用户下单信息（DSO）====== 2026-10-15：采购单（PO）区块按用户要求撤掉，
+       这块就是学员下单信息本身 —— 买家 / 手机号 / 收货地址补齐，单行占满一行。 #}
+    <div class="col-12">
       <div class="card h-100">
-        <div class="card-header"><i class="bi bi-receipt icon"></i> 下游订单（DSO）</div>
+        <div class="card-header"><i class="bi bi-person-check icon"></i> 学员用户下单信息（DSO）</div>
         <div class="table-responsive">
           <table class="table mb-0">
             <thead>
-              <tr><th>SKU</th><th class="text-end">数量</th><th class="text-end">售价</th><th>状态</th><th>买家</th></tr>
+              <tr><th>SKU</th><th class="text-end">数量</th><th class="text-end">售价</th><th>状态</th>
+                  <th>买家</th><th>买家手机号</th><th>收货地址</th></tr>
             </thead>
             <tbody>
               {% for dso in dsos %}
@@ -151,39 +153,13 @@
                   <td class="text-end mono">¥{{ '%.2f' % (dso.sale_price | float) }}</td>
                   <td>{{ status_badge(dso.status) }}</td>
                   <td class="small">{{ dso.buyer_name or '—' }}</td>
+                  <td class="small mono">{{ dso.buyer_phone or '—' }}</td>
+                  <td class="small" title="{{ dso.address or '' }}">
+                    <span class="d-inline-block text-truncate align-top" style="max-width:320px;">
+                      {{ dso.address or '—' }}
+                    </span>
+                  </td>
                 </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    {# ====== 采购单（PO） ====== #}
-    <div class="col-lg-6">
-      <div class="card h-100">
-        <div class="card-header">
-          <i class="bi bi-truck icon"></i> 采购单（PO）
-          <span class="ms-auto badge bg-light">{{ pos|length }} 笔</span>
-        </div>
-        <div class="table-responsive">
-          <table class="table mb-0">
-            <thead>
-              <tr><th>PO ID</th><th>SKU</th><th>状态</th>
-                  <th class="text-end" title="采购单实际采购成本（对账用）；看经营毛利请用商品渔货价">采购成本</th>
-                  <th>ali_order_id</th></tr>
-            </thead>
-            <tbody>
-              {% for po in pos %}
-                <tr>
-                  <td><a href="/api/v1/purchase/orders/{{ po.id }}" class="mono text-decoration-none" style="color: var(--c-primary);">#{{ po.id }}</a></td>
-                  <td><code class="k">{{ po.ali_sku_id }}</code></td>
-                  <td>{{ status_badge(po.status) }}</td>
-                  <td class="text-end mono">¥{{ '%.2f' % (po.cost_price | float) }}</td>
-                  <td class="mono-sm text-secondary">{{ po.ali_order_id or '—' }}</td>
-                </tr>
-              {% else %}
-                <tr><td colspan="5" class="text-center text-secondary py-4">未生成 PO</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -278,33 +254,8 @@
       </div>
     </div>
 
-    {# ====== 异常日志 ====== #}
-    <div class="col-12">
-      <div class="card">
-        <div class="card-header">
-          <i class="bi bi-bug icon"></i> 异常日志
-          <span class="ms-auto badge bg-light">{{ exceptions|length }} 条</span>
-        </div>
-        <div class="card-body">
-          {% for ex in exceptions %}
-            <div class="mb-3 pb-3" style="border-bottom: 1px solid var(--c-border);">
-              <div class="d-flex align-items-center gap-2 flex-wrap">
-                <span class="badge bg-warning text-dark">{{ ex.type }}</span>
-                <span class="mono-sm text-secondary">{{ ex.created_at | dt('%Y-%m-%d %H:%M:%S') }}</span>
-                {% if ex.resolved %}
-                  <span class="badge bg-success">已解决</span>
-                {% else %}
-                  <span class="badge bg-danger">未解决</span>
-                {% endif %}
-              </div>
-              <div class="text-danger small mt-2 mono-sm">{{ ex.error or '—' }}</div>
-            </div>
-          {% else %}
-            <div class="text-center text-secondary py-3 small">无异常</div>
-          {% endfor %}
-        </div>
-      </div>
-    </div>
+    {# ====== 异常日志区块已撤掉（2026-10-15 用户要求）：详情页只看履约信息，
+        排查问题去「日志」页，那边按单号 / 类型能筛。 ====== #}
   </div>
 {% endif %}
 {% endblock %}

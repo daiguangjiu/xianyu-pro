@@ -1796,22 +1796,8 @@ def order_detail(
         )
         return templates.TemplateResponse("order_detail.html", ctx)
 
-    pos = db.execute(
-        select(PurchaseOrder).where(
-            PurchaseOrder.downstream_order_id.in_([d.downstream_order_id for d in dsos])
-        )
-    ).scalars().all()
-    exceptions = db.execute(
-        select(ExceptionLog)
-        .where(
-            ExceptionLog.payload["downstream_order_id"].as_string().in_(
-                [d.downstream_order_id for d in dsos]
-            )
-        )
-        .order_by(ExceptionLog.id.desc())
-        .limit(50)
-    ).scalars().all()
-
+    # 采购单（PO）与异常日志两个区块 2026-10-15 按用户要求从详情页撤掉：
+    # PO 采购进度去「采购单」页看，异常去「日志」页按单号筛 —— 详情页只留履约信息。
     # 渔枢系统那笔单：金额口径 / 推单状态 / 收货信息（字段与渔枢系统端一致）
     order_no = hub_orders.base_order_no(dsos[0].downstream_order_id)
     hub = hub_orders.one(order_no)
@@ -1846,7 +1832,7 @@ def order_detail(
         request, "orders", db=db,
         active_sub="orders:all",
         nav_crumb=["交易", "订单", dsos[0].downstream_order_id],
-        dsos=dsos, pos=pos, exceptions=exceptions,
+        dsos=dsos,
         dso_id=dso_id, not_found=False,
         current_statuses={d.status for d in dsos},
         order_no=order_no, hub=hub,
