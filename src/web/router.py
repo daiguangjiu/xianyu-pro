@@ -2570,7 +2570,9 @@ def _abs_image_url(url: str, request: Request | None = None) -> str:
     return base + "/" + url.lstrip("/")
 
 
-ZIP_IMAGE_WIDTH = 0  # 默认打包原图；传 ?w=1080 则每张等比压到该宽度（发布够用、下得快）
+# 默认按 1080 宽打包（2026-10-15 用户拍板）：原图包动辄 90+MB，下起来要等一分钟以上；
+# 发闲鱼 1080 完全够用，要原图的传 ?w=0 即可。
+ZIP_IMAGE_WIDTH = 1080
 
 
 def _zip_image(data: bytes, url: str, max_width: int) -> tuple[bytes, str]:

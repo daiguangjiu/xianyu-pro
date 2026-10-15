@@ -107,6 +107,29 @@ class GoodsImagesDownloadTest(unittest.TestCase):
         self.assertIn("测试", zf.read("README.txt").decode("utf-8"), "说明里要有商品标题")
         self.assertEqual(zf.read("主图/01.jpg"), PNG)
 
+    def test_12_default_pack_is_1080_slim(self):
+        """默认按 1080 宽打包（2026-10-15 用户拍板）：文件名与 README 都要体现尺寸。
+
+        原图包动辄 90+MB，下起来要等一分钟以上；发闲鱼 1080 完全够用。
+        """
+        item = self._make_item()
+        resp = self.client.get(f"/self/goods/{item.item_id}/images.zip")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("1080w", resp.headers.get("content-disposition", ""),
+                      "默认是精简包，文件名带 1080w")
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            self.assertIn("每张等比压到宽 1080",
+                          zf.read("README.txt").decode("utf-8"))
+
+    def test_13_original_pack_still_available(self):
+        """要原图传 ?w=0：页面上的「原图」切换就是走这个。"""
+        item = self._make_item()
+        resp = self.client.get(f"/self/goods/{item.item_id}/images.zip?w=0")
+        self.assertEqual(resp.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            self.assertIn("原图直出", zf.read("README.txt").decode("utf-8"))
+            self.assertEqual(zf.read("主图/01.jpg"), PNG, "原图包字节不变")
+
     def test_15_relative_media_path_goes_absolute(self):
         """站内图是 /media/... 相对路径：抓图前必须补成绝对地址，否则一个都抓不到。"""
         from src.web.router import _abs_image_url
