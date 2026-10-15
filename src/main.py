@@ -24,6 +24,7 @@ from src.web.router import router as web_router
 from src.merchant.router import router as merchant_web_router
 from src.external_identity.router import router as external_identity_router
 from src.external_identity.products import router as external_products_router
+from src.external_identity.categories import router as external_categories_router
 
 
 @asynccontextmanager
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(api_router, prefix="/api/v1")
     app.include_router(external_identity_router)
     app.include_router(external_products_router)
+    app.include_router(external_categories_router)
 
     # ====== Web UI（HTML 模板，只读） ======
     # 详见 src/web/router.py；include_in_schema=True 已在路由内关闭，避免污染 Swagger

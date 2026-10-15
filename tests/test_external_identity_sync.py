@@ -14,7 +14,8 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import tests
-from app.models import Base, User
+from app.models import Base, IDENTITY_STUDENT, User
+from app.portals import PORTAL_SELF
 from src.deps import get_db
 from src.external_identity.router import router
 from src.models.external_identity import ExternalIdentity
@@ -67,7 +68,8 @@ class ExternalIdentitySyncTests(unittest.TestCase):
                 },
             )
 
-    def test_unmatched_phone_records_identity_without_login_user(self):
+    def test_unmatched_phone_auto_registers_platform_user(self):
+        """第一次同步时若手机号未匹配任何平台账号，应自动开号并绑定。"""
         response = self.post_sync({
             "external_user_id": "user-1",
             "phone": "13800000001",
@@ -75,10 +77,75 @@ class ExternalIdentitySyncTests(unittest.TestCase):
             "source_role": "account",
         })
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["linked"])
+        self.assertTrue(response.json()["linked"])
         with self.Session() as db:
-            self.assertEqual(len(db.scalars(select(User)).all()), 0)
-            self.assertIsNotNone(db.scalar(select(ExternalIdentity)))
+            users = db.scalars(select(User)).all()
+            self.assertEqual(len(users), 1)
+            user = users[0]
+            self.assertEqual(user.phone, "13800000001")
+            self.assertEqual(user.display_name, "测试用户")
+            self.assertEqual(user.role, "user")
+            self.assertEqual(user.status, "active")
+            self.assertEqual(user.portals, PORTAL_SELF)
+            self.assertEqual(user.identity, IDENTITY_STUDENT)
+            self.assertEqual(user.password_hash, "")
+            self.assertTrue(user.username.startswith("xhm_13800000001"))
+            identity = db.scalar(select(ExternalIdentity))
+            self.assertIsNotNone(identity)
+            self.assertEqual(identity.platform_user_id, user.id)
+            self.assertEqual(identity.source_role, "account")
+
+    def test_unmatched_phone_admin_role_keeps_admin_privilege(self):
+        response = self.post_sync({
+            "external_user_id": "user-admin",
+            "phone": "13800000010",
+            "display_name": "管理员",
+            "source_role": "admin",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["linked"])
+        with self.Session() as db:
+            user = db.scalar(select(User))
+            self.assertEqual(user.role, "admin")
+
+    def test_sync_without_phone_still_auto_registers_user(self):
+        """闲参谋未把手机号传过来时也要能完成自动开号。"""
+        response = self.post_sync({
+            "external_user_id": "user-nophone",
+            "phone": None,
+            "display_name": "无手机号用户",
+            "source_role": "account",
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["linked"])
+        with self.Session() as db:
+            user = db.scalar(select(User))
+            self.assertIsNone(user.phone)
+            self.assertEqual(user.display_name, "无手机号用户")
+            self.assertTrue(user.username.startswith("xhm_user-nophone"))
+            identity = db.scalar(select(ExternalIdentity))
+            self.assertEqual(identity.platform_user_id, user.id)
+
+    def test_auto_registration_is_idempotent_and_does_not_change_role(self):
+        first = self.post_sync({
+            "external_user_id": "user-idem",
+            "phone": "13800000020",
+            "display_name": "首次",
+            "source_role": "account",
+        })
+        # 后续用 admin 角色同步：已存在的子账号不会被提权
+        second = self.post_sync({
+            "external_user_id": "user-idem",
+            "phone": "13800000020",
+            "display_name": "首次",
+            "source_role": "admin",
+        })
+        self.assertEqual((first.status_code, second.status_code), (200, 200))
+        with self.Session() as db:
+            self.assertEqual(len(db.scalars(select(User)).all()), 1)
+            self.assertEqual(len(db.scalars(select(ExternalIdentity)).all()), 1)
+            user = db.scalar(select(User))
+            self.assertEqual(user.role, "user")
 
     def test_phone_match_links_existing_user_and_is_idempotent(self):
         with self.Session() as db:
