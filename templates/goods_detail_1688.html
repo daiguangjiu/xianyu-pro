@@ -662,6 +662,13 @@
             <i class="bi bi-file-earmark-zip"></i>
             下载所有图片包（ZIP）· {{ (images|length) + (detail_images|length) }} 张
           </button>
+          {# 精简包（2026-10-15）：原图包动辄 90+MB，下起来慢；压到 1080 宽只剩十分之一左右，
+             闲鱼发布够用。原图按钮保留，要高清的还是能下原图。 #}
+          <a class="pdp-btn plain"
+             href="{{ self_url('/goods/' ~ item.item_id ~ '/images.zip?w=1080') }}"
+             title="每张等比压到宽 1080（闲鱼发布够用），体积约为原图的一成，下得快">
+            <i class="bi bi-file-earmark-zip"></i> 下载精简图片包（ZIP·1080）
+          </a>
           <button type="button" class="pdp-btn plain" onclick="pdpOpenImageWall()"
                   title="手机用：所有图一次铺开，长按每张 → 存储到照片">
             <i class="bi bi-phone"></i> 存到手机相册

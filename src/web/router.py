@@ -2570,8 +2570,58 @@ def _abs_image_url(url: str, request: Request | None = None) -> str:
     return base + "/" + url.lstrip("/")
 
 
+ZIP_IMAGE_WIDTH = 0  # 默认打包原图；传 ?w=1080 则每张等比压到该宽度（发布够用、下得快）
+
+
+def _zip_image(data: bytes, url: str, max_width: int) -> tuple[bytes, str]:
+    """按宽度上限缩一张图，缩好的缓存到 media/_zipimg/<宽>/ 下（下次打包直接用）。
+
+    图已经压过一遍（jpg/png/webp），zip 层再 deflate 几乎不省（实测 97MB 只省
+    0.3MB，却要多花 16 倍时间），所以包体本身用 STORED；真要省体积只能靠缩尺寸，
+    这才是「下载慢」的解 —— 97MB 的原图包压到 1080 宽只剩十分之一左右。
+    """
+    from ..self_purchase.shop_pool import _ext_of  # noqa: PLC0415
+
+    if not max_width or not data:
+        return data, _ext_of(url)
+    try:
+        import hashlib  # noqa: PLC0415
+        import io  # noqa: PLC0415
+
+        from app.config import settings  # noqa: PLC0415
+        from PIL import Image, ImageOps  # noqa: PLC0415
+    except Exception:
+        return data, _ext_of(url)
+
+    cache_dir = Path(str(getattr(settings, "media_path", ""))) / "_zipimg" / str(max_width)
+    key = hashlib.sha1(str(url).encode("utf-8", "ignore")).hexdigest()
+    cached = cache_dir / f"{key}.jpg"
+    try:
+        if cached.is_file() and cached.stat().st_size:
+            return cached.read_bytes(), ".jpg"
+    except OSError:
+        pass
+    try:
+        with Image.open(io.BytesIO(data)) as raw:
+            im = ImageOps.exif_transpose(raw) or raw
+            w0, h0 = im.size
+            if w0 <= max_width:          # 比目标还小就不放大
+                return data, _ext_of(url)
+            height = max(1, int(round(h0 * (max_width / float(w0)))))
+            buf = io.BytesIO()
+            im.convert("RGB").resize((max_width, height), Image.LANCZOS).save(
+                buf, "JPEG", quality=88, optimize=True)
+            out = buf.getvalue()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(out)
+        return out, ".jpg"
+    except Exception:                    # 缩不动就发原图，不能让整包少图
+        return data, _ext_of(url)
+
+
 def _images_zip_of(
-    item, request: Request | None = None, part: str = "all", idx: int = 1
+    item, request: Request | None = None, part: str = "all", idx: int = 1,
+    max_width: int = ZIP_IMAGE_WIDTH,
 ) -> tuple[bytes, str]:
     """把这款货的图打包成 zip，返回 (字节, 文件名)。
 
@@ -2610,7 +2660,8 @@ def _images_zip_of(
     failed: list[str] = []
     buf = io.BytesIO()
     total = sum(len(urls) for _, urls in folders)
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    # 不压缩（2026-10-15 实测）：97MB 的图 deflate 只省 0.3MB，却从 0.2 秒变成 3.3 秒
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
         for folder, urls in folders:
             for index, url in enumerate(urls, 1):
                 # 站内 /media 图直接读本地磁盘（httpx 回环会被鉴权 303 到登录页，
@@ -2621,7 +2672,8 @@ def _images_zip_of(
                 if not _looks_like_image(data):
                     failed.append(f"{folder} {index:02d}  {url}")
                     continue
-                zf.writestr(f"{folder}/{index:02d}{_ext_of(url)}", data)
+                data, ext = _zip_image(data, url, max_width)
+                zf.writestr(f"{folder}/{index:02d}{ext}", data)
         readme = [
             "渔货栈 · 商品图片包",
             f"商品：{item.title or ''}",
@@ -2630,6 +2682,8 @@ def _images_zip_of(
             "、".join(f"{name} {len(urls)} 张" for name, urls in folders)
             + f"，成功 {total - len(failed)} 张。",
             "",
+            f"每张等比压到宽 {max_width} 像素（原图直出，未缩放）。"
+            if max_width else "原图直出，未做任何缩放。",
             "解压后按目录、编号排好序，直接就能传到闲鱼发布页。",
         ]
         if failed:
@@ -2638,27 +2692,31 @@ def _images_zip_of(
 
     code = str(item.item_id or "images").replace("/", "-")
     title = re.sub(r"[\\/:*?\"<>|\s]+", "_", str(item.title or ""))[:20]
-    return buf.getvalue(), f"{title or '商品'}{suffix}_{code}.zip"
+    sized = f"{max_width}w" if max_width else ""
+    return buf.getvalue(), f"{title or '商品'}{suffix}{sized}_{code}.zip"
 
 
 @router.get("/goods/{item_id}/images.zip")
 def goods_images_zip(item_id: str, request: Request, part: str = "all", idx: int = 1,
-                     db: Session = Depends(get_db)):
+                     w: int = ZIP_IMAGE_WIDTH, db: Session = Depends(get_db)):
     """商品图片包：一次性打包下载（替代以前的一张张下载）。
 
     part=all（默认）头图 + 详情图全打；part=head 只要头图；
     part=group&idx=N 只要详情图第 N 组 —— 详情页上三个按钮分别对应这三种。
+    w>0：每张等比压到该宽度再打包（缩好的有缓存），原图包九十多 MB 时用它下得快。
     """
     item = db.query(SupplierItem).filter(SupplierItem.item_id == item_id).first()
     if item is None:
         return JSONResponse(
             {"ok": False, "message": f"货源不存在：{item_id}"}, status_code=404,
         )
-    data, name = _images_zip_of(item, request, part=part, idx=idx)
+    data, name = _images_zip_of(item, request, part=part, idx=idx, max_width=w)
     # 文件名带中文：既给 ASCII 兜底又给 RFC 5987 的 UTF-8 写法（旧浏览器只认前者）
     # 分片下载时 ASCII 名也带上标记，下载目录里不会三个包都叫同一个名字
     tag = "" if str(part).lower() == "all" else (
         "-head" if str(part).lower() == "head" else f"-group{idx}")
+    if w:
+        tag += f"-{int(w)}w"
     ascii_name = "images-" + str(item.item_id or "").replace("/", "-") + tag + ".zip"
     return StreamingResponse(
         io.BytesIO(data),
