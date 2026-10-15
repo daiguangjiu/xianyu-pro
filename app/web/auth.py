@@ -47,8 +47,9 @@ PUBLIC_PATHS = {
 # · /media/cards/ = 引流名片的封面图 —— 抖音爬虫抓图**不带 Cookie**，
 #   卡在登录页就是一张空白卡片，所以这个目录必须裸奔（订单截图所在的其它
 #   media 子目录仍然要登录，不跟着一起放）；
-# · /c/ = 名片长链接本身（https://域名/c/<slug>），同理。
-PUBLIC_PREFIXES = ("/static", "/media/cards/", "/c/")
+# · /c/ = 名片长链接本身（https://域名/c/<slug>），同理；
+# · /openapi/v1/xh-fish/ = 闲参谋服务接口，路由自身必须校验 HMAC 签名。
+PUBLIC_PREFIXES = ("/static", "/media/cards/", "/c/", "/openapi/v1/xh-fish/")
 COOKIE_NAME = "oh_session"
 ROLE_ADMIN = "admin"
 ROLE_USER = "user"

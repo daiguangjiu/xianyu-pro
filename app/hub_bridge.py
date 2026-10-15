@@ -124,6 +124,9 @@ def _patch_templates(templates: Jinja2Templates) -> None:
 def mount_hub(app: FastAPI) -> None:
     """把渔货栈的页面 / 接口 / 静态资源接到渔枢系统应用上。"""
     from src.api.v1 import api_router as hub_api_router
+    from src.external_identity.categories import router as external_categories_router
+    from src.external_identity.products import router as external_products_router
+    from src.external_identity.router import router as external_identity_router
     from src.merchant import router as hub_merchant_module
     from src.merchant.router import router as hub_merchant_router
     from src.web import router as hub_web_module
@@ -143,6 +146,10 @@ def mount_hub(app: FastAPI) -> None:
     app.include_router(hub_merchant_router, prefix=SELF_PREFIX, dependencies=[Depends(require_hub)])
     # 对外接口：保持 /api/v1 原路径（外部按这个地址对接，不能改）
     app.include_router(hub_api_router, prefix="/api/v1")
+    # xh-fish 服务间接口：依靠接口内的 HMAC 签名鉴权，由 AuthMiddleware 放行此公开前缀。
+    app.include_router(external_identity_router)
+    app.include_router(external_products_router)
+    app.include_router(external_categories_router)
     # 静态资源：渔枢系统已经占了 /static 与 /media，渔货栈用自己的前缀
     app.mount(
         f"{SELF_PREFIX}/static",
