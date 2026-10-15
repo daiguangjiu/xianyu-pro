@@ -176,12 +176,16 @@ def resolve_fish_code(
     return code
 
 
-def set_fish_code(session: Session, item: WmsItem, code: str, operator: str = "") -> WmsItem:
+def set_fish_code(session: Session, item: WmsItem, code: str, operator: str = "",
+                  note: str = "") -> WmsItem:
     """把一台货挂到某个渔货号上 —— **台账页的合并 / 拆分就靠它**。
 
     ``code`` 传一个已存在的渔货号 = 并进去；传空串 = **拆出来**单独发一个新渔货号
     （同一款货其实是两台不同的东西，比如成色差得多不想放在一起卖）。
     渔货号只认现有 / 新发两种，不校验存在性（挂到不存在的号上没有意义，但也不至于出错）。
+
+    ``note`` 给调用方定制审计说明（如检测台的「独立渔货号重新建档」）；不传就按
+    有原号 / 没原号自动写成「渔货号换绑」「补发渔货号」。
     """
     raw = str(code or "").strip().upper()
     if not raw:
@@ -192,7 +196,8 @@ def set_fish_code(session: Session, item: WmsItem, code: str, operator: str = ""
     item.fish_code = raw
     item.updated_at = _now()
     audit.log(session, "item", item.id, "fish_code", before=before, after=raw,
-              operator=operator, note="渔货号换绑" if before else "补发渔货号")
+              operator=operator,
+              note=note or ("渔货号换绑" if before else "补发渔货号"))
     session.commit()
     return item
 

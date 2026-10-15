@@ -29,7 +29,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from wms import importer, intake  # noqa: E402
 from wms import seed as wms_seed  # noqa: E402
 from wms.db import init_tables as wms_init_tables  # noqa: E402
-from wms.models import STATUS_SELLABLE, WmsBatch, WmsItem  # noqa: E402
+from wms.models import STATUS_SELLABLE, WmsAuditLog, WmsBatch, WmsItem  # noqa: E402
 
 ADMIN = {"username": "admin", "password": "xianyu2026"}
 
@@ -232,6 +232,97 @@ class FishGoodsTest(unittest.TestCase):
         self.assertIn(fish, page.text)
         for it_code in ("DT-1", "DT-2"):
             self.assertIn(it_code, page.text, "这一款下的条码商品都要在")
+
+    # ------------------------------------------------------ ⑤ 独立渔货号重新建档
+    def test_45_standalone_button_and_dialog_on_inspect(self):
+        """检测台「② 商品入库信息」右上角要有「独立渔货号重新建档」入口与确认弹窗。"""
+        page = self.client.get("/wms/inspect")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="btnFishStandalone"', page.text)
+        self.assertIn("独立渔货号重新建档", page.text)
+        self.assertIn('id="saMask"', page.text, "建档前要把影响摆清楚的确认弹窗")
+        self.assertIn("/wms/api/item/fish-standalone", page.text)
+
+    def test_46_item_json_reports_fish_mates(self):
+        """item.json 要把「这个渔货号下几个条码商品 / 合计几台」给检测台。"""
+        batch = self._batch()
+        ids = self._register(batch, [
+            {"sku_code": "SA-1", "product_name": "独立建档款", "qty": 2},
+            {"sku_code": "SA-2", "product_name": "独立建档款", "qty": 3},
+        ])
+        with SessionLocal() as s:
+            barcode = s.get(WmsItem, ids[0]).barcode
+        item = self.client.get(f"/wms/api/item.json?code={barcode}").json()["item"]
+        self.assertEqual(item["fish_items"], 2)
+        self.assertEqual(item["fish_qty"], 5)
+
+    def test_47_api_standalone_gets_new_fish_code(self):
+        """点「独立建档」：这一台另发一个新渔货号 → 原号少一台、新号就它自己。"""
+        batch = self._batch()
+        ids = self._register(batch, [
+            {"sku_code": "SB-1", "product_name": "要拆出来的一款", "qty": 2},
+            {"sku_code": "SB-2", "product_name": "要拆出来的一款", "qty": 3},
+        ])
+        with SessionLocal() as s:
+            old = str(s.get(WmsItem, ids[1]).fish_code or "")
+            self.assertEqual(str(s.get(WmsItem, ids[0]).fish_code or ""), old,
+                             "同一款一开始是同一个渔货号")
+        resp = self.client.post("/wms/api/item/fish-standalone", json={"item_id": ids[1]})
+        self.assertEqual(resp.status_code, 200, resp.text[:300])
+        body = resp.json()
+        self.assertTrue(body["ok"], body)
+        new = str(body["fish_code"])
+        self.assertTrue(new.startswith("YS"), new)
+        self.assertNotEqual(new, old, "独立建档必须另发一个新号")
+        self.assertEqual(body["from_code"], old)
+        self.assertEqual(body["items"], 1)
+        self.assertEqual(body["qty"], 3, "这台货 3 台一起走")
+        with SessionLocal() as s:
+            self.assertEqual(len(intake.find_items_by_fish(s, new)), 1)
+            mates = intake.find_items_by_fish(s, old)
+            self.assertEqual([str(r.sku_code) for r in mates], ["SB-1"], "原号只剩另一台")
+            # 审计留痕：看得出这次是「独立渔货号重新建档」，不是普通换绑
+            log = s.scalars(select(WmsAuditLog).where(
+                WmsAuditLog.entity == "item",
+                WmsAuditLog.entity_id == str(ids[1]),
+                WmsAuditLog.action == "fish_code",
+            ).order_by(WmsAuditLog.id.desc())).first()
+            self.assertIsNotNone(log)
+            self.assertEqual(str(log.note or ""), "独立渔货号重新建档")
+            self.assertEqual(str(log.before or ""), old)
+            self.assertEqual(str(log.after or ""), new)
+
+    def test_48_standalone_when_alone_or_without_code(self):
+        """本来就独占一个号的货不空转发号；压根没号的货点它就是补发一个新号。"""
+        batch = self._batch()
+        ids = self._register(batch, [{"sku_code": "SC-1", "product_name": "独苗款"}])
+        with SessionLocal() as s:
+            before = str(s.get(WmsItem, ids[0]).fish_code or "")
+        self.assertTrue(before.startswith("YS"))
+        resp = self.client.post("/wms/api/item/fish-standalone", json={"item_id": ids[0]})
+        self.assertEqual(resp.status_code, 200, resp.text[:300])
+        body = resp.json()
+        self.assertTrue(body["ok"], body)
+        self.assertTrue(body["already_alone"])
+        self.assertEqual(body["fish_code"], before, "号不许换")
+        with SessionLocal() as s:
+            self.assertEqual(str(s.get(WmsItem, ids[0]).fish_code or ""), before)
+            # 没号的货：建档口子照开（补发）
+            it = s.get(WmsItem, ids[0])
+            it.fish_code = ""
+            s.commit()
+        body = self.client.post(
+            "/wms/api/item/fish-standalone", json={"item_id": ids[0]}).json()
+        self.assertTrue(body["ok"], body)
+        self.assertFalse(body.get("already_alone"))
+        self.assertTrue(str(body["fish_code"]).startswith("YS"), body)
+        self.assertEqual(body["items"], 1)
+        with SessionLocal() as s:
+            self.assertEqual(str(s.get(WmsItem, ids[0]).fish_code or ""),
+                             str(body["fish_code"]))
+        # 不存在的货品
+        self.assertEqual(self.client.post(
+            "/wms/api/item/fish-standalone", json={"item_id": 99999999}).status_code, 404)
 
 
 if __name__ == "__main__":

@@ -1716,9 +1716,11 @@ def wms_api_item(code: str = "", db: Session = Depends(get_db)):
             f"（系统条码 / 进货货号 / 渔货号 / 序列号都查过）—— 先去「批次与建档」建档", 404,
         )
     # 同一款可能挂着好几台：渔货号里同款的、以及货号重号的一起列给检测员挑
+    fish_rows: list[WmsItem] = []
     twin_ids: set[int] = set()
     if item.fish_code:
-        twin_ids.update(int(t.id) for t in intake.find_items_by_fish(db, item.fish_code))
+        fish_rows = intake.find_items_by_fish(db, item.fish_code)
+        twin_ids.update(int(t.id) for t in fish_rows)
     if item.sku_code:
         twin_ids.update(int(t.id) for t in intake.find_items_by_sku(db, item.sku_code))
     twin_ids.discard(int(item.id))
@@ -1775,6 +1777,11 @@ def wms_api_item(code: str = "", db: Session = Depends(get_db)):
                 # 同款候选（2026-10-14）：库里还有哪些**别的**渔货号跟这台货同名字 ——
                 # 导入是按单品一导的，同一款被发成好几个号就靠这个口子并回来
                 "fish_candidates": intake.fish_candidates(db, item),
+                # 这个渔货号现在挂着几个条码商品 / 合计几台（2026-10-15）：
+                # 检测台「独立渔货号重新建档」弹窗要把这两句摆给检测员看，
+                # 免得把本来就独占一个号的货又发一次新号
+                "fish_items": len(fish_rows),
+                "fish_qty": sum(int(r.qty or 0) or 1 for r in fish_rows),
                 # 数量（2026-10-10）：这一条货有几台（同一个条码，整台流转）
                 "qty": int(item.qty or 0) or 1,
                 "own_barcode": item.own_barcode,
@@ -1853,6 +1860,48 @@ async def wms_api_item_fish_code(request: Request, db: Session = Depends(get_db)
                 "items": len(intake.find_items_by_fish(db, item.fish_code)),
                 "message": f"已并入 {item.fish_code}" if target
                            else f"已拆出来单独发号 {item.fish_code}"})
+
+
+@router.post("/wms/api/item/fish-standalone")
+async def wms_api_item_fish_standalone(request: Request,
+                                       db: Session = Depends(get_db)):
+    """检测台「独立渔货号重新建档」（2026-10-15 用户口径）。
+
+    场景：认亲是按**商品名**做的，不同进货货号只要名字一样就会被并进同一个渔货号；
+    实际拿到货才发现它们有差别（成色 / 配置 / 版本不一样，要分开卖、分开算库存）。
+    这时把扫到的这一台单独拉出来、**另发一个新渔货号**——商品维度从这一刻起独立。
+
+    只动归属（渔货号换绑 + 审计留痕），条码 / 检测记录 / 库位 / 库存流水一律不碰，
+    随时能在「货品台账」里再并回去。
+
+    「本来就独占一个渔货号」的货不发新号（发出来也是空转）：直接告诉他不用建档。
+    """
+    payload = await request.json()
+    item = db.get(WmsItem, _form_int(payload.get("item_id")))
+    if not item:
+        return _fail("货品不存在", 404)
+    before = str(item.fish_code or "").strip().upper()
+    if before:
+        mates = [r for r in intake.find_items_by_fish(db, before) if r.id != item.id]
+        if not mates:
+            return _ok({
+                "ok": True, "already_alone": True, "fish_code": before,
+                "items": 1, "qty": int(item.qty or 0) or 1,
+                "message": f"这台货本来就独占渔货号 {before}（这一款下面只有它自己），不用再建档",
+            })
+    try:
+        intake.set_fish_code(db, item, "", operator=_user(request),
+                             note="独立渔货号重新建档")
+    except ValueError as exc:
+        return _fail(str(exc), 400)
+    code = str(item.fish_code or "")
+    rows = intake.find_items_by_fish(db, code)
+    return _ok({
+        "ok": True, "fish_code": code, "from_code": before,
+        "items": len(rows), "qty": sum(int(r.qty or 0) or 1 for r in rows),
+        "message": (f"已按独立渔货号重新建档：新渔货号 {code}"
+                    + (f"（原来挂的 {before} 少一台）" if before else "")),
+    })
 
 
 @router.post("/wms/api/inspect/preview")

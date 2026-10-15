@@ -125,6 +125,8 @@ _API_PERMS: dict[str, str] = {
     "/wms/api/label/check-code": "wms.inspect.view",
     # 检测台里「并进这一款」（2026-10-14）：改的是货品的商品归属，按货品管理收口
     "/wms/api/item/fish-code": "wms.item.manage",
+    # 检测台里「独立渔货号重新建档」（2026-10-15）：同样是改商品归属，同一把钥匙
+    "/wms/api/item/fish-standalone": "wms.item.manage",
 }
 
 # 谁都能进的路径（不需要任何检测仓权限，登录即可）

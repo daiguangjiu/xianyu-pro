@@ -160,6 +160,13 @@
   .fm-it .fm-code { font-weight:700; }
   .fm-it .fm-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .fm-it .fm-qty { color:var(--c-text-muted); font-size:12px; white-space:nowrap; }
+  /* ② 卡片的标题行右侧挂「独立渔货号重新建档」（2026-10-15）：标题与按钮同一行，
+     窄屏折下来按钮独占一行 —— 按钮永远看得见，不用去别处找。 */
+  #panel > h2 { flex-wrap:wrap; }
+  #panel > h2 .h2-act { margin-left:auto; }
+  @media (max-width: 560px) {
+    #panel > h2 .h2-act { margin-left:0; width:100%; justify-content:center; }
+  }
   .kv-sep { grid-column:1 / -1; font-size:12px; color:var(--c-text-muted);
     border-top:1px solid var(--c-border); padding-top:8px; margin-top:2px; }
   /* 拍照留档（2026-10-11）：一次可以选多张、也能分几次加；每张右上角一个 × 删掉它。
@@ -256,7 +263,14 @@
   <div>
     {# ② 商品入库信息：扫出来的这一台，按货号从建档档案里带出来的入库资料（2026-10-08） #}
     <div class="card" id="panel" style="display:none">
-      <h2>② 商品入库信息</h2>
+      <h2>② 商品入库信息
+        {# 独立渔货号重新建档（2026-10-15 用户口径）：认亲是按商品名做的，不同进货货号
+           被并进同一个渔货号、实际却有差别时，点这里把这台单独拉出来另发一个新号 #}
+        <button type="button" class="btn sm h2-act" id="btnFishStandalone"
+                title="这一台跟同渔货号下的其它货其实不是一款时：单独发一个新渔货号、单独建档管理">
+          <i class="bi bi-diagram-3"></i> 独立渔货号重新建档
+        </button>
+      </h2>
       <p class="d">扫码枪扫出条码 / 货号后，按<b>货号</b>从建档的商品档案里带出这一台的全部入库信息 ——
         品牌 / 型号 / 规格 / 序列号 / 成本与基准价 / 批次与供应商 / 入库时间，以及导入时
         <b>沉淀下来的商品字段</b>（顺序与显示名跟「商品字段」页保持一致）。</p>
@@ -496,6 +510,27 @@
     <div class="dlg-act">
       <button type="button" class="btn" id="fmNo">各归各的（不并）</button>
       <button type="button" class="btn primary" id="fmYes">并进这一款</button>
+    </div>
+  </div>
+</div>
+
+{# 独立渔货号重新建档（2026-10-15）：同一个渔货号下面挂着的几台货其实不是一款时，
+   把这一台单独拉出来、另发一个新渔货号单独建档。改的是商品归属，
+   所以先把「现在什么样 / 建完什么样」摆清楚再动手。 #}
+<div class="mask" id="saMask" style="display:none">
+  <div class="dialog">
+    <h3>把这台货按独立渔货号重新建档？</h3>
+    <p class="d" style="margin:0 0 10px" id="saHead"></p>
+    <div class="cd-cmp">
+      <div><span>现在挂的渔货号</span><b class="mono" id="saFrom"></b></div>
+      <div><span>这一款现在挂着</span><b id="saMates"></b></div>
+      <div><span>这台货</span><b id="saThis"></b></div>
+      <div><span>建档后</span><b id="saTo"></b></div>
+    </div>
+    <p class="d" style="margin:10px 0 0" id="saTip"></p>
+    <div class="cd-acts">
+      <button type="button" class="btn" id="saCancel">算了，维持原样</button>
+      <button type="button" class="btn primary" id="saOk">独立建档（发新渔货号）</button>
     </div>
   </div>
 </div>
@@ -866,6 +901,84 @@ $('fmNo').addEventListener('click', function () {
 });
 $('fishMask').addEventListener('click', e => {
   if (e.target === $('fishMask')) { closeFishDialog(); $('scanInput').focus(); }
+});
+
+// -------------------------------------------------- 独立渔货号重新建档（2026-10-15）
+// 用户口径：并款是按**商品名**认亲做的，不同进货货号名字一样就被并进同一个渔货号；
+// 实际拿到货才发现有差别（成色 / 配置 / 版本不一样，得分开卖、分开算库存）时，
+// 用「② 商品入库信息」右上角这个按钮把这一台单独拉出来、另发一个新渔货号。
+// 只改归属 —— 条码 / 检测记录 / 库位 / 库存流水都不动，随时能在「货品台账」里并回去。
+var SA_ITEM = null;
+
+function askFishStandalone() {
+  if (!CUR || !CUR.item) { return; }
+  const item = CUR.item;
+  const from = String(item.fish_code || '');
+  const mates = Number(item.fish_items || 0);
+  const qty = Number(item.qty || 1);
+  // 本来就独占一个号（或压根没号）的货：发新号是空转，直接说清、不弹窗
+  if (mates <= 1) {
+    banner(from
+      ? ('这台货本来就独占渔货号 ' + from + '（这一款下面只有它自己），不用再建档')
+      : '这台货还没有渔货号 —— 先去「货品台账」或建档页补号即可', 'warn');
+    return;
+  }
+  SA_ITEM = item;
+  $('saHead').textContent = (item.display_code || item.barcode) + '（'
+    + (item.title || '这台货') + '）：如果它跟同号下的其它货其实不是一款，'
+    + '就在这里把它单独拉出来、另发一个新渔货号。';
+  $('saFrom').textContent = from || '（还没有）';
+  $('saMates').textContent = mates + ' 个条码商品 / ' + Number(item.fish_qty || 0) + ' 台';
+  $('saThis').textContent = (item.sku_code ? '进货货号 ' + item.sku_code + ' · ' : '') + qty + ' 台';
+  $('saTo').textContent = '新发一个渔货号（YS + 日期 + 当天流水）';
+  $('saTip').textContent = '建档后：这台（' + qty + ' 台）挂到新渔货号下，'
+    + '原来那一款的台数减 ' + qty + '；渔枢那边按新的号单独建档案、单独算库存。'
+    + '条码、检测记录、货架位置都不动，以后想在「货品台账」里并回去也行。';
+  $('saMask').style.display = '';
+  $('saOk').focus();
+}
+
+function closeStandalone() { $('saMask').style.display = 'none'; }
+
+async function doFishStandalone() {
+  const item = SA_ITEM || {};
+  if (!item.id) { closeStandalone(); return; }
+  $('saOk').disabled = true;
+  try {
+    const res = await fetch('/wms/api/item/fish-standalone', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: item.id }),
+    });
+    const d = await res.json();
+    if (!d.ok) { banner(d.message || '独立建档失败', 'err'); return; }
+    closeStandalone();
+    banner(d.message || ('已按独立渔货号重新建档：' + d.fish_code),
+      d.already_alone ? 'warn' : 'ok');
+    // 页面上的渔货号要跟着变（头部那一格 + 这台货的内存态）；
+    // 注意：extra_rows 在 item 里（顶层的是 records），别取错地方把沉淀字段刷没了
+    if (CUR && CUR.item) {
+      CUR.item.fish_code = d.fish_code;
+      CUR.item.fish_items = Number(d.items || 1);
+      CUR.item.fish_qty = Number(d.qty || CUR.item.qty || 1);
+      renderHead(CUR.item, CUR.item.extra_rows || []);
+    }
+    $('scanInput').focus();
+  } catch (e) {
+    banner('独立建档失败 —— 网络不稳，刷新后再试', 'err');
+  } finally {
+    $('saOk').disabled = false;
+  }
+}
+
+$('btnFishStandalone').addEventListener('click', askFishStandalone);
+$('saOk').addEventListener('click', doFishStandalone);
+$('saCancel').addEventListener('click', function () {
+  closeStandalone();
+  banner('维持原样：这台货仍挂在 ' + ((CUR && CUR.item && CUR.item.fish_code) || '原来的号'), 'warn');
+  $('scanInput').focus();
+});
+$('saMask').addEventListener('click', e => {
+  if (e.target === $('saMask')) { closeStandalone(); $('scanInput').focus(); }
 });
 
 function resetRecheck() {
