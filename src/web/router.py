@@ -2570,19 +2570,48 @@ def _abs_image_url(url: str, request: Request | None = None) -> str:
     return base + "/" + url.lstrip("/")
 
 
-def _images_zip_of(item, request: Request | None = None) -> tuple[bytes, str]:
+def _images_zip_of(
+    item, request: Request | None = None, part: str = "all", idx: int = 1
+) -> tuple[bytes, str]:
     """把这款货的图打包成 zip，返回 (字节, 文件名)。
 
-    包里按「主图 / 详情图」分两个目录，编号 01、02…（顺序即详情页的顺序）；
+    包里按目录分好、编号 01、02…（顺序即详情页的顺序）；
     个别图抓不下来不影响出包，缺哪些写进 README.txt。
+
+    2026-10-15 起支持只打包其中一部分 —— 详情页「头图」「第 N 组」各自有下载按钮：
+      · part=all（默认）：头图 + 详情图，两个目录，跟以前一样；
+      · part=head：只要头图（发布页封面用的就是这几张）；
+      · part=group&idx=N：只要详情图第 N 组（切片口径用详情页同一份，不会对不上）。
     """
+    from app.services import product as hub_product  # noqa: PLC0415
     from ..self_purchase.shop_pool import _ext_of, _fetch  # noqa: PLC0415
 
     mains, details = _item_image_sets(item)
+    part = str(part or "all").strip().lower()
+    try:
+        idx = max(1, int(idx or 1))
+    except (TypeError, ValueError):
+        idx = 1
+
+    if part == "head":
+        folders = [("头图", mains)]
+        suffix = "头图"
+    elif part == "group":
+        groups = hub_product.detail_image_groups(details) or [details]
+        if idx > len(groups):
+            idx = len(groups)
+        folders = [(f"详情图第{idx}组", groups[idx - 1])]
+        suffix = f"详情图第{idx}组"
+    else:
+        part = "all"
+        folders = [("主图", mains), ("详情图", details)]
+        suffix = "图片"
+
     failed: list[str] = []
     buf = io.BytesIO()
+    total = sum(len(urls) for _, urls in folders)
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for folder, urls in (("主图", mains), ("详情图", details)):
+        for folder, urls in folders:
             for index, url in enumerate(urls, 1):
                 # 站内 /media 图直接读本地磁盘（httpx 回环会被鉴权 303 到登录页，
                 # 登录页 HTML 存成 jpg 就是用户看到的「空白图」）；外链图才走抓取
@@ -2598,10 +2627,10 @@ def _images_zip_of(item, request: Request | None = None) -> tuple[bytes, str]:
             f"商品：{item.title or ''}",
             f"货源：{item.item_id}",
             "",
-            f"主图 {len(mains)} 张、详情图 {len(details)} 张，"
-            f"成功 {len(mains) + len(details) - len(failed)} 张。",
+            "、".join(f"{name} {len(urls)} 张" for name, urls in folders)
+            + f"，成功 {total - len(failed)} 张。",
             "",
-            "解压后「主图 / 详情图」两个目录按编号排好序，直接就能传到闲鱼发布页。",
+            "解压后按目录、编号排好序，直接就能传到闲鱼发布页。",
         ]
         if failed:
             readme += ["", "以下图片这次没抓到（图床临时挂了，稍后重下即可）：", *failed]
@@ -2609,20 +2638,28 @@ def _images_zip_of(item, request: Request | None = None) -> tuple[bytes, str]:
 
     code = str(item.item_id or "images").replace("/", "-")
     title = re.sub(r"[\\/:*?\"<>|\s]+", "_", str(item.title or ""))[:20]
-    return buf.getvalue(), f"{title or '商品'}图片_{code}.zip"
+    return buf.getvalue(), f"{title or '商品'}{suffix}_{code}.zip"
 
 
 @router.get("/goods/{item_id}/images.zip")
-def goods_images_zip(item_id: str, request: Request, db: Session = Depends(get_db)):
-    """商品图片包：主图 + 详情图一次性打包下载（替代以前的一张张下载）。"""
+def goods_images_zip(item_id: str, request: Request, part: str = "all", idx: int = 1,
+                     db: Session = Depends(get_db)):
+    """商品图片包：一次性打包下载（替代以前的一张张下载）。
+
+    part=all（默认）头图 + 详情图全打；part=head 只要头图；
+    part=group&idx=N 只要详情图第 N 组 —— 详情页上三个按钮分别对应这三种。
+    """
     item = db.query(SupplierItem).filter(SupplierItem.item_id == item_id).first()
     if item is None:
         return JSONResponse(
             {"ok": False, "message": f"货源不存在：{item_id}"}, status_code=404,
         )
-    data, name = _images_zip_of(item, request)
+    data, name = _images_zip_of(item, request, part=part, idx=idx)
     # 文件名带中文：既给 ASCII 兜底又给 RFC 5987 的 UTF-8 写法（旧浏览器只认前者）
-    ascii_name = "images-" + str(item.item_id or "").replace("/", "-") + ".zip"
+    # 分片下载时 ASCII 名也带上标记，下载目录里不会三个包都叫同一个名字
+    tag = "" if str(part).lower() == "all" else (
+        "-head" if str(part).lower() == "head" else f"-group{idx}")
+    ascii_name = "images-" + str(item.item_id or "").replace("/", "-") + tag + ".zip"
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/zip",

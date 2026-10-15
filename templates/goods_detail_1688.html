@@ -651,9 +651,16 @@
           <button type="button" class="pdp-btn plain" onclick="pdpCopyAll()">
             <i class="bi bi-clipboard"></i> <span id="pdpCopyAllText">复制商品文案</span>
           </button>
+          {# 头图包（2026-10-15）：发布页封面只要这几张，单独下一个包，不用从总包里挑 #}
+          <a class="pdp-btn plain"
+             href="{{ self_url('/goods/' ~ item.item_id ~ '/images.zip?part=head') }}"
+             title="电脑用：只打包头图（主图），发布页封面用的就是这几张">
+            <i class="bi bi-file-earmark-zip"></i> 下载头图文件包（ZIP）· {{ images|length }} 张
+          </a>
           <button type="button" class="pdp-btn plain" onclick="pdpDownloadZip()"
-                  title="电脑用：主图与详情图打包成一个 ZIP，一次下载完">
-            <i class="bi bi-file-earmark-zip"></i> 下载图片包（ZIP）
+                  title="电脑用：头图与详情图一起打包成一个 ZIP，一次下载完">
+            <i class="bi bi-file-earmark-zip"></i>
+            下载所有图片包（ZIP）· {{ (images|length) + (detail_images|length) }} 张
           </button>
           <button type="button" class="pdp-btn plain" onclick="pdpOpenImageWall()"
                   title="手机用：所有图一次铺开，长按每张 → 存储到照片">
@@ -970,6 +977,12 @@
             <div class="pdp-img-group-hd">
               <i class="bi bi-images"></i> 第 {{ loop.index }} 组
               <span class="sub">共 {{ group | length }} 张 · 点下面的缩略图切换</span>
+              {# 分组包（2026-10-15）：这一组单独下一个包，只缺其中一组时不用整包重下 #}
+              <a class="pdp-btn plain" style="margin-left:auto"
+                 href="{{ self_url('/goods/' ~ item.item_id ~ '/images.zip?part=group&idx=' ~ loop.index) }}"
+                 title="只打包这一组的详情图">
+                <i class="bi bi-file-earmark-zip"></i> 下载图片包（ZIP）· {{ group | length }} 张
+              </a>
             </div>
             <div class="pdp-imgpick">
               <div class="pdp-imgpick-stage">

@@ -6,7 +6,7 @@
 
 {% block actions %}
 <a class="btn" href="{{ detail_url }}">← 回商品详情</a>
-<a class="btn primary" href="{{ zip_url }}">下载图片包（ZIP）</a>
+<a class="btn primary" href="{{ zip_url }}">下载所有图片包（ZIP）· {{ (mains|length) + (details|length) }} 张</a>
 {% endblock %}
 
 {% block head_extra %}
