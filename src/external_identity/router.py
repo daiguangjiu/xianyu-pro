@@ -7,12 +7,17 @@ import re
 import time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from src.config import get_settings
 from src.deps import get_db
-from src.external_identity.service import IdentityConflict, sync_xianmou_identity
+from src.external_identity.service import (
+    IdentityConflict,
+    PlatformAccountNotFound,
+    sync_xianmou_identity,
+)
 
 router = APIRouter(prefix="/openapi/v1/identities/xh-fish", tags=["openapi"])
 _PHONE_RE = re.compile(r"^\+?[0-9]{6,20}$")
@@ -88,6 +93,17 @@ async def sync_identity(
             source_role=payload.source_role,
         )
         db.commit()
+    except PlatformAccountNotFound as exc:
+        db.rollback()
+        content = {
+            "external_identity_id": None,
+            "platform_user_id": None,
+            "linked": False,
+            "needs_manual_request": True,
+            "code": "platform_account_not_found",
+            "message": "未找到对应的渔货栈平台账号，请联系客服专员人工申请渔货栈采购权限",
+        }
+        return JSONResponse(status_code=403, content=content)
     except IdentityConflict as exc:
         db.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -97,5 +113,7 @@ async def sync_identity(
 
     return {
         "external_identity_id": identity.id,
+        "platform_user_id": identity.platform_user_id,
         "linked": identity.platform_user_id is not None,
+        "needs_manual_request": False,
     }
