@@ -112,7 +112,7 @@
             <td>
               <div style="display:flex;gap:8px;align-items:center;">
                 {% if p.image_path %}
-                  <img src="{{ p.image_path }}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">
+                  <img src="{{ thumb_url(p.image_path, 96) }}" alt="" style="width:36px;height:36px;object-fit:cover;border-radius:6px;">
                 {% endif %}
                 <div>
                   <a href="{{ product_url(p) }}" style="text-decoration:none;">{{ p.name or '（未命名）' }}</a>

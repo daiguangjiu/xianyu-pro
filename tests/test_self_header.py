@@ -40,7 +40,7 @@ MENU_ITEMS = [
     ("热销榜单", "/self/harbor?tab=hot"),
     ("全部订单", "/self/orders"),
     ("待确认", "/self/orders?status=pending"),
-    ("待推单", "/self/orders?status=confirmed"),
+    ("待发货", "/self/orders?status=confirmed"),
     ("已推单", "/self/orders?status=pushed"),
     ("已完成", "/self/orders?status=completed"),
     ("异常单", "/self/orders?status=exception"),

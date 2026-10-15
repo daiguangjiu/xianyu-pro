@@ -72,7 +72,12 @@
     <div class="kv">
       <b>条码</b><span class="mono">{{ item.barcode }}</span>
       <b>显示编码</b><span class="mono">{{ item.display_code }}</span>
-      <b>货号</b><span class="mono">{{ item.sku_code or '—' }}<span class="muted" style="font-weight:400">（进仓 / 检测扫它）</span></span>
+      <b>进货货号</b><span class="mono">{{ item.sku_code or '—' }}<span class="muted" style="font-weight:400">（供应商清单编号，进仓 / 检测扫它）</span></span>
+      {# 渔货号（2026-10-14）：这一款货在渔集的编号 —— 渔枢建档的商家编码与库存都认它，
+         点进去就是「这一款」的台账，里面挂着所有同款的条码商品 #}
+      <b>渔货号</b><span>{% if item.fish_code %}<a class="mono" href="/wms/goods/{{ item.fish_code }}">{{ item.fish_code }}</a>
+        <span class="muted" style="font-weight:400">（一款一号，点开看同款 {% if fish_twins %}{{ fish_twins }} 台{% else %}还有几台{% endif %}）</span>
+        {% else %}<span class="muted">—（还没补号，去「货品台账」页看）</span>{% endif %}</span>
       {# 数量（2026-10-10）：同一个条码底下有几台 —— 台数是最要紧的事实，做成胶囊重点摆出来 #}
       <b>数量</b><span><span class="qty-pill {{ 'many' if (item.qty or 1) > 1 }}">{{ item.qty or 1 }}</span>
         <span class="muted"> 台（同一个条码，整台流转）</span></span>

@@ -67,8 +67,11 @@
 
   <form method="post" action="{{ self_url('/pay/' ~ order.order_no) }}">
     <div class="card mb-3">
-      <div class="card-header"><i class="bi bi-wallet2 icon"></i> 选择支付方式</div>
+      <div class="card-header"><i class="bi bi-wallet2 icon"></i> 登记支付方式</div>
       <div class="card-body">
+        <div class="text-secondary small mb-2">
+          支付不走线上：线下转账后在这里登记，运营经理确认收到转账后订单转入「待发货」。
+        </div>
         {% for key, label in methods.items() %}
           <label class="pay-method {% if loop.first %}on{% endif %}" data-method="{{ key }}">
             <input type="radio" name="method" value="{{ key }}" class="form-check-input"

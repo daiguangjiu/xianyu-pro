@@ -25,7 +25,7 @@
   {% elif s == 'refunding' %}退款中，等平台处理
   {% elif s == 'refunded' %}已退款
   {% elif s == 'exception' %}异常单，需要人工处理
-  {% elif s == 'cancelled' %}已取消
+  {% elif s == 'cancelled' %}已关闭
   {% else %}{{ status_labels.get(s, s) }}
   {% endif %}
 {%- endmacro %}

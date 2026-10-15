@@ -50,6 +50,9 @@
   .zone { border:1px solid var(--c-border); border-radius:10px; padding:12px 14px;
     margin:10px 0 14px; background: var(--c-bg); }
   .zone-new { border-color: var(--c-primary); background: rgba(13,127,116,.06); }
+  /* 上架与贴码区块（2026-10-14）：检完顺手上架 / 贴码，绿色高亮跟「全新判定」一个分量 */
+  .zone-shelf { border-color: var(--c-primary); background: rgba(13,127,116,.06); }
+  .zone-shelf .bi { color: var(--c-primary); }
   .zone-hd { display:flex; flex-wrap:wrap; align-items:baseline; gap:6px 12px; margin-bottom:10px; }
   .zone-hd b { font-size:14.5px; }
   .zone-hd .bi { color: var(--c-primary); }
@@ -140,6 +143,23 @@
     margin-left:4px; letter-spacing:0; }
   .kv-cell.wide { grid-column:span 2; }
   .kv-cell.extra .v { color:var(--c-primary-hover); }
+  /* 渔货号（2026-10-14）：商品维度的主 key，检测台要一眼看见 —— 主色 + 加粗 + 等宽 */
+  .kv-cell .v.fish-hot { color:var(--c-primary); font-size:16px; font-weight:800;
+    font-family:var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    letter-spacing:.3px; }
+  /* 渔货号可点（2026-10-14）：虚线下划线 + 悬停变实线，点开是这一款的货品明细 */
+  .kv-cell .v.fish-hot a.fish-link { color:inherit; text-decoration:underline;
+    text-decoration-style:dotted; text-underline-offset:3px; }
+  .kv-cell .v.fish-hot a.fish-link:hover { text-decoration-style:solid; color:var(--c-primary-hover); }
+  /* 同款归属弹窗的候选列表（2026-10-14）：一行一个可选渔货号 */
+  .fm-list { display:flex; flex-direction:column; gap:8px; max-height:240px; overflow:auto; }
+  .fm-it { display:grid; grid-template-columns:20px minmax(0,auto) minmax(0,1fr) auto;
+    gap:8px; align-items:center; padding:8px 10px; border:1px solid var(--c-border);
+    border-radius:8px; cursor:pointer; font-size:13px; }
+  .fm-it.on { border-color:var(--c-primary); background:var(--c-primary-soft, #eaf6f4); }
+  .fm-it .fm-code { font-weight:700; }
+  .fm-it .fm-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .fm-it .fm-qty { color:var(--c-text-muted); font-size:12px; white-space:nowrap; }
   .kv-sep { grid-column:1 / -1; font-size:12px; color:var(--c-text-muted);
     border-top:1px solid var(--c-border); padding-top:8px; margin-top:2px; }
   /* 拍照留档（2026-10-11）：一次可以选多张、也能分几次加；每张右上角一个 × 删掉它。
@@ -155,9 +175,13 @@
   .photo-count { font-size:12px; color:var(--c-text-muted); margin-top:6px; display:flex;
     gap:8px; align-items:center; flex-wrap:wrap; }
   /* 检修后条码 + 打标签：现场是「填码 → 打标 → 贴标 → 提交」，一个格子里做完 */
-  .own-row { display:flex; gap:8px; align-items:center; }
+  .own-row { display:flex; gap:8px; align-items:stretch; }
   .own-row input { flex:1 1 auto; min-width:0; }
   .own-row .btn { white-space:nowrap; }
+  /* 打印标签按钮（2026-10-14 用户要求「明显显示」）：主色实心 + 打印机图标，
+     禁用态只压到 .8 —— 按钮在哪、能不能点，一眼就看得出来 */
+  #btnPrintLabel { font-weight:600; height:auto; }
+  #btnPrintLabel[disabled] { opacity:.75; }
   .label-state { color: var(--c-primary); font-weight:600; }
   .label-box { margin-top:8px; border:1px solid var(--c-border); border-radius:8px; padding:6px 10px 10px; }
   .label-box summary { cursor:pointer; font-size:12.5px; }
@@ -177,8 +201,8 @@
   .cd-cmp span { color:var(--c-text-muted); font-size:12.5px; flex:0 0 auto; }
   .cd-cmp b { font-size:14px; word-break:break-all; text-align:right; }
   .cd-acts { display:flex; gap:8px; justify-content:flex-end; margin-top:14px; }
-  /* 复检提示条（扫到检测过的货）：跟着提交按钮上面，看一眼就知道现在是回看还是覆盖 */
-  #recheckBar { margin:10px 0 0; font-size:12.5px; line-height:1.65; }
+  /* 复检提示条（扫到检测过的货）：在「引擎建议」正上方，回看还是覆盖一眼见分晓 */
+  #recheckBar { margin:0 0 10px; font-size:12.5px; line-height:1.65; }
   #recheckBar .btn { margin-top:8px; }
   .photo-strip img { width:64px; height:64px; object-fit:cover; border-radius:6px; border:1px solid var(--c-border); }
   #banner { border-radius:8px; padding:10px 14px; margin-bottom:12px; font-size:14px; }
@@ -285,15 +309,12 @@
             那属于「不影响使用」，检测项里判 × 会自行落到 B 档照常卖</span></div>
         <div class="repair-hint" id="repairHint"></div>
         <div class="checks">
+          {# 2026-10-14 用户拍板：「厂内可修」与「必须官方修」合并成一个勾 —— 现场不用再分；
+             勾了就是「故障要修」，提交后两个事实都记 true，档位照旧落 C、按档位自动进报修仓 #}
           <label class="big-check sm">
-            <input id="inhouse" type="checkbox">
-            <span class="bc-txt"><span class="bc-title">故障在「厂内可修清单」</span>
-              <span class="bc-sub">厂内自己能修 → 进维修仓</span></span>
-          </label>
-          <label class="big-check sm">
-            <input id="official" type="checkbox">
-            <span class="bc-txt"><span class="bc-title">故障在「必须官方修清单」</span>
-              <span class="bc-sub">只能官方修 → 进报修仓</span></span>
+            <input id="repairList" type="checkbox">
+            <span class="bc-txt"><span class="bc-title">故障在「维修清单」</span>
+              <span class="bc-sub">厂内能修的进维修仓、得送厂家的进报修仓 —— 提交后按档位自动落位，不用再分</span></span>
           </label>
           <label class="big-check sm">
             <input id="missing" type="checkbox">
@@ -303,7 +324,11 @@
           </label>
         </div>
       </div>
-      <div class="field-row auto">
+      {# 2026-10-14 用户拍板：上架与贴码独立成高亮区块 —— 检完顺手要做的两件事，一眼锁定 #}
+      <div class="zone zone-shelf" id="zoneShelf">
+        <div class="zone-hd"><b><i class="bi bi-box-seam"></i> 上架与贴码（检完顺手做）</b>
+          <span class="zone-tip">这两项做完这台就能直接卖 —— 别留到最后一起补</span></div>
+        <div class="field-row auto">
         <div class="field"><label for="location">货架位置（检完顺手上架）</label>
           {# 库位只能从「仓库与货架」维护的表里选（2026-10-08）；
              2026-10-11 起换成搜索联想（短码 / 名称 / 拼音首字母 + 常用置顶），
@@ -312,8 +337,10 @@
         <div class="field"><label for="ownBarcode">检修后条码（规整完贴自己的码）</label>
           <div class="own-row">
             <input id="ownBarcode" type="text" placeholder="贴完扫进来；没贴就留空">
-            <button type="button" class="btn sm" id="btnPrintLabel" disabled
-                    title="按当前建议档打一张标签：打完贴到机器上">打印标签</button>
+            {# 打印标签（2026-10-14 用户要求「明显显示」）：主色实心 + 打印机图标，
+               不再是个灰扑扑的小按钮；禁用态也只压到 .8，位置永远看得见 #}
+            <button type="button" class="btn primary" id="btnPrintLabel" disabled
+                    title="按当前建议档打一张标签：打完贴到机器上"><i class="bi bi-printer"></i> 打印标签</button>
           </div>
           <span class="own-state" id="ownCodeState"></span>
           <div class="hint">打完贴到机器上；
@@ -327,6 +354,7 @@
           </details>
         </div>
         <div class="field"><label for="note">备注</label><input id="note" type="text" placeholder="选填"></div>
+        </div>
       </div>
       {# 拍照留档（2026-10-11 用户：要「多图上传 + 能删图」）：
          去掉 capture —— 手机上带 capture 只会开相机、一次一张；不带的话系统弹「拍照 / 相册」，
@@ -339,6 +367,13 @@
   </div>
 
   <div class="suggest">
+    {# 扫到检测过的货：回看 / 复检提示条（2026-10-14 移到引擎建议上方）——
+       原来贴在提交按钮上面，现场根本注意不到；现在放在引擎建议正上方，
+       上轮档位与「带进来的判定」一眼就能看到。 #}
+    <div class="note warn" id="recheckBar" style="display:none">
+      <span id="recheckText"></span>
+      <button type="button" class="btn sm" id="rcSwitch" style="display:none">我要重新检测（覆盖上一轮）</button>
+    </div>
     <div class="card">
       <h2>④ 引擎建议</h2>
       <div class="grade" id="suggestGrade">—</div>
@@ -377,11 +412,6 @@
         </select></div>
       <div class="field" id="overrideBox" style="display:none"><label for="override">覆盖理由（必填）</label>
         <input id="override" type="text" placeholder="如：外观太差，按 B 处理"></div>
-      {# 扫到检测过的货：这里是「回看历史 / 复检中」的提示条（2026-10-10） #}
-      <div class="note warn" id="recheckBar" style="display:none">
-        <span id="recheckText"></span>
-        <button type="button" class="btn sm" id="rcSwitch" style="display:none">我要重新检测（覆盖上一轮）</button>
-      </div>
       {# 判到 C 档：提交后这里长出「去开报修单」按钮（2026-10-14）—— 检测员手里就是这台货 #}
       <div class="note" id="repairBar" style="display:none">
         <span id="repairText"></span>
@@ -410,9 +440,10 @@
     <div class="pool">
       {% if pending %}
       <div class="table-wrap"><table>
-        <thead><tr><th>显示编码</th><th>品牌型号</th><th>入库</th></tr></thead>
+        <thead><tr><th>进货货号</th><th>品牌型号</th><th>入库</th></tr></thead>
         <tbody>{% for it in pending %}
-          <tr><td class="nowrap"><a href="/wms/inspect?code={{ it.barcode }}">{{ it.display_code }}</a></td>
+          {# 2026-10-14 用户拍板：待检池亮「进货货号」（对供应商清单用的就是它），不再亮显示编码 #}
+          <tr><td class="nowrap mono"><a href="/wms/inspect?code={{ it.barcode }}">{{ it.sku_code or it.display_code }}</a></td>
             <td class="wrap2"><span class="clamp2">{{ it.title }}</span></td><td class="nowrap muted">{{ it.created_at | dt }}</td></tr>
         {% endfor %}</tbody>
       </table></div>
@@ -449,6 +480,22 @@
     <div class="cd-acts">
       <button type="button" class="btn" id="rcCancel">算了，先看历史</button>
       <button type="button" class="btn primary" id="rcOk">重新检测（覆盖上一轮）</button>
+    </div>
+  </div>
+</div>
+
+{# 同款归属弹窗（2026-10-14）：导入是按单品一行一台导进来的，同一款货在清单里名字
+   写得略有出入就会被发成好几个渔货号。扫到这种货时给检测员一句提醒 ——
+   并进去 = 那一款下面多一台、它的库存跟着加（不并就各归各的）。 #}
+<div class="mask" id="fishMask" style="display:none">
+  <div class="dialog">
+    <h3>这台货看着跟库里某一款是同一个东西</h3>
+    <p class="d" style="margin:0 0 10px" id="fmHead"></p>
+    <div class="fm-list" id="fmList"></div>
+    <p class="d" style="margin:10px 0 0" id="fmTip"></p>
+    <div class="dlg-act">
+      <button type="button" class="btn" id="fmNo">各归各的（不并）</button>
+      <button type="button" class="btn primary" id="fmYes">并进这一款</button>
     </div>
   </div>
 </div>
@@ -631,7 +678,7 @@ async function load(code) {
   $('sealed').checked = false; $('opened').checked = false;
   // 「缺件严重」的手动标记也清掉 —— 下一台判 D 时照旧自动勾（2026-10-13）
   $('missing').checked = false; delete $('missing').dataset.user;
-  $('inhouse').checked = false; $('official').checked = false;
+  $('repairList').checked = false;
   $('zoneFix').classList.remove('urge'); $('repairHint').innerHTML = '';
   // 上一台的「去开报修单」条不能带到下一台（只有这台判 C 才会再长出来）
   if ($('repairBar')) $('repairBar').style.display = 'none';
@@ -656,6 +703,10 @@ async function load(code) {
   $('ownCodeState').textContent = ''; $('ownCodeState').className = 'own-state';
   // 检测过的货：先问一句是不是要重新提交（复检 = 新增一轮，覆盖上一轮结论）
   if (data.tested) { askRecheck(data); } else { resetRecheck(); }
+  // 同款归属（2026-10-14）：库里还有别的渔货号跟这台货同名 —— 先问要不要并进去
+  // （复检弹窗优先：那一个必须让人先看，这条问完再问会连着弹两次，所以放后面、
+  //   且 askRecheck 已经把焦点拿走了的时候这里就先不弹）
+  if (!data.tested) { maybeAskFishMerge(data.item, data.item.fish_candidates || []); }
   refresh();
   loadLabelPreview();
 }
@@ -696,15 +747,126 @@ function enterRecheck() {
 
 function viewHistory() {
   const r = RECHECK || {};
+  const last = r.last || {};
   $('recheckMask').style.display = 'none';
   $('recheckBar').style.display = '';
   $('rcSwitch').style.display = '';
   $('recheckText').innerHTML = '<b>正在回看历史（第 ' + (r.round || 1) + ' 轮 · '
-    + ((r.last || {}).final || '未定级') + '）</b> · 提交按钮锁着，不会覆盖上一轮。';
+    + (last.final || '未定级') + '）</b> · 上一轮的判定与不合格原因已经带到下面的检查项里（供对照）；'
+    + '提交按钮锁着，点「我要重新检测」在此基础上改，提交才会覆盖上一轮。';
   $('submitBtn').textContent = '这台已检测，先点「我要重新检测」';
   $('submitBtn').disabled = true;
+  // 2026-10-14 用户口径：回看历史要把上一轮检查记录带进来 —— 判定项原样点亮、
+  // 判 × 的原因填回输入框，检测员不用再翻记录表。
+  applyHistory(last);
+  refresh();
   $('scanInput').focus();
 }
+
+// 把某一轮检测记录回填到检查项：判定按钮点亮 + 不合格原因填回输入框。
+// 只改内存态（RESULTS/DESCS），不碰库 —— 真正覆盖要等「我要重新检测」后提交。
+function applyHistory(last) {
+  const res = (last || {}).results || {};
+  const descs = (last || {}).fail_descs || {};
+  RESULTS = {}; DESCS = {};
+  Object.keys(res).forEach(k => { RESULTS[k] = res[k]; });
+  Object.keys(descs).forEach(k => { if (descs[k]) DESCS[k] = descs[k]; });
+  document.querySelectorAll('#items .item-row').forEach(row => {
+    const pass = row.querySelector('.res-btn.pass');
+    if (!pass) return;
+    const key = pass.dataset.k;
+    const v = RESULTS[key] || '';
+    row.querySelectorAll('.res-btn').forEach(b => b.classList.toggle('active', !!v && b.dataset.v === v));
+    const inp = row.querySelector('.fail-desc');
+    if (!inp) return;
+    inp.value = DESCS[key] || '';
+    inp.style.display = v === 'fail' ? '' : 'none';
+  });
+}
+
+// ------------------------------------------------------------------ 同款归属（渔货号合并）
+// （2026-10-14 用户口径）导入是按单品一导的，同一款货常被发成好几个渔货号。
+// 扫到这种货时系统先捕捉到「库里还有别的号跟它同名」，弹一句让人选：
+//   并进去 → 这台货归到那一款下面（那一款多一台，库存按汇总算，等于加库存）
+//   不并   → 各归各的，维持现在的号（下一台再扫就不问了 —— 见 FM_SKIP）
+var FISH_MERGE = null;   // {item_id, fish_code}
+var FM_SKIP = {};        // 这台货这一轮已经问过了就别反复弹
+
+function maybeAskFishMerge(item, cands) {
+  FISH_MERGE = null;
+  if (!item || !cands || !cands.length) { return; }
+  const id = String(item.id || '');
+  if (!id || FM_SKIP[id]) { return; }
+  FM_SKIP[id] = 1;                 // 不并也是个答复，同一台不再问第二遍
+  const qty = Number(item.qty || 1);
+  $('fmHead').textContent = (item.display_code || item.barcode) + '（'
+    + (item.title || '这台货') + '）现在挂着渔货号 ' + (item.fish_code || '（还没有）')
+    + '；库里还有 ' + cands.length + ' 个跟它同名的渔货号 —— 是同一款就该并到一个号下面。';
+  const box = $('fmList');
+  box.innerHTML = '';
+  cands.forEach(function (c, idx) {
+    const row = document.createElement('label');
+    row.className = 'fm-it' + (idx === 0 ? ' on' : '');
+    row.innerHTML = '<input type="radio" name="fmPick" value="' + esc(c.fish_code || '')
+      + '"' + (idx === 0 ? ' checked' : '') + '>'
+      + '<span class="fm-code mono">' + esc(c.fish_code || '') + '</span>'
+      + '<span class="fm-name">' + esc(c.name || '（没名字）') + '</span>'
+      + '<span class="fm-qty">' + (c.items || 0) + ' 个条码商品 / ' + (c.qty || 0) + ' 台</span>';
+    box.appendChild(row);
+  });
+  box.querySelectorAll('input[name=fmPick]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      box.querySelectorAll('.fm-it').forEach(function (el) {
+        el.classList.toggle('on', el.contains(r));
+      });
+    });
+  });
+  FISH_MERGE = { item_id: parseInt(id, 10), fish_code: cands[0].fish_code || '' };
+  $('fmTip').textContent = '并进去以后：这台（'
+    + qty + ' 台）算到那一款下面，那一款的库存加 ' + qty
+    + ' 台；渔枢那边按这一款的总库存走。只是改归属，不动这台货的条码与检测记录。';
+  $('fishMask').style.display = '';
+}
+
+function closeFishDialog() { $('fishMask').style.display = 'none'; }
+
+async function doFishMerge() {
+  const m = FISH_MERGE || {};
+  if (!m.item_id || !m.fish_code) { closeFishDialog(); return; }
+  const picked = document.querySelector('input[name=fmPick]:checked');
+  const target = picked ? picked.value : m.fish_code;
+  $('fmYes').disabled = true;
+  try {
+    const res = await fetch('/wms/api/item/fish-code', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_id: m.item_id, fish_code: target }),
+    });
+    const d = await res.json();
+    if (!d.ok) { banner(d.message || '并进去失败', 'err'); return; }
+    closeFishDialog();
+    banner('已并进 ' + target + '：这一款现在 ' + (d.items || 0) + ' 个条码商品（库存按汇总加）', 'ok');
+    // 页面上的渔货号要跟着变（头部那一格 + 这台货的内存态）
+    // 注意：extra_rows 在 item 里（顶层的是 records），别取错地方把沉淀字段刷没了
+    if (CUR && CUR.item) { CUR.item.fish_code = target; }
+    renderHead(CUR.item, (CUR.item || {}).extra_rows || []);
+  } catch (e) {
+    banner('并进去失败 —— 网络不稳，刷新后再试', 'err');
+  } finally {
+    $('fmYes').disabled = false;
+    $('scanInput').focus();
+  }
+}
+
+$('fmYes').addEventListener('click', doFishMerge);
+$('fmNo').addEventListener('click', function () {
+  closeFishDialog();
+  banner('各归各的：这台货仍挂在 ' + ((CUR && CUR.item && CUR.item.fish_code) || '原来的号')
+    + '（想并回去去「货品台账」里改）', 'warn');
+  $('scanInput').focus();
+});
+$('fishMask').addEventListener('click', e => {
+  if (e.target === $('fishMask')) { closeFishDialog(); $('scanInput').focus(); }
+});
 
 function resetRecheck() {
   RECHECK = null;
@@ -754,7 +916,7 @@ $('btnPrintLabel').addEventListener('click', async () => {
   if (!CUR || !CUR.item) { banner('先扫一台货再打标签', 'warn'); return; }
   const btn = $('btnPrintLabel');
   btn.disabled = true;
-  btn.textContent = '打印中…';
+  btn.innerHTML = '<i class="bi bi-printer"></i> 打印中…';
   try {
     const res = await fetch('/wms/api/label/print', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -789,7 +951,7 @@ $('btnPrintLabel').addEventListener('click', async () => {
     banner('标签没打成：网络不通（' + err + '）', 'warn');
   } finally {
     btn.disabled = false;
-    btn.textContent = '打印标签';
+    btn.innerHTML = '<i class="bi bi-printer"></i> 打印标签';
   }
 });
 
@@ -808,7 +970,14 @@ const money = v => (v === null || v === undefined || v === '' || isNaN(Number(v)
 function renderHead(item, extraRows) {
   const qty = Number(item.qty || 1);
   const cells = [
-    ['货号', item.sku_code || '—'],
+    // 渔货号（2026-10-14 用户要求「检测台重点显示」）：商品维度的主 key，
+    // 一款一号 —— 摆在第一格并高亮（主色 + 加粗），扫进来第一眼看见的就是它。
+    // 2026-10-14 新加：有号就直接链到「货品明细」，点开看这一款挂着哪些条码商品
+    ['渔货号', item.fish_code
+      ? '<a class="fish-link" href="/wms/goods/' + encodeURIComponent(item.fish_code) + '"'
+        + ' target="_blank" title="点开看这一款下面挂着哪些条码商品">' + esc(item.fish_code) + '</a>'
+      : '—（还没补号）', '', 'fish-hot'],
+    ['进货货号', item.sku_code || '—'],
     // 数量（2026-10-10）：同一个条码底下有几台 —— 台数错了整批都错，做成胶囊重点摆出来
     ['数量', '<span class="qty-pill' + (qty > 1 ? ' many' : '') + '">' + qty +
       '</span> 台（同一个条码）', '', 'qty-hot'],
@@ -835,8 +1004,8 @@ function renderHead(item, extraRows) {
     '</span><span class="v' + (vcls ? ' ' + vcls : '') + '"' +
     (vcls === 'price-hot'
       ? ' title="渔货价 = 基准价 × 该档价格系数（在「分级规则 → 价格系数」里配）"' : '') +
-    // 数量格带胶囊徽标（HTML），其余一律转义后再进 DOM
-    '>' + (vcls === 'qty-hot' ? v : esc(v)) + '</span></div>').join('');
+    // 数量格带胶囊徽标、渔货号是个链接（HTML），其余一律转义后再进 DOM
+    '>' + (vcls === 'qty-hot' || vcls === 'fish-hot' ? v : esc(v)) + '</span></div>').join('');
   const rows = (extraRows || []).filter(r => String(r.value || '').trim());
   if (rows.length) {
     html += '<div class="kv-sep">导入沉淀的商品字段（' + rows.length +
@@ -906,10 +1075,10 @@ function setResult(key, value) {
   refresh();
 }
 
-// 维修方式二选一（2026-10-13 用户拍板）：厂内自修 / 官方报修互斥 ——
-// C 报修的货必须二选一，两个都勾没有意义
+// 「故障在维修清单」与「缺件报废」互斥（2026-10-14 用户拍板：厂内/官方合并成一个勾，
+// 勾了就是故障要修，提交后 inhouse_fixable 与 must_official 一起记 true，档位照旧落 C）
 function bindRepairExclusive() {
-  const a = $('inhouse'), b = $('official');
+  const a = $('repairList'), b = $('missing');
   a.addEventListener('change', () => { if (a.checked) b.checked = false; refresh(); });
   b.addEventListener('change', () => { if (b.checked) a.checked = false; refresh(); });
 }
@@ -989,7 +1158,7 @@ async function refresh() {
   if (!CUR) return;
   const payload = {
     item_id: CUR.item.id, results: RESULTS,
-    inhouse_fixable: $('inhouse').checked, must_official: $('official').checked,
+    inhouse_fixable: $('repairList').checked, must_official: $('repairList').checked,
     missing_parts: $('missing').checked,
     sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
   };
@@ -1359,11 +1528,10 @@ async function submit() {
     if (firstErr) firstErr.focus();
     return;
   }
-  // ② 建议 C 报修：必须选一个维修方式（自修 / 官方二选一），
-  //    确实修不了就勾「缺件严重」人工判 D（2026-10-13 用户拍板）
+  // ② 建议 C 报修：必须勾「故障在维修清单」或人工判 D（2026-10-14 合并后口径）
   if (suggestGradeNow() === 'C' && !$('missing').checked
-      && !$('inhouse').checked && !$('official').checked) {
-    banner('这台建议 C 报修 —— 请先在「检修判定」里选一个维修方式（厂内自修 / 官方报修），'
+      && !$('repairList').checked) {
+    banner('这台建议 C 报修 —— 请先在「检修判定」里勾「故障在维修清单」，'
       + '确实修不了就勾「缺件严重 / 无维修价值」判 D 报废', 'err');
     $('zoneFix').classList.add('urge');
     return;
@@ -1373,7 +1541,7 @@ async function submit() {
     item_id: CUR.item.id, results: RESULTS, fail_descs: DESCS,
     final_grade: finalGrade, override_reason: $('override').value,
     uncertain: $('uncertain').checked,
-    inhouse_fixable: $('inhouse').checked, must_official: $('official').checked,
+    inhouse_fixable: $('repairList').checked, must_official: $('repairList').checked,
     missing_parts: $('missing').checked, note: $('note').value, photos: PHOTOS,
     sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
     location_code: $('location').value,

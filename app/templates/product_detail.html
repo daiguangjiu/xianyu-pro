@@ -76,13 +76,13 @@
           {# 主图默认取第一张（主图没维护时自动用图集第一张），点下面的缩略图可切换；
              大图右下角带「第几张 / 共几张」角标，切到哪张一眼看得出 #}
           <div class="detail-main-img" id="galleryMain">
-            <img src="{{ gallery[0] }}" alt="{{ product.name }}" onerror="this.parentNode.classList.add('is-broken')">
+            <img src="{{ thumb_url(gallery[0], 800) }}" alt="{{ product.name }}" onerror="this.parentNode.classList.add('is-broken')">
             <span class="img-index" id="galleryIndex">1/{{ gallery | length }}</span>
           </div>
           {% if gallery | length > 1 %}
           <div class="detail-thumbs" id="galleryThumbs">
             {% for url in gallery %}
-              <img src="{{ url }}" alt="" loading="lazy" data-src="{{ url }}"
+              <img src="{{ thumb_url(url, 160) }}" alt="" loading="lazy" data-src="{{ url }}"
                    class="{{ 'active' if loop.first }}" title="点击切换主图"
                    onclick="switchMainImage(this)" onerror="this.style.display='none'">
             {% endfor %}
@@ -250,14 +250,14 @@
           </div>
           <div class="detail-gallery">
             <div class="detail-main-img" id="detailMain{{ loop.index }}">
-              <img src="{{ group[0] }}" alt="详情图 第 {{ loop.index }} 组" loading="lazy"
+              <img src="{{ thumb_url(group[0], 800) }}" alt="详情图 第 {{ loop.index }} 组" loading="lazy"
                    onerror="this.parentNode.classList.add('is-broken')">
               <span class="img-index">1/{{ group | length }}</span>
             </div>
             {% if group | length > 1 %}
             <div class="detail-thumbs" id="detailThumbs{{ loop.index }}">
               {% for url in group %}
-                <img src="{{ url }}" alt="" loading="lazy" data-src="{{ url }}"
+                <img src="{{ thumb_url(url, 160) }}" alt="" loading="lazy" data-src="{{ url }}"
                      class="{{ 'active' if loop.first }}" title="第 {{ loop.index }} 张"
                      onclick="switchGroupImage(this, 'detailMain{{ loop.index }}')" onerror="this.style.display='none'">
               {% endfor %}

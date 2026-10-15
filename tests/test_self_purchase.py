@@ -334,17 +334,27 @@ class SelfPurchaseTest(unittest.TestCase):
         )
         self.assertEqual(paid.status_code, 303)
         order = _order(order_no)
-        self.assertEqual(order.status, "paid")
+        # 2026-10-14：支付不走线上，付完先落「待确认」，运营经理确认到账才进「待发货」
+        self.assertEqual(order.status, "confirming")
         self.assertEqual(order.pay_method, "alipay")
         self.assertTrue(order.pay_no and order.pay_no.startswith("PAY"))
         self.assertIsNotNone(order.paid_at)
 
-        # 已支付的不能再付
+        # 待确认的不能再付
         again = self.client.post(
             f"/self/pay/{order_no}", data={"method": "balance"}, follow_redirects=False
         )
         self.assertEqual(again.status_code, 303)
-        self.assertEqual(_order(order_no).status, "paid")
+        self.assertEqual(_order(order_no).status, "confirming")
+
+        # 运营经理确认收款 → 待发货
+        confirmed = self.client.post(
+            f"/self/purchases/{order_no}/actions",
+            data={"action": "confirm_pay"}, follow_redirects=False,
+        )
+        self.assertEqual(confirmed.status_code, 303)
+        order = _order(order_no)
+        self.assertEqual(order.status, "paid")
 
         # 平台发货 → 确认收货
         self.client.post(
@@ -559,10 +569,16 @@ class SelfPurchaseTest(unittest.TestCase):
         # 车里那两行已经下单，该清掉
         self.assertEqual(len(_cart_rows()), 0)
 
-        # 母单付一次钱 → 两张子单都变「待发货」
+        # 母单付一次钱 → 两张子单都进「待确认」；运营确认收款后一起转「待发货」
         paid = self.client.post(f"/self/pay/{order_no}", data={"method": "balance"},
                                 follow_redirects=False)
         self.assertEqual(paid.status_code, 303, paid.text[:200])
+        with SessionLocal() as s:
+            self.assertEqual(_order(order_no).status, "confirming")
+            for no in sub_nos:
+                self.assertEqual(_order(no).status, "confirming")
+        self.client.post(f"/self/purchases/{order_no}/actions",
+                         data={"action": "confirm_pay"}, follow_redirects=False)
         with SessionLocal() as s:
             self.assertEqual(_order(order_no).status, "paid")
             for no in sub_nos:

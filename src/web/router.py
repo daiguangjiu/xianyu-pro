@@ -111,6 +111,7 @@ from src.self_purchase import (
     cart_count,
     cart_summary,
     complete_order,
+    confirm_pay,
     create_order,
     create_split_order,
     default_address,
@@ -1427,7 +1428,7 @@ def harbor_leaves() -> JSONResponse:
 
 
 # =====================================================================
-# 2.9 我要下单 /orders/new（选品商品订单 + 其他订单）
+# 2.9 我要录单 /orders/new（选品商品订单 + 其他订单）
 # =====================================================================
 # 「其他订单」的录入模板：与飞书群里报单的格式一致（照着填就不会漏字段）
 OTHER_ORDER_TEMPLATE = """【闲鱼订单】
@@ -1449,7 +1450,7 @@ def order_new_page(
     shop_id: str = "",
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """我要下单：闲鱼出单后在这儿补一笔在线订单。
+    """我要录单：闲鱼出单后在这儿录一笔在线订单。
 
     - 带 item_id 进来 = 选品商品订单（从「我的店铺商品」点的「下单」），商品自动带出来；
     - 不带 = 其他订单，按飞书群模板填，或传一张闲鱼订单详情图让系统认。
@@ -1490,7 +1491,7 @@ def order_new_page(
         _common_ctx(
             request, "orders", db=db,
             active_sub="orders:new",
-            nav_crumb=["交易", "订单", "我要下单"],
+            nav_crumb=["交易", "订单", "我要录单"],
             owner_name=name,
             shops=_my_shop_options(request),
             goods=goods,
@@ -1631,17 +1632,18 @@ async def order_create(request: Request, db: Session = Depends(get_db)) -> Redir
             shop_name=shop_name,
             note=val("note"),
             images=images,
+            operator=val("operator") or _name,
             source=(
                 manual_order.SOURCE_SHOP_GOODS if item_id else manual_order.SOURCE_OTHER
             ),
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("手工下单落库失败：%s", exc)
-        return _redirect("/orders/new", f"下单失败：{exc}", "err")
+        logger.warning("手工录单落库失败：%s", exc)
+        return _redirect("/orders/new", f"录单失败：{exc}", "err")
 
     return _redirect(
         f"/orders/{row.downstream_order_id}",
-        f"订单已建（{row.downstream_order_id}）：待确认，确认后推给渔枢系统采购",
+        f"录单已建（{row.downstream_order_id}）：待确认，确认接单后进「待发货」",
     )
 
 
@@ -1662,6 +1664,13 @@ def orders_list(
     这里按单号把渔枢系统侧的事实取回来合并展示（只读，见 `src/web/hub_orders.py`）；
     单子还没推到渔枢系统就显示「未建档」，页面上能一键补推。
     """
+    # 2026-10-14「我要录单」：内部自营同学在飞书群报的单也按运营姓名同步进来，
+    # 幂等（同单号只建一次）；桥断了不挡订单列表。
+    try:
+        hub_orders.sync_group_orders(db)
+    except Exception:  # noqa: BLE001
+        logger.debug("飞书群报单同步失败（不挡订单列表）", exc_info=True)
+
     stmt = select(DownstreamOrder).order_by(DownstreamOrder.created_at.desc())
     if status:
         stmt = stmt.where(DownstreamOrder.status == status)
@@ -1787,22 +1796,8 @@ def order_detail(
         )
         return templates.TemplateResponse("order_detail.html", ctx)
 
-    pos = db.execute(
-        select(PurchaseOrder).where(
-            PurchaseOrder.downstream_order_id.in_([d.downstream_order_id for d in dsos])
-        )
-    ).scalars().all()
-    exceptions = db.execute(
-        select(ExceptionLog)
-        .where(
-            ExceptionLog.payload["downstream_order_id"].as_string().in_(
-                [d.downstream_order_id for d in dsos]
-            )
-        )
-        .order_by(ExceptionLog.id.desc())
-        .limit(50)
-    ).scalars().all()
-
+    # 采购单（PO）与异常日志两个区块 2026-10-15 按用户要求从详情页撤掉：
+    # PO 采购进度去「采购单」页看，异常去「日志」页按单号筛 —— 详情页只留履约信息。
     # 渔枢系统那笔单：金额口径 / 推单状态 / 收货信息（字段与渔枢系统端一致）
     order_no = hub_orders.base_order_no(dsos[0].downstream_order_id)
     hub = hub_orders.one(order_no)
@@ -1837,7 +1832,7 @@ def order_detail(
         request, "orders", db=db,
         active_sub="orders:all",
         nav_crumb=["交易", "订单", dsos[0].downstream_order_id],
-        dsos=dsos, pos=pos, exceptions=exceptions,
+        dsos=dsos,
         dso_id=dso_id, not_found=False,
         current_statuses={d.status for d in dsos},
         order_no=order_no, hub=hub,
@@ -2496,6 +2491,48 @@ def _item_image_sets(item) -> tuple[list[str], list[str]]:
     return mains[:MAX_ZIP_IMAGES], _dedup_urls(details)[:MAX_ZIP_IMAGES]
 
 
+_IMAGE_MAGICS = (  # 常见位图的文件头：写包前验一遍，别再把 HTML 错误页当 jpg 打包
+    b"\xff\xd8\xff",              # JPEG
+    b"\x89PNG\r\n\x1a\n",         # PNG
+    b"GIF8",                      # GIF87a / GIF89a
+    b"RIFF",                      # WEBP（RIFF....WEBP）
+)
+
+
+def _looks_like_image(data: bytes | None) -> bool:
+    if not data:
+        return False
+    if any(data.startswith(m) for m in _IMAGE_MAGICS):
+        return True
+    return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
+def _read_local_image(url: str) -> bytes | None:
+    """站内图（``/media/...``）不走 HTTP 回环、直接读本地 media 目录。
+
+    以前 ``_images_zip_of`` 对站内图也发 httpx 回环请求 —— /media 没进免登录前缀，
+    服务端裸抓被鉴权中间件 303 到登录页，跟随重定向拿到 200 的 HTML 原样存成
+    jpg，解压出来全是空白图。站内图本来就在同一台机器的磁盘上，直接读又快又稳。
+    """
+    path = str(url or "").split("?", 1)[0].split("#", 1)[0]
+    if not path.startswith("/media/"):
+        return None
+    try:
+        from app.config import settings  # noqa: PLC0415
+
+        root = Path(str(getattr(settings, "media_path", ""))).resolve()
+        if not str(root):
+            return None
+        target = (root / path[len("/media/"):]).resolve()
+        if root != target and root not in target.parents:
+            return None  # 越出 media 目录的路径一律不给读
+        if not target.is_file():
+            return None
+        return target.read_bytes()
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _abs_image_url(url: str, request: Request | None = None) -> str:
     """把图补成能抓的绝对地址。
 
@@ -2519,34 +2556,123 @@ def _abs_image_url(url: str, request: Request | None = None) -> str:
     return base + "/" + url.lstrip("/")
 
 
-def _images_zip_of(item, request: Request | None = None) -> tuple[bytes, str]:
+# 默认按 1080 宽打包（2026-10-15 用户拍板）：原图包动辄 90+MB，下起来要等一分钟以上；
+# 发闲鱼 1080 完全够用，要原图的传 ?w=0 即可。
+ZIP_IMAGE_WIDTH = 1080
+
+
+def _zip_image(data: bytes, url: str, max_width: int) -> tuple[bytes, str]:
+    """按宽度上限缩一张图，缩好的缓存到 media/_zipimg/<宽>/ 下（下次打包直接用）。
+
+    图已经压过一遍（jpg/png/webp），zip 层再 deflate 几乎不省（实测 97MB 只省
+    0.3MB，却要多花 16 倍时间），所以包体本身用 STORED；真要省体积只能靠缩尺寸，
+    这才是「下载慢」的解 —— 97MB 的原图包压到 1080 宽只剩十分之一左右。
+    """
+    from ..self_purchase.shop_pool import _ext_of  # noqa: PLC0415
+
+    if not max_width or not data:
+        return data, _ext_of(url)
+    try:
+        import hashlib  # noqa: PLC0415
+        import io  # noqa: PLC0415
+
+        from app.config import settings  # noqa: PLC0415
+        from PIL import Image, ImageOps  # noqa: PLC0415
+    except Exception:
+        return data, _ext_of(url)
+
+    cache_dir = Path(str(getattr(settings, "media_path", ""))) / "_zipimg" / str(max_width)
+    key = hashlib.sha1(str(url).encode("utf-8", "ignore")).hexdigest()
+    cached = cache_dir / f"{key}.jpg"
+    try:
+        if cached.is_file() and cached.stat().st_size:
+            return cached.read_bytes(), ".jpg"
+    except OSError:
+        pass
+    try:
+        with Image.open(io.BytesIO(data)) as raw:
+            im = ImageOps.exif_transpose(raw) or raw
+            w0, h0 = im.size
+            if w0 <= max_width:          # 比目标还小就不放大
+                return data, _ext_of(url)
+            height = max(1, int(round(h0 * (max_width / float(w0)))))
+            buf = io.BytesIO()
+            im.convert("RGB").resize((max_width, height), Image.LANCZOS).save(
+                buf, "JPEG", quality=88, optimize=True)
+            out = buf.getvalue()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cached.write_bytes(out)
+        return out, ".jpg"
+    except Exception:                    # 缩不动就发原图，不能让整包少图
+        return data, _ext_of(url)
+
+
+def _images_zip_of(
+    item, request: Request | None = None, part: str = "all", idx: int = 1,
+    max_width: int = ZIP_IMAGE_WIDTH,
+) -> tuple[bytes, str]:
     """把这款货的图打包成 zip，返回 (字节, 文件名)。
 
-    包里按「主图 / 详情图」分两个目录，编号 01、02…（顺序即详情页的顺序）；
+    包里按目录分好、编号 01、02…（顺序即详情页的顺序）；
     个别图抓不下来不影响出包，缺哪些写进 README.txt。
+
+    2026-10-15 起支持只打包其中一部分 —— 详情页「头图」「第 N 组」各自有下载按钮：
+      · part=all（默认）：头图 + 详情图，两个目录，跟以前一样；
+      · part=head：只要头图（发布页封面用的就是这几张）；
+      · part=group&idx=N：只要详情图第 N 组（切片口径用详情页同一份，不会对不上）。
     """
+    from app.services import product as hub_product  # noqa: PLC0415
     from ..self_purchase.shop_pool import _ext_of, _fetch  # noqa: PLC0415
 
     mains, details = _item_image_sets(item)
+    part = str(part or "all").strip().lower()
+    try:
+        idx = max(1, int(idx or 1))
+    except (TypeError, ValueError):
+        idx = 1
+
+    if part == "head":
+        folders = [("头图", mains)]
+        suffix = "头图"
+    elif part == "group":
+        groups = hub_product.detail_image_groups(details) or [details]
+        if idx > len(groups):
+            idx = len(groups)
+        folders = [(f"详情图第{idx}组", groups[idx - 1])]
+        suffix = f"详情图第{idx}组"
+    else:
+        part = "all"
+        folders = [("主图", mains), ("详情图", details)]
+        suffix = "图片"
+
     failed: list[str] = []
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for folder, urls in (("主图", mains), ("详情图", details)):
+    total = sum(len(urls) for _, urls in folders)
+    # 不压缩（2026-10-15 实测）：97MB 的图 deflate 只省 0.3MB，却从 0.2 秒变成 3.3 秒
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as zf:
+        for folder, urls in folders:
             for index, url in enumerate(urls, 1):
-                data = _fetch(_abs_image_url(url, request))
-                if data is None:
+                # 站内 /media 图直接读本地磁盘（httpx 回环会被鉴权 303 到登录页，
+                # 登录页 HTML 存成 jpg 就是用户看到的「空白图」）；外链图才走抓取
+                data = _read_local_image(url)
+                if data is None and not url.startswith("/media/"):
+                    data = _fetch(_abs_image_url(url, request))
+                if not _looks_like_image(data):
                     failed.append(f"{folder} {index:02d}  {url}")
                     continue
-                zf.writestr(f"{folder}/{index:02d}{_ext_of(url)}", data)
+                data, ext = _zip_image(data, url, max_width)
+                zf.writestr(f"{folder}/{index:02d}{ext}", data)
         readme = [
             "渔货栈 · 商品图片包",
             f"商品：{item.title or ''}",
             f"货源：{item.item_id}",
             "",
-            f"主图 {len(mains)} 张、详情图 {len(details)} 张，"
-            f"成功 {len(mains) + len(details) - len(failed)} 张。",
+            "、".join(f"{name} {len(urls)} 张" for name, urls in folders)
+            + f"，成功 {total - len(failed)} 张。",
             "",
-            "解压后「主图 / 详情图」两个目录按编号排好序，直接就能传到闲鱼发布页。",
+            f"每张等比压到宽 {max_width} 像素（原图直出，未缩放）。"
+            if max_width else "原图直出，未做任何缩放。",
+            "解压后按目录、编号排好序，直接就能传到闲鱼发布页。",
         ]
         if failed:
             readme += ["", "以下图片这次没抓到（图床临时挂了，稍后重下即可）：", *failed]
@@ -2554,20 +2680,32 @@ def _images_zip_of(item, request: Request | None = None) -> tuple[bytes, str]:
 
     code = str(item.item_id or "images").replace("/", "-")
     title = re.sub(r"[\\/:*?\"<>|\s]+", "_", str(item.title or ""))[:20]
-    return buf.getvalue(), f"{title or '商品'}图片_{code}.zip"
+    sized = f"{max_width}w" if max_width else ""
+    return buf.getvalue(), f"{title or '商品'}{suffix}{sized}_{code}.zip"
 
 
 @router.get("/goods/{item_id}/images.zip")
-def goods_images_zip(item_id: str, request: Request, db: Session = Depends(get_db)):
-    """商品图片包：主图 + 详情图一次性打包下载（替代以前的一张张下载）。"""
+def goods_images_zip(item_id: str, request: Request, part: str = "all", idx: int = 1,
+                     w: int = ZIP_IMAGE_WIDTH, db: Session = Depends(get_db)):
+    """商品图片包：一次性打包下载（替代以前的一张张下载）。
+
+    part=all（默认）头图 + 详情图全打；part=head 只要头图；
+    part=group&idx=N 只要详情图第 N 组 —— 详情页上三个按钮分别对应这三种。
+    w>0：每张等比压到该宽度再打包（缩好的有缓存），原图包九十多 MB 时用它下得快。
+    """
     item = db.query(SupplierItem).filter(SupplierItem.item_id == item_id).first()
     if item is None:
         return JSONResponse(
             {"ok": False, "message": f"货源不存在：{item_id}"}, status_code=404,
         )
-    data, name = _images_zip_of(item, request)
+    data, name = _images_zip_of(item, request, part=part, idx=idx, max_width=w)
     # 文件名带中文：既给 ASCII 兜底又给 RFC 5987 的 UTF-8 写法（旧浏览器只认前者）
-    ascii_name = "images-" + str(item.item_id or "").replace("/", "-") + ".zip"
+    # 分片下载时 ASCII 名也带上标记，下载目录里不会三个包都叫同一个名字
+    tag = "" if str(part).lower() == "all" else (
+        "-head" if str(part).lower() == "head" else f"-group{idx}")
+    if w:
+        tag += f"-{int(w)}w"
+    ascii_name = "images-" + str(item.item_id or "").replace("/", "-") + tag + ".zip"
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/zip",
@@ -3312,6 +3450,8 @@ async def purchase_action(request: Request, order_no: str, db: Session = Depends
     action = str(form.get("action") or "").strip().lower()
     if action == "cancel":
         cancel_order(db, order, str(form.get("reason") or ""))
+    elif action == "confirm_pay":
+        confirm_pay(db, order)
     elif action == "ship":
         mark_shipped(
             db, order,

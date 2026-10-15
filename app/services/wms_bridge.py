@@ -96,6 +96,9 @@ def lookup_item(code: str) -> dict[str, Any] | None:
             "barcode": str(item.barcode or ""),
             "display_code": str(item.display_code or ""),
             "sku_code": str(item.sku_code or ""),
+            # 渔货号（2026-10-14）：**商家编码写的就是它** —— 这款货在渔集的身份证，
+            # 后面渔集出库 / 退货召回也按它认回来改库存（一个号对多个条码商品）
+            "fish_code": str(item.fish_code or ""),
             "product_name": str(item.product_name or item.title or ""),
             "brand": str(item.brand or ""),
             "model": str(item.model or ""),

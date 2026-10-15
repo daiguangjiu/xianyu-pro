@@ -121,7 +121,7 @@
             <td>
               <div class="d-flex align-items-center gap-2">
                 {% if p.image_path %}
-                  <img src="{{ p.image_path }}" alt=""
+                  <img src="{{ thumb_url(p.image_path, 96) }}" alt=""
                        style="width:40px;height:40px;object-fit:cover;border-radius:8px;border:1px solid var(--c-border);flex-shrink:0;"
                        onerror="this.style.display='none'">
                 {% else %}
@@ -227,7 +227,7 @@
     <article class="gcard" data-item="{{ p.id }}">
       <div class="gcard-thumb">
         {% if p.image_path %}
-          <img src="{{ p.image_path }}" alt="{{ p.name }}" loading="lazy" onerror="this.style.display='none'">
+          <img src="{{ thumb_url(p.image_path, 400) }}" alt="{{ p.name }}" loading="lazy" onerror="this.style.display='none'">
         {% else %}
           <div class="ph"><i class="bi bi-image"></i></div>
         {% endif %}

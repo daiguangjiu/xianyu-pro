@@ -1,4 +1,4 @@
-"""自营端「我要下单」：闲鱼出单之后，在这儿补一笔在线订单（2026-10-11）。
+"""自营端「我要录单」（原「我要下单」，2026-10-14 改名）：闲鱼出单之后，在这儿录一笔在线订单。
 
 两种单：
 - **选品商品订单** —— 在「我的店铺商品」里直接下单，商品信息自动带出来；
@@ -130,6 +130,7 @@ def create_manual_order(
     shop_name: str = "",
     note: str = "",
     images=None,
+    operator: str = "",
     source: str = SOURCE_OTHER,
 ) -> DownstreamOrder:
     """落一笔手工补的在线订单（状态 pending 待确认，后面走正常流转）。
@@ -152,6 +153,8 @@ def create_manual_order(
         raw_json={
             "source": source,
             "owner": str(owner or ""),
+            # 运营姓名（2026-10-14）：与飞书群报单人对齐，谁录的单 / 谁在群里报的都看得到
+            "operator": str(operator or "")[:64],
             "title": str(title or "")[:255],
             "item_id": str(item_id or ""),
             "shop_id": int(shop_id or 0),

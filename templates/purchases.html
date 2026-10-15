@@ -17,7 +17,8 @@
 {% endblock %}
 
 {% block content %}
-{% set badge_map = {'pending_pay': 'bg-warning text-dark', 'paid': 'bg-info text-dark',
+{% set badge_map = {'pending_pay': 'bg-warning text-dark', 'confirming': 'bg-warning text-dark',
+                    'paid': 'bg-info text-dark',
                     'shipped': 'bg-primary', 'completed': 'bg-success', 'cancelled': 'bg-secondary'} %}
 
 <div class="page-header">
@@ -35,7 +36,7 @@
        class="btn btn-sm {% if not status %}btn-primary{% else %}btn-outline-secondary{% endif %}">
       全部 <span class="ms-1" style="font-family: var(--font-mono);">{{ by_status.values() | sum }}</span>
     </a>
-    {% for key, label in [('pending_pay', '待支付'), ('paid', '待发货'), ('shipped', '已发货'), ('completed', '已完成'), ('cancelled', '已取消')] %}
+    {% for key, label in [('pending_pay', '待支付'), ('confirming', '待确认'), ('paid', '待发货'), ('shipped', '已发货'), ('completed', '已完成'), ('cancelled', '已取消')] %}
       <a href="{{ self_url('/purchases?status=' ~ key) }}"
          class="btn btn-sm {% if status == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">
         {{ label }} <span class="ms-1" style="font-family: var(--font-mono);">{{ by_status.get(key, 0) }}</span>
@@ -93,6 +94,8 @@
             <td class="table-actions">
               {% if o.status == 'pending_pay' %}
                 <a href="{{ self_url('/pay/' ~ o.order_no) }}" class="btn btn-sm btn-primary">去支付</a>
+              {% elif o.status == 'confirming' %}
+                <a href="{{ self_url('/purchases/' ~ o.order_no) }}" class="btn btn-sm btn-warning text-dark">待确认收款</a>
               {% else %}
                 <a href="{{ self_url('/purchases/' ~ o.order_no) }}" class="btn btn-sm btn-ghost">详情</a>
               {% endif %}

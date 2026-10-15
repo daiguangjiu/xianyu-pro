@@ -6,9 +6,13 @@
 **谁调它**：渔集的 ``wms/bridge.py::push_stock()``（渔集出库核销、买家退货召回时各调一次）。
 方向是**渔集 → 渔枢**，只减/加库存，不动价格、不动状态、不动别的字段。
 
-**认货靠条码**：渔枢建档时「商家编码」直接复用渔集的条码（用户口径），所以按
-``Product.code == 条码`` 就能认回这款商品；再顺着它找到渔货栈那条货源（``hub-prd-<商品id>``），
-一起把库存改掉。认不回来的条码记在 ``missing`` 里返回，页面会说人话。
+**认货靠渔货号**（2026-10-14 起）：以前「商家编码」直接复用渔集那**一台货的条码**，
+同款多台分散在好几个编码上，渔枢永远不知道这一款还剩多少。现在统一认渔集内部发的
+**渔货号**（``YS + 日期 + 流水``，一个渔货号 = 一款货 = 多个条码商品），按
+``Product.code == 渔货号`` 认回这款商品；再顺着它找到渔货栈那条货源（``hub-prd-<商品id>``），
+一起把库存改掉。认不回来的记在 ``missing`` 里返回，页面会说人话。
+调用方（``wms.bridge.push_stock``）已经把条码换算成渔货号并按款合并过了 ——
+这里收到的就是「这一款少了 / 多了几台」。
 
 **口径**：库存按台数整进整出（渔集一台货可以带 N 台，见 ``WmsItem.qty``）；
 商品级库存 = 各规格库存之和（沿用 ``product.sync_stock_from_skus`` 的口径），
@@ -107,10 +111,10 @@ def _shift_supplier_item(db, product: Product, delta: int) -> tuple[int, int] | 
 
 
 def apply_stock_deltas(rows: list[tuple[str, int]]) -> dict:
-    """把 ``[(条码, 变动台数)]`` 落到渔枢商品库存与渔货栈平台库存上。
+    """把 ``[(渔货号, 变动台数)]`` 落到渔枢商品库存与渔货栈平台库存上。
 
     负数 = 出库减少，正数 = 回库增加。返回 ``{updated, missing, notes, unchanged}``：
-    ``missing`` 是渔枢里没认到商品的条码（页面上要提醒人），``notes`` 是给人看的账变说明。
+    ``missing`` 是渔枢里没认到商品的渔货号（页面上要提醒人），``notes`` 是给人看的账变说明。
     """
     moves = [(str(code or "").strip(), int(qty or 0)) for code, qty in (rows or [])]
     moves = [(code, qty) for code, qty in moves if code and qty]
@@ -121,10 +125,10 @@ def apply_stock_deltas(rows: list[tuple[str, int]]) -> dict:
     from ..db import SessionLocal
 
     with SessionLocal() as db:
-        for barcode, delta in moves:
-            product = db.scalar(select(Product).where(Product.code == barcode))
+        for fish_code, delta in moves:
+            product = db.scalar(select(Product).where(Product.code == fish_code))
             if product is None:
-                report["missing"].append(barcode)
+                report["missing"].append(fish_code)
                 continue
             before, after, moved = _shift_product(db, product, delta)
             if not moved:
@@ -153,7 +157,7 @@ def sync_note(report: dict | None) -> str:
         bits.append(f"渔枢 / 渔货栈库存已同步 {updated} 款")
     missing = list(report.get("missing") or [])
     if missing:
-        bits.append("这些条码在渔枢没认到商品（库存没同步）："
+        bits.append("这些渔货号在渔枢没认到商品（库存没同步）："
                     + "、".join(str(x) for x in missing[:3])
                     + ("…" if len(missing) > 3 else ""))
     unchanged = list(report.get("unchanged") or [])

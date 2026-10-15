@@ -47,6 +47,14 @@
 </div>
 
 <div class="card flush">
+  {# 2026-10-14 用户拍板：页头摆一排「所有报修状态」的统计签 —— 各状态有多少单、点一下就筛，
+     不用在下拉里翻，也一眼看清这张清单覆盖了哪些状态 #}
+  <div class="rchip-row">
+    <a class="rchip {{ 'on' if not filters.status }}" href="/wms/repairs">全部 {{ total_all }}</a>
+    {% for v, t in statuses %}
+    <a class="rchip {{ 'on' if filters.status == v }}" href="/wms/repairs?status={{ v }}">{{ t }} {{ status_counts.get(v, 0) }}</a>
+    {% endfor %}
+  </div>
   <div class="filters padded">
     <form method="get" action="/wms/repairs">
       <div class="field grow"><label for="f-q">单号 / 条码 / 网点 / 凭证号</label>
@@ -73,7 +81,7 @@
         <td class="wrap2"><span class="clamp2">{{ o.vendor }}</span></td>
         <td class="mono muted">{{ o.ticket_no or '—' }}</td>
         <td>{% if o.timeout_flag %}<span class="badge failed">超时</span>
-            {% else %}<span class="badge {{ 'done' if o.status == 'closed' else 'pending' }}">{{ o.status }}</span>{% endif %}</td>
+            {% else %}<span class="badge {{ 'done' if o.status == 'closed' else ('muted' if o.status == 'cancelled' else 'pending') }}">{{ wms_repair_status_label(o.status) }}</span>{% endif %}</td>
         <td class="num">{{ bits.money_cell(o.paid_amount) }}</td>
         <td class="nowrap muted">{{ o.promise_date | dt if o.promise_date else '未送修' }}</td>
         <td class="nowrap muted">{{ o.sent_at | dt if o.sent_at else '—' }}</td>
@@ -83,4 +91,16 @@
   </table></div>
   {% else %}{{ bits.empty('还没有报修工单') }}{% endif %}
 </div>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* 状态统计签（2026-10-14）：一排可点的状态清单，选中的高亮 */
+  .rchip-row{display:flex;flex-wrap:wrap;gap:8px;padding:12px 14px 0}
+  .rchip{display:inline-block;padding:5px 12px;border:1px solid var(--c-border);
+    border-radius:999px;font-size:13px;color:var(--c-text);background:var(--c-bg);
+    text-decoration:none;font-variant-numeric:tabular-nums}
+  .rchip:hover{border-color:var(--c-primary)}
+  .rchip.on{background:var(--c-primary);border-color:var(--c-primary);color:#fff;font-weight:600}
+</style>
 {% endblock %}

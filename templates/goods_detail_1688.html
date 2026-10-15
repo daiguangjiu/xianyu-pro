@@ -230,6 +230,14 @@
     font-size: 13px; font-weight: 600; margin-bottom: 10px;
   }
   .pdp-img-group-hd .sub { font-weight: 400; font-size: 12px; color: var(--c-text-muted, #64748b); }
+  /* 图片包尺寸切换（2026-10-15）：1080 精简 / 原图，两个小按钮合成一个分段控件 */
+  .pdp-zip-size { display: inline-flex; border: 1px solid var(--c-border, #e2e8f0);
+    border-radius: 6px; overflow: hidden; }
+  .pdp-zip-size button { border: 0; background: #fff; padding: 6px 12px; font-size: 12.5px;
+    cursor: pointer; color: var(--c-text-muted, #64748b); }
+  .pdp-zip-size button + button { border-left: 1px solid var(--c-border, #e2e8f0); }
+  .pdp-zip-size button.on { background: var(--pdp-soft, #fff6f0);
+    color: var(--pdp-brand-dark, #e85a00); font-weight: 600; }
   .pdp-imgpick { display: flex; flex-direction: column; gap: 10px; align-items: center; }
   .pdp-imgpick-stage {
     position: relative; width: 100%; max-width: 380px; aspect-ratio: 1 / 1;
@@ -647,13 +655,26 @@
         <span>·</span>
         <span>SKU {{ sku_rows|length }} 个 · 规格 {{ spec_defs|length }} 维</span>
         {# 2026-10-11：素材直接在详情页拿 —— 文案一键复制（按钮变「已复制」）、图片批量下载 #}
-        <div class="pdp-media-acts" style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;">
+        <div class="pdp-media-acts" style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          {# 图片尺寸切换（2026-10-15 用户拍板）：默认 1080 精简 —— 原图包动辄 90+MB，
+             下起来要等一分钟以上；发闲鱼 1080 完全够用。切「原图」三个下载按钮一起换。 #}
+          <span class="pdp-zip-size" id="pdpZipSize">
+            <button type="button" class="on" data-w="1080"
+                    title="每张等比压到 1080 宽：体积约为原图的一成，闲鱼发布够用">1080 精简</button>
+            <button type="button" data-w="0" title="原图直出：最大最清晰，但包会很大">原图</button>
+          </span>
           <button type="button" class="pdp-btn plain" onclick="pdpCopyAll()">
             <i class="bi bi-clipboard"></i> <span id="pdpCopyAllText">复制商品文案</span>
           </button>
+          {# 头图包（2026-10-15）：发布页封面只要这几张，单独下一个包，不用从总包里挑 #}
+          <a class="pdp-btn plain" data-zip="head" href="#"
+             title="只打包头图（主图）：发布页封面用的就是这几张（尺寸跟左边切换走）">
+            <i class="bi bi-file-earmark-zip"></i> 下载头图文件包（ZIP）· {{ images|length }} 张
+          </a>
           <button type="button" class="pdp-btn plain" onclick="pdpDownloadZip()"
-                  title="电脑用：主图与详情图打包成一个 ZIP，一次下载完">
-            <i class="bi bi-file-earmark-zip"></i> 下载图片包（ZIP）
+                  title="头图与详情图一起打包成一个 ZIP，一次下载完（尺寸跟左边切换走）">
+            <i class="bi bi-file-earmark-zip"></i>
+            下载所有图片包（ZIP）· {{ (images|length) + (detail_images|length) }} 张
           </button>
           <button type="button" class="pdp-btn plain" onclick="pdpOpenImageWall()"
                   title="手机用：所有图一次铺开，长按每张 → 存储到照片">
@@ -970,6 +991,11 @@
             <div class="pdp-img-group-hd">
               <i class="bi bi-images"></i> 第 {{ loop.index }} 组
               <span class="sub">共 {{ group | length }} 张 · 点下面的缩略图切换</span>
+              {# 分组包（2026-10-15）：这一组单独下一个包，只缺其中一组时不用整包重下 #}
+              <a class="pdp-btn plain" style="margin-left:auto" data-zip="group" data-idx="{{ loop.index }}"
+                 href="#" title="只打包这一组的详情图（尺寸跟左上角的切换走）">
+                <i class="bi bi-file-earmark-zip"></i> 下载图片包（ZIP）· {{ group | length }} 张
+              </a>
             </div>
             <div class="pdp-imgpick">
               <div class="pdp-imgpick-stage">
@@ -1439,10 +1465,39 @@
 
   /* 图片：电脑上走后端打包的 ZIP（2026-10-13 —— 以前逐张下载要点二十次，现场根本不用），
      手机上开图片墙长按存相册（浏览器不许网页直接写相册，这是唯一合规的做法）。 */
+  /* 图片包尺寸（2026-10-15 用户拍板）：默认 1080 精简，原图包 90+MB 下起来太慢；
+     切「原图」时三个下载按钮（头图 / 全部 / 每组）的地址一起换，共用一个选择。 */
+  var PDP_ZIP_WIDTH = 1080;
+  function pdpZipUrl(part, idx) {
+    var u = ITEM_IMAGES_ZIP_URL + '?w=' + PDP_ZIP_WIDTH;
+    if (part) { u += '&part=' + encodeURIComponent(part); }
+    if (idx) { u += '&idx=' + encodeURIComponent(idx); }
+    return u;
+  }
+  function pdpRefreshZipLinks() {
+    var links = document.querySelectorAll('[data-zip]');
+    for (var i = 0; i < links.length; i++) {
+      links[i].href = pdpZipUrl(links[i].getAttribute('data-zip'), links[i].getAttribute('data-idx'));
+    }
+  }
+  (function () {
+    var btns = document.querySelectorAll('#pdpZipSize button');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () {
+        PDP_ZIP_WIDTH = parseInt(this.getAttribute('data-w'), 10) || 0;
+        for (var j = 0; j < btns.length; j++) { btns[j].classList.remove('on'); }
+        this.classList.add('on');
+        pdpRefreshZipLinks();
+      });
+    }
+  })();
+  pdpRefreshZipLinks();
+
   function pdpDownloadZip() {
     if (!(PDP_DOWNLOAD_IMAGES || []).length) { showToast('这款货没有图片可下载', 'err'); return; }
-    showToast('正在打包 ' + PDP_DOWNLOAD_IMAGES.length + ' 张图片…', 'ok');
-    window.location.href = ITEM_IMAGES_ZIP_URL;
+    var size = PDP_ZIP_WIDTH ? PDP_ZIP_WIDTH + ' 宽' : '原图';
+    showToast('正在打包 ' + PDP_DOWNLOAD_IMAGES.length + ' 张图片（' + size + '）…', 'ok');
+    window.location.href = pdpZipUrl('');
   }
   function pdpOpenImageWall() {
     window.location.href = ITEM_IMAGES_WALL_URL;

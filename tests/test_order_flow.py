@@ -350,7 +350,7 @@ class WebActionRoute(unittest.TestCase):
         self.client.post(f"/self/orders/{DSO_ID}/action", data={"action": "confirm"})
         html = self.client.get(f"/self/orders/{DSO_ID}").text
         self.assertIn("订单流转", html)
-        self.assertIn("待推单", html)
+        self.assertIn("待发货", html)
         self.assertIn("推给渔枢系统采购", html, "当前该做的动作是推给渔枢系统")
         self.assertIn("确认接单", html)  # 流水里记了这次动作
 

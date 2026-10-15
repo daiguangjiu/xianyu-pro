@@ -149,12 +149,61 @@ def hub_suppliers(db, keyword: str = "", limit: int = 500) -> list[dict]:
     ]
 
 
+def to_fish_rows(rows: list[tuple[str, int]]) -> list[tuple[str, int]]:
+    """``[(条码, 变动台数)]`` → ``[(渔货号, 变动台数)]``（2026-10-14）。
+
+    渔枢的商品档案自这次起认的是**渔货号**（商家编码存的就是它），所以推过去的
+    也得是渔货号；同一款一口气出了好几台时，变动**合并成一条**再推 ——
+    渔枢那边一个商家编码对上来的是一整款货，库存就是这个渔货号的合计台数。
+
+    认不到渔货号的条码**原样留着**（老数据 / 还没补号的货），让它照旧走进
+    ``missing`` 里在页面上报出来，别悄悄丢掉。
+    """
+    moves = [(str(code or "").strip().upper(), int(qty or 0)) for code, qty in (rows or [])]
+    moves = [(code, qty) for code, qty in moves if code and qty]
+    if not moves:
+        return []
+    fall_back = lambda: [(code, qty) for code, qty in moves]  # noqa: E731
+    try:
+        from sqlalchemy import select
+
+        from .db import SessionLocal
+        from .models import WmsItem
+    except Exception:  # noqa: BLE001
+        logger.info("渔集的表不可用（库存沿用条码推送）", exc_info=True)
+        return fall_back()
+    cache: dict[str, str] = {}
+    merged: dict[str, int] = {}
+    order: list[str] = []
+    try:
+        with SessionLocal() as db:
+            for code, qty in moves:
+                fish = cache.get(code)
+                if fish is None:
+                    item = db.scalar(select(WmsItem).where(WmsItem.barcode == code))
+                    fish = str(item.fish_code or "").strip().upper() if item else ""
+                    cache[code] = fish
+                key = fish or code
+                if key not in merged:
+                    merged[key] = 0
+                    order.append(key)
+                merged[key] += qty
+    except Exception:  # noqa: BLE001
+        logger.warning("查渔货号失败（库存沿用条码推送）", exc_info=True)
+        return fall_back()
+    return [(key, merged[key]) for key in order if merged[key]]
+
+
 def push_stock(rows: list[tuple[str, int]]) -> dict:
     """把渔集的库存变动推给渔枢的商品库存与渔货栈平台库存（2026-10-10）。
 
     ``rows = [(条码, 变动台数)]`` —— 负数 = 出库减、正数 = 退货召回加。渔集出库核销
-    （货真卖了）与买家退货召回（货回来了）各调一次，**认货靠条码**：渔枢建档时
-    「商家编码」直接复用渔集的条码，所以按 ``Product.code == 条码`` 认回那款商品。
+    （货真卖了）与买家退货召回（货回来了）各调一次。
+
+    **认货靠渔货号**（2026-10-14）：以前渔枢建档时「商家编码」直接复用渔集的条码，
+    按 ``Product.code == 条码`` 认回来 —— 可是条码是「一台一个」，同一款货出两台就
+    得推两次、且同款分散在好几个编码上，渔枢那边永远不知道这一款总共还剩多少。
+    现在两边统一认渔货号：入口仍是条码（现场扫的就是它），出口换成渔货号并合并。
 
     这是桥里唯一一个「往平台写」的动作，边界照旧：
       · 独立部署（``WMS_STANDALONE``）直接不写；
@@ -166,6 +215,7 @@ def push_stock(rows: list[tuple[str, int]]) -> dict:
     moves = [(code, qty) for code, qty in moves if code and qty]
     if not moves or standalone():
         return empty
+    moves = to_fish_rows(moves)
     try:
         from app.services.wms_stock import apply_stock_deltas
     except Exception:  # noqa: BLE001  平台侧没这个模块（独立部署 / 老版本）
@@ -191,7 +241,7 @@ def hub_sync_note(report: dict | None) -> str:
         bits.append(f"渔枢 / 渔货栈库存已同步 {updated} 款")
     missing = [str(x) for x in (report.get("missing") or [])]
     if missing:
-        bits.append("这些条码在渔枢没认到商品、库存没同步：" + "、".join(missing[:3])
+        bits.append("这些渔货号在渔枢没认到商品、库存没同步：" + "、".join(missing[:3])
                     + ("…" if len(missing) > 3 else ""))
     unchanged = [str(x) for x in (report.get("unchanged") or [])]
     if unchanged:

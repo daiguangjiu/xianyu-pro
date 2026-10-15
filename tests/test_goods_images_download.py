@@ -55,16 +55,21 @@ class GoodsImagesDownloadTest(unittest.TestCase):
             s.query(ChannelListing).delete()
             s.query(SupplierItem).delete()
             s.commit()
-        # zip 里的图是 httpx 抓的：这里替掉抓图函数，回一张最小的 PNG
-        from src.self_purchase import shop_pool
+        # 2026-10-14 起站内 /media 图不再 httpx 回环抓（那是「空白图」的根因），
+        # 打包直接读本地磁盘 —— 测试里把真图落进 media 目录，走的线上同一条链路
+        from app.config import settings
 
-        self._origin_fetch = shop_pool._fetch
-        shop_pool._fetch = lambda url: PNG
+        self._media_dir = Path(str(settings.media_path)) / "test"
+        self._media_dir.mkdir(parents=True, exist_ok=True)
+        self._made_files = []
+        for name in ("main.jpg", "2.jpg", "3.jpg", "d1.jpg", "d2.jpg"):
+            target = self._media_dir / name
+            target.write_bytes(PNG)
+            self._made_files.append(target)
 
     def tearDown(self) -> None:
-        from src.self_purchase import shop_pool
-
-        shop_pool._fetch = self._origin_fetch
+        for made in getattr(self, "_made_files", []):
+            made.unlink(missing_ok=True)
         with SessionLocal() as s:
             s.query(SupplierItem).delete()
             s.commit()
@@ -101,6 +106,29 @@ class GoodsImagesDownloadTest(unittest.TestCase):
         self.assertIn("README.txt", names, "包里给一份说明（含没抓到的清单）")
         self.assertIn("测试", zf.read("README.txt").decode("utf-8"), "说明里要有商品标题")
         self.assertEqual(zf.read("主图/01.jpg"), PNG)
+
+    def test_12_default_pack_is_1080_slim(self):
+        """默认按 1080 宽打包（2026-10-15 用户拍板）：文件名与 README 都要体现尺寸。
+
+        原图包动辄 90+MB，下起来要等一分钟以上；发闲鱼 1080 完全够用。
+        """
+        item = self._make_item()
+        resp = self.client.get(f"/self/goods/{item.item_id}/images.zip")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("1080w", resp.headers.get("content-disposition", ""),
+                      "默认是精简包，文件名带 1080w")
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            self.assertIn("每张等比压到宽 1080",
+                          zf.read("README.txt").decode("utf-8"))
+
+    def test_13_original_pack_still_available(self):
+        """要原图传 ?w=0：页面上的「原图」切换就是走这个。"""
+        item = self._make_item()
+        resp = self.client.get(f"/self/goods/{item.item_id}/images.zip?w=0")
+        self.assertEqual(resp.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            self.assertIn("原图直出", zf.read("README.txt").decode("utf-8"))
+            self.assertEqual(zf.read("主图/01.jpg"), PNG, "原图包字节不变")
 
     def test_15_relative_media_path_goes_absolute(self):
         """站内图是 /media/... 相对路径：抓图前必须补成绝对地址，否则一个都抓不到。"""

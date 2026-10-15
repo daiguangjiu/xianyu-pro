@@ -316,6 +316,14 @@ def preview_css() -> str:
 .lbl-fake { border: 1px dashed #94a3b8; color: #64748b; font-size: 10px;
   display: flex; align-items: center; justify-content: center; background: #f8fafc; }
 .lbl-foot { font-size: 11.5px; color: var(--c-text-muted, #6b7280); margin-top: 6px; }
+/* 窄屏兜底（2026-10-12 用户：弹窗把页面撑宽了）：纸面按毫米 × 固定像素画出来，
+   60mm × 1.7 倍 = 385px，比手机屏还宽 —— 在这里让它在自己那一行局部横滑，
+   别把整页撑出横向滚动条。检测台与标签预览页共用这段口径，一处改两处生效。 */
+@media (max-width: 560px) {
+  .lbl-item { display: block; max-width: 100%; overflow-x: auto; overflow-y: hidden;
+    margin: 0 0 10px; -webkit-overflow-scrolling: touch; }
+  .lbl-preview, .pv-stage { justify-content: flex-start; }
+}
 """
 
 

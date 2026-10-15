@@ -564,6 +564,57 @@ def _write_failed_log(
     db.commit()
 
 
+def fish_plan(db: Session, payload: list[dict], target: str = "") -> dict:
+    """导入前先算一遍「这张表进来后会归成几个渔货号」（**只读，不写库**）。
+
+    导入是**按单品一行一台**导进来的，同一款货在清单里出现二十次就是二十行 ——
+    而渔货号是「一款一号」，所以这里先按商品名指纹归并，把结果摆给导入的人看：
+
+      ``groups``  ``[(商品名, 行数, 台数, 渔货号, 是不是新发号)]``（按台数倒序）
+      ``total``   归并后一共几款
+      ``reuse``   其中几款会**并进库里已有的渔货号**
+      ``fresh``   其中几款要**新发渔货号**
+
+    ``target`` 非空时整批并进这一个渔货号（人在预览页指定的合并目标）——
+    同一批货被拆成两张表导、或者清单里那一款的名字写走样了，就靠这个口子拉回来。
+
+    没有商品名的行认不了亲，建档时各自发一个号（算进 ``fresh``）。
+    """
+    target = str(target or "").strip().upper()
+    index = intake.fish_index(db)
+    buckets: dict[str, dict] = {}
+    for line in payload or []:
+        name = str(line.get("product_name") or "").strip()
+        key = intake.fish_name_key(name)
+        if not key:
+            key = "__solo_%s" % (str(line.get("sku_code") or "") or len(buckets))
+        slot = buckets.get(key)
+        if slot is None:
+            slot = buckets[key] = {"name": name, "rows": 0, "qty": 0}
+        slot["rows"] += 1
+        slot["qty"] += int(line.get("qty") or 1) or 1
+    groups: list[dict] = []
+    fresh = 0
+    reuse = 0
+    for key, slot in buckets.items():
+        if target:
+            fish, is_new = target, False
+        elif key.startswith("__solo_"):
+            fish, is_new = "", True    # 没商品名 → 建档时按行各发一个号
+        else:
+            fish = str(index.get(key) or "")
+            is_new = not fish
+        if is_new:
+            fresh += 1
+        else:
+            reuse += 1
+        groups.append({"name": slot["name"], "rows": slot["rows"], "qty": slot["qty"],
+                       "fish_code": fish, "fresh": is_new})
+    groups.sort(key=lambda g: (-int(g["qty"]), str(g["name"])))
+    return {"groups": groups, "total": len(groups), "fresh": fresh,
+            "reuse": reuse, "target": target}
+
+
 def apply_import(
     db: Session,
     batch_id: int,
@@ -577,6 +628,7 @@ def apply_import(
     line_base: int = 2,
     skip_bad_rows: bool = False,
     cat_fallback: str = "",
+    fish_code: str = "",
 ) -> dict:
     """按映射把表格灌成货品：逐行建档（发条码 + 入库流水），多出来的列沉淀成字段。
 
@@ -621,6 +673,12 @@ def apply_import(
         db, batch, headers=headers, rows=rows, mapping=mapping,
         extra_specs=extra_specs, line_base=line_base, cat_fallback=cat_fallback,
     )
+    # 渔货号（2026-10-14）：人指定了「整批并入这一个渔货号」就强行落到那款下面；
+    # 没指定则按商品名自动认亲（register 里做，同名款自动聚拢）
+    fish_target = str(fish_code or "").strip().upper()
+    if fish_target:
+        for line in payload:
+            line["fish_code"] = fish_target
     if (errors and not skip_bad_rows) or not payload:
         if not errors:
             errors = ["表里没有一行能导入的（先看「货号」那一列有没有映射对）"]
@@ -662,6 +720,9 @@ def apply_import(
     if cat_fallback:
         # 兜底建档的行留句话，回头好查「这几台的类目是当时拍的」
         note = (note + "；" if note else "") + f"分类认不出的按 {cat_fallback} 建档"
+    if fish_target:
+        # 整批并进一个渔货号：这是改了商品维度的归属，必须留痕
+        note = (note + "；" if note else "") + f"整批并入渔货号 {fish_target}"
     if errors:
         note = (note + "；" if note else "") + f"跳过 {len(errors)} 行有毛病的"
     audit.log(db, "batch", batch.id, "import", after=f"{file_name}（{len(created)} 台）",

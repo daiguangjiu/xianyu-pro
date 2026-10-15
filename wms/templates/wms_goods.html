@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}货品台账{% endblock %}
+{% block sub %}共 {{ total }} 款（一款货一个渔货号，点进去看它下面挂着哪几个条码商品）{% endblock %}
+
+{# 翻页链接：筛选条件一路带着走，翻到第 2 页不能把筛掉的款又倒回来 #}
+{% macro plink(p) -%}
+/wms/goods?q={{ filters.q | urlencode }}&category={{ filters.category | urlencode }}&page={{ p }}
+{%- endmacro %}
+{% block actions %}<a class="btn primary" href="/wms/inspect">扫码检测</a>{% endblock %}
+
+{% block content %}
+<div class="card">
+  <form class="filters" method="get" action="/wms/goods">
+    <div class="field grow"><label for="f-q">渔货号 / 产品名称 / 品牌 / 型号 / 进货货号</label>
+      <input id="f-q" type="search" name="q" value="{{ filters.q }}" placeholder="YS202610140001 或 对讲机">
+      <div class="hint">扫码枪对着这页扫一下就直接搜（渔货号、进货货号都能认）</div></div>
+    <div class="field"><label for="f-c">品类</label>
+      <select id="f-c" name="category"><option value="">全部</option>
+        {% for v, t in categories %}<option value="{{ v }}" {{ 'selected' if filters.category == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+  </form>
+</div>
+
+<div class="card flush">
+  {% if cards %}
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>渔货号</th><th>产品名称</th><th>品类</th>
+      {# 条码商品数（2026-10-14）：这一款下面挂着几台物理的货 —— 台账的核心数字 #}
+      <th class="num">条码商品</th><th class="num">合计台数</th><th class="num">可售台数</th>
+      <th class="num">进货价</th><th class="num">渔货价</th><th class="num">建议售价</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for c in cards %}
+      <tr>
+        <td class="num muted">{{ row_base + loop.index }}</td>
+        <td class="nowrap"><a class="mono" href="/wms/goods/{{ c.fish_code }}">{{ c.fish_code }}</a></td>
+        <td class="wrap2" title="{{ (c.head.product_name or c.head.title) if c.head else '' }}">
+          <span class="clamp2">{{ (c.head.product_name or c.head.title) if c.head else '—' }}</span>
+          {% if c.head and c.head.brand %}<div class="loc-sub">{{ c.head.brand }}</div>{% endif %}</td>
+        <td>{{ wms_category_label(c.head.category) if c.head else '—' }}</td>
+        <td class="num"><a href="/wms/goods/{{ c.fish_code }}"
+              title="这一款下面挂着 {{ c.items }} 个条码商品">{{ c.items }}</a></td>
+        <td class="num"><span class="qty-pill {{ 'many' if c.qty > 1 }}">{{ c.qty }}</span></td>
+        <td class="num">{{ c.sellable }}</td>
+        <td class="num">{{ bits.money_cell(c.head.purchase_cost) if c.head else '—' }}</td>
+        {# 渔货价（2026-10-14）：卖给渔货栈的口径价，全系统统一用 selling_price 表达 #}
+        <td class="num">{{ bits.money_cell(c.head.selling_price) if c.head else '—' }}</td>
+        <td class="num">{{ bits.money_cell(c.head.suggest_price or c.head.selling_price) if c.head else '—' }}</td>
+        <td class="nowrap"><a class="btn sm" href="/wms/goods/{{ c.fish_code }}">明细</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有任何款（先去「批次与建档」把货导进来）') }}{% endif %}
+  {% if pages > 1 %}
+  <div class="pager foot">
+    <span class="pager-info">第 {{ row_base + 1 }}–{{ row_base + cards | length }} 款 ·
+      共 {{ total }} 款 · 第 {{ page }} / {{ pages }} 页（每页 {{ page_size }} 条）</span>
+    {% if page > 1 %}<a class="btn sm" href="{{ plink(page - 1) }}">上一页</a>
+    {% else %}<span class="btn sm disabled">上一页</span>{% endif %}
+    {% for p in range(1, pages + 1) %}
+      {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
+        {% if p == page %}<span class="btn sm primary">{{ p }}</span>
+        {% else %}<a class="btn sm" href="{{ plink(p) }}">{{ p }}</a>{% endif %}
+      {% elif p == page - 3 or p == page + 3 %}
+        <span class="muted">…</span>
+      {% endif %}
+    {% endfor %}
+    {% if page < pages %}<a class="btn sm" href="{{ plink(page + 1) }}">下一页</a>
+    {% else %}<span class="btn sm disabled">下一页</span>{% endif %}
+  </div>
+  {% elif total and cards %}
+  <div class="pager foot"><span class="pager-info">共 {{ total }} 款（每页 {{ page_size }} 条，一页放得下）</span></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{# 扫码枪自动搜索（与库存台账同一套）：连续快速击键 + 回车结尾才算扫码，
+   手打（间隔 > 50ms）会被判成人工输入丢掉。光标不在输入框里也能扫。 #}
+<script>
+(function () {
+  var input = document.getElementById('f-q');
+  if (!input) { return; }
+  var form = input.form;
+  var buf = '', last = 0, firing = false;
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      if (firing && buf.length >= 5) {
+        e.preventDefault();
+        input.value = buf;
+        form.submit();
+      }
+      buf = ''; firing = false;
+      return;
+    }
+    if (!e.key || e.key.length !== 1) { return; }
+    var now = e.timeStamp || Date.now();
+    if (firing && now - last > 50) { buf = ''; }
+    buf += e.key; last = now; firing = true;
+  }, true);
+})();
+</script>
+{% endblock %}

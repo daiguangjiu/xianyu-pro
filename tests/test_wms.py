@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import pathlib
+
 import json
 import sys
 import unittest
@@ -466,12 +468,13 @@ class WmsTest(unittest.TestCase):
             inspection.submit(s, item, tester="t", results=dict(_PHONE_RESULTS),
                               battery_health=60, final_grade="C",
                               override_reason="主板故障需官方修")
-            # C1 线上必须填凭证号
+            # 官方维修（原 C1 线上）必须填凭证号
             with self.assertRaises(ValueError) as ctx:
-                repairs.create(s, item, {"channel": "C1", "vendor": "京东服务",
-                                         "fault_desc": "不开机"})
+                repairs.create(s, item, {"repair_type": "official", "official_mode": "ship",
+                                         "vendor": "京东服务", "fault_desc": "不开机"})
             self.assertIn("凭证号", str(ctx.exception))
-            row = repairs.create(s, item, {"channel": "C1", "vendor": "京东服务",
+            row = repairs.create(s, item, {"repair_type": "official", "official_mode": "ship",
+                                           "vendor": "京东服务",
                                            "ticket_no": "JD-1", "fault_desc": "不开机",
                                            "promise_days": 15, "paid_amount": 800},
                                  operator="t")
@@ -495,7 +498,7 @@ class WmsTest(unittest.TestCase):
             inspection.submit(s, item, tester="t", results=dict(_PHONE_RESULTS),
                               battery_health=60, final_grade="C",
                               override_reason="主板故障")
-            row = repairs.create(s, item, {"channel": "C2", "vendor": "授权网点",
+            row = repairs.create(s, item, {"repair_type": "inhouse", "vendor": "授权网点",
                                            "contact_phone": "13800000000",
                                            "fault_desc": "不开机"}, operator="t")
             with self.assertRaises(ValueError) as ctx:
@@ -1001,6 +1004,32 @@ class WmsTest(unittest.TestCase):
         records = resp.json()["records"]
         self.assertTrue(records, "检测过的货要有检测记录")
         self.assertIsInstance(records[0]["at"], str, "记录时间要转成文本再出 JSON")
+
+    def test_78b_item_api_records_carry_details(self):
+        """回看历史要把上一轮判定带进来（2026-10-14）：records 里带逐项判定与不合格原因。"""
+        batch = self._empty_batch()
+        with SessionLocal() as s:
+            item = intake.register(s, batch.id, [{"sku_code": "RC-2", "brand": "美的"}],
+                                   operator="tester")[0]
+            barcode = item.barcode
+            results = dict(_PHONE_RESULTS)
+            results["camera"] = TEST_FAIL
+            inspection.submit(s, item, tester="t", results=results,
+                              fail_descs={"camera": "后摄无法对焦"})
+        resp = self.client.get(f"/wms/api/item.json?code={barcode}")
+        self.assertEqual(resp.status_code, 200)
+        rec = resp.json()["records"][-1]
+        self.assertEqual(rec["results"].get("camera"), TEST_FAIL, "判定要逐项带出来")
+        self.assertEqual(rec["fail_descs"].get("camera"), "后摄无法对焦", "不合格原因要带出来")
+
+    def test_78c_inspect_page_history_prefill(self):
+        """检测台：回看历史把上一轮判定带回检查项；提示条挪到「引擎建议」上方（2026-10-14）。"""
+        page = self.client.get("/wms/inspect")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("applyHistory", page.text)
+        self.assertIn("已经带到下面的检查项里", page.text)
+        self.assertLess(page.text.find('id="recheckBar"'), page.text.find("④ 引擎建议"),
+                        "提示条要在引擎建议上面")
 
 
     # ------------------------------------------------------------ 仓库与货架维护
@@ -2121,7 +2150,11 @@ class WmsTest(unittest.TestCase):
         self.assertIn("不写等级、不进可售仓", page)
         self.assertLess(page.index('id="uncertainBox"'), page.index('id="submitBtn"'))
         # ② 库位下拉：宽度给足 + 由 JS 量着视口定位（老写法窄屏会被裁掉）
-        self.assertIn("width:max(100%,480px)", page)
+        # 2026-10-15：宽度那条规则随设计系统搬到了外部样式表，这里查样式表 + 确认页面引了它
+        css = pathlib.Path(__file__).resolve().parents[1].joinpath(
+            "app", "static", "wms_design.css").read_text(encoding="utf-8")
+        self.assertIn("/static/wms_design.css", page, "页面要引这张外部样式表")
+        self.assertIn("width:max(100%,480px)", css, "下拉宽度由这一条保证")
         self.assertIn("LIST_MIN_W", page)
         self.assertIn("function place()", page)
         self.assertIn('role="option" title="', page, "每行给全路径 title：再长也能看全")

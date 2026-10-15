@@ -118,7 +118,7 @@
               <td>
                 <div class="d-flex gap-2 align-items-center">
                   {% if l.image %}
-                    <img src="{{ l.image }}" alt="" class="cart-thumb" loading="lazy">
+                    <img src="{{ thumb_url(l.image, 160) }}" alt="" class="cart-thumb" loading="lazy">
                   {% endif %}
                   <div style="min-width: 0;">
                     <div class="text-truncate" style="max-width: 420px;">

@@ -264,17 +264,22 @@ class RegisterSpecsTest(unittest.TestCase):
 
     # ---------------------------------------------------------------- 系统生成货号 / 分类合并
     def test_17_system_sku_code(self):
-        """系统生成货号（2026-10-12）：非扫码场景 —— 页面给按钮，服务端按 YC+年月+流水发号。
+        """系统生成货号（2026-10-12 加 / 2026-10-14 升级为渔货号）：非扫码场景 ——
+        页面给按钮，服务端发号。
 
-        按钮要做醒目（用户反馈原来那个灰描边小按钮找不到）：主色实心 `.btn.primary`，
-        文案「系统生成货号」，输入框提示语也把这条用法写清楚。
+        **2026-10-14 口径变更（用户拍板）**：渔货号（YS + 日期 + 当天 4 位流水）才是
+        **我们自己的商品货号**、一款一号，所以这个按钮升级成发渔货号；
+        原来那个「YC + 年月 + 流水」的发号接口（进货货号）作为供应商编号那一套保留。
+        按钮照旧要醒目（用户反馈原来那个灰描边小按钮找不到）：主色实心 `.btn.primary`。
         """
         batch = self._batch()
         page = self.client.get(f"/wms/batches/{batch.id}/register").text
-        self.assertIn("系统生成货号", page)
+        self.assertIn("系统生成渔货号", page, "按钮文案跟着升级")
         self.assertIn("btn primary sku-btn", page, "按钮要显眼（主色实心）")
-        self.assertIn("扫码商品的货号或条码，如果没有点击生成系统货号", page, "输入框提示语")
-        self.assertIn(f"/wms/batches/{batch.id}/next-sku", page)
+        self.assertIn("fish_code", page, "建档页有渔货号这一格")
+        self.assertIn(f"/wms/batches/{batch.id}/next-fish", page)
+        # 进货货号（YC 那套外部编号）的发号接口仍在，只是页面不再摆按钮 ——
+        # 供应商清单上有号就手填，没有就用生成的渔货号顶上（见 genFishCode）
         first = self.client.get(f"/wms/batches/{batch.id}/next-sku")
         self.assertEqual(first.status_code, 200)
         code1 = first.json()["sku_code"]

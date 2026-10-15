@@ -654,13 +654,17 @@
     .badge.bg-warning { background: var(--c-warning-soft) !important; color: var(--c-warning-fg); border-color: var(--c-warning-border); }
     .badge.bg-primary { background: var(--c-primary-soft) !important; color: var(--c-primary-hover); border-color: var(--c-primary-border); }
 
+    /* 订单状态徽章（2026-10-15 规整）：九个状态一套色系，一眼看出「在等谁动手」——
+       待处理 = 琥珀，进行中 = 主色（实心）/ 已交出去 = 主色描边，走完 = 绿，
+       逆向 = 琥珀（退款中）/ 紫（已退款），撤单 = 灰，异常 = 橙。 */
     .badge-status-pending     { background: var(--c-warning-soft); color: var(--c-warning-fg); border-color: var(--c-warning-border); }
     .badge-status-confirmed   { background: var(--c-primary-soft); color: var(--c-primary-hover); border-color: var(--c-primary-border); }
-    .badge-status-pushed      { background: var(--c-success-soft); color: var(--c-success-fg); border-color: var(--c-success-border); }
+    .badge-status-pushed      { background: #fff; color: var(--c-primary-hover); border-color: var(--c-primary); }
     .badge-status-shipped     { background: var(--c-success-soft); color: var(--c-success-fg); border-color: var(--c-success-border); }
     .badge-status-completed   { background: var(--c-success-soft); color: var(--c-success-fg); border-color: var(--c-success-border); }
-    .badge-status-failed      { background: var(--c-error-soft); color: var(--c-error-fg); border-color: var(--c-error-border); }
+    .badge-status-refunding   { background: var(--c-warning-soft); color: var(--c-warning-fg); border-color: var(--c-warning-border); }
     .badge-status-refunded    { background: var(--c-accent-soft); color: #6D28D9; border-color: var(--c-accent-border); }
+    .badge-status-cancelled   { background: var(--c-surface-2); color: var(--c-text-muted); border-color: var(--c-border); }
     .badge-status-exception   { background: #FFF7ED; color: #C2410C; border-color: #FED7AA; }
     .badge-status-init        { background: var(--c-surface-2); color: var(--c-text-muted); border-color: var(--c-border); }
     .badge-status-draft       { background: var(--c-surface-2); color: var(--c-text-muted); border-color: var(--c-border); }
@@ -2703,7 +2707,7 @@
           {% set order_subs = [
             ('orders:all',       self_url('/orders'),                  '全部订单', 'dso_total'),
             ('orders:pending',   self_url('/orders?status=pending'),   '待确认',   'pending'),
-            ('orders:confirmed', self_url('/orders?status=confirmed'), '待推单',   'confirmed'),
+            ('orders:confirmed', self_url('/orders?status=confirmed'), '待发货',   'confirmed'),
             ('orders:pushed',    self_url('/orders?status=pushed'),    '已推单',   'pushed'),
             ('orders:completed', self_url('/orders?status=completed'), '已完成',   'completed'),
             ('orders:exception', self_url('/orders?status=exception'), '异常单',   'exception'),
@@ -2800,10 +2804,10 @@
         ('harbor_rank', '热销榜单', self_url('/harbor?tab=hot'), 'bi-fire', '', 'harbor:rank'),
       ]),
       ('交易 · 订单', [
-        ('orders', '我要下单', self_url('/orders/new'), 'bi-cart-plus', '', 'orders:new'),
+        ('orders', '我要录单', self_url('/orders/new'), 'bi-pencil-square', '', 'orders:new'),
         ('orders', '全部订单', self_url('/orders'), 'bi-receipt', 'dso_total', 'orders:all'),
         ('orders', '待确认', self_url('/orders?status=pending'), 'bi-hourglass-split', 'pending', 'orders:pending'),
-        ('orders', '待推单', self_url('/orders?status=confirmed'), 'bi-send', 'confirmed', 'orders:confirmed'),
+        ('orders', '待发货', self_url('/orders?status=confirmed'), 'bi-send', 'confirmed', 'orders:confirmed'),
         ('orders', '已推单', self_url('/orders?status=pushed'), 'bi-truck', 'pushed', 'orders:pushed'),
         ('orders', '已完成', self_url('/orders?status=completed'), 'bi-check2-circle', 'completed', 'orders:completed'),
         ('orders', '异常单', self_url('/orders?status=exception'), 'bi-exclamation-octagon', 'exception', 'orders:exception'),
@@ -2899,7 +2903,7 @@
               <div class="sy-cart-list">
                 {% for ln in _cart.lines %}
                 <a class="sy-cart-row" href="{{ ln.url }}" title="{{ ln.title }}">
-                  <img src="{{ ln.image or '/self/static/logo.png' }}" alt="" loading="lazy">
+                  <img src="{{ thumb_url(ln.image, 96) or '/self/static/logo.png' }}" alt="" loading="lazy">
                   <span class="ti">
                     <span class="t">{{ ln.title }}</span>
                     <span class="s">{{ ln.spec_text }}</span>

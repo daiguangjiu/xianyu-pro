@@ -6,13 +6,15 @@
     往下流转（已发货 → 已完成），退款也由渔枢系统回写。
 
 正向：
-    待确认 pending ──确认接单──▶ 待推单 confirmed ──推给渔枢系统采购──▶ 已推单 pushed
+    待确认 pending ──确认接单──▶ 待发货 confirmed ──推给渔枢系统采购──▶ 已推单 pushed
         ──渔枢系统回写物流单号──▶ 已发货 shipped ──买家签收──▶ 已完成 completed
+    待发货也能直接发货（2026-10-14「我要录单」）：没上渔货栈的商品不用推单采购，
+    确认接单后直接补个物流单号就发走。
 逆向：
     已推单 / 已发货 / 已完成 ──申请退款──▶ 退款中 refunding ──退款完成──▶ 已退款 refunded
 挂起与终止：
-    待确认 / 待推单 ──取消订单──▶ 已取消 cancelled
-    待确认 / 待推单 / 已推单 ──标记异常──▶ 异常单 exception ──异常解除──▶ 待推单
+    待确认 / 待发货 ──取消订单──▶ 已关闭 cancelled
+    待确认 / 待发货 / 已推单 ──标记异常──▶ 异常单 exception ──异常解除──▶ 待发货
 
 规则只写在这一个文件里：路由、页面、渔枢系统回写都问它「下一步能做什么」，
 不许在别处手写状态字符串，也不许跳过校验直接改 status。
@@ -24,24 +26,24 @@ from dataclasses import dataclass, field
 
 # --------------------------------------------------------------------- 状态
 S_PENDING = "pending"        # 待确认：单子下来了，等运营确认接单
-S_CONFIRMED = "confirmed"    # 待推单：确认接单，等推给渔枢系统采购
+S_CONFIRMED = "confirmed"    # 待发货：确认接单；录单的货直接发，店铺货可推单采购
 S_PUSHED = "pushed"          # 已推单：已推给渔枢系统，等它采购发货
-S_SHIPPED = "shipped"        # 已发货：渔枢系统回写了物流单号，包裹在途
+S_SHIPPED = "shipped"        # 已发货：回写了物流单号，包裹在途
 S_COMPLETED = "completed"    # 已完成：买家签收，交易成功
 S_REFUNDING = "refunding"    # 退款中：退单受理，钱还没退完
 S_REFUNDED = "refunded"      # 已退款：退款完成
-S_CANCELLED = "cancelled"    # 已取消：发货前撤单（终态）
+S_CANCELLED = "cancelled"    # 已关闭：发货前撤单（终态）
 S_EXCEPTION = "exception"    # 异常单：卡住了，等人处理
 
 STATUS_LABELS: dict[str, str] = {
     S_PENDING: "待确认",
-    S_CONFIRMED: "待推单",
+    S_CONFIRMED: "待发货",
     S_PUSHED: "已推单",
     S_SHIPPED: "已发货",
     S_COMPLETED: "已完成",
     S_REFUNDING: "退款中",
     S_REFUNDED: "已退款",
-    S_CANCELLED: "已取消",
+    S_CANCELLED: "已关闭",
     S_EXCEPTION: "异常单",
 }
 
@@ -86,7 +88,7 @@ class Action:
 ACTIONS: dict[str, Action] = {
     "confirm": Action(
         "confirm", "确认接单", S_CONFIRMED, tone="primary",
-        hint="确认这单接了，进入待推单",
+        hint="确认这单接了，进入待发货",
     ),
     "push_hub": Action(
         "push_hub", "推给渔枢系统采购", S_PUSHED, tone="primary",
@@ -118,7 +120,7 @@ ACTIONS: dict[str, Action] = {
     ),
     "resolve_exception": Action(
         "resolve_exception", "异常解除", S_CONFIRMED, tone="outline",
-        hint="处理完了，回到待推单",
+        hint="处理完了，回到待发货",
     ),
 }
 
@@ -130,6 +132,8 @@ TRANSITIONS: dict[str, dict[str, str]] = {
         "mark_exception": S_EXCEPTION,
     },
     S_CONFIRMED: {
+        # 2026-10-14「我要录单」：没上渔货栈的商品不用推单，确认接单后直接发
+        "ship": S_SHIPPED,
         "push_hub": S_PUSHED,
         "cancel": S_CANCELLED,
         "mark_exception": S_EXCEPTION,

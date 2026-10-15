@@ -92,26 +92,23 @@ def _card_state(html: str, item_id: str) -> str:
     同一款货在页面里可能出现多次（feed / 活动节点），所以从这款货的详情链接往后
     找它**紧跟着的**那块 fish-actions，而不是按整段切（会串到别的卡片上去）。
     """
-    # 卡片是 <article class="fish-card">…：页面头部内联 CSS 里也有 fish-actions 这个
-    # 类名，活动节点区块里也可能先出现这款货的链接，所以按 <article 切开只取卡片本体
-    for seg in html.split("<article")[1:]:
-        if item_id not in seg:
-            continue
-        pos = seg.find("fish-actions")
-        if pos < 0:
-            return "no-actions"
-        tail = seg[pos : pos + 700]
-        for marker, label in (
-            ("已铺货</span>", "已铺货"),
-            ("待发布</a>", "待发布"),
-            ("发布失败</span>", "发布失败"),
-            ("铺货到店铺", "铺货到店铺"),
-            ("已下架</button>", "已下架"),
-        ):
-            if marker in tail:
-                return label
-        return "?"
-    return "no-card"
+    anchor = html.find(f"/self/goods/detail/{item_id}")
+    if anchor < 0:
+        return "no-card"
+    pos = html.find("fish-actions", anchor)
+    if pos < 0:
+        return "no-card"
+    seg = html[pos : pos + 700]
+    for marker, label in (
+        ("已铺货</span>", "已铺货"),
+        ("待发布</a>", "待发布"),
+        ("发布失败</span>", "发布失败"),
+        ("铺货到店铺", "铺货到店铺"),
+        ("已下架</button>", "已下架"),
+    ):
+        if marker in seg:
+            return label
+    return "?"
 
 
 class ListingOwnerIsolationTest(unittest.TestCase):

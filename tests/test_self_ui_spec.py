@@ -102,7 +102,7 @@ class OrderNewHeaderTest(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         html = page.text
         self.assertIn('<div class="page-header">', html)
-        self.assertIn("<h1>我要下单</h1>", html)
+        self.assertIn("<h1>我要录单</h1>", html)
         self.assertIn("page-actions", html)
         # 正文里不能再出现没定义的 .sec-title（base 的 CSS 里有这个词，只查正文）
         body = html.split("<main", 1)[-1]

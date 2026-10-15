@@ -29,6 +29,28 @@ def media_url(local_path: str) -> str:
     return f"{url}?v={stamp}"
 
 
+def thumb_url(local_path: str, width: int = 320) -> str:
+    """把 media 图片换成**按需生成的缩略图**地址（2026-10-15）。
+
+    列表 / 购物车 / 结算这些地方图只占几十像素，原来直接拉 2MB 原图；这里把地址
+    换成 /thumb/<相对路径>?w=<宽度>，由 app.thumbs 裁一次并落盘缓存，第二次起
+    只有几十 KB。相较直接写 media_url：宽度不同 = 不同 URL，天然不会串味。
+
+    外链（http(s)://、//、data:）原样返回 —— 那些图不在我们服务器手里，裁不动。
+    """
+    if not local_path:
+        return ""
+    s = str(local_path)
+    if s.startswith(("http://", "https://", "//", "data:")):
+        return s
+    url = media_url(s)
+    if not url.startswith("/media/"):
+        return url
+    rest = url[len("/media/"):]
+    joiner = "&" if "?" in rest else "?"
+    return f"/thumb/{rest}{joiner}w={int(width)}"
+
+
 def money(value: float | None) -> str:
     try:
         return f"{float(value or 0):,.2f}"

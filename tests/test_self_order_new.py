@@ -32,7 +32,8 @@ BUYER_TEXT = "张三 13800000001 广东省深圳市南山区科技园路 1 号 A
 def _wipe() -> None:
     with SessionLocal() as s:
         s.query(DownstreamOrder).filter(
-            DownstreamOrder.channel_sku_id.in_(ALL_IDS + ["", "T-ORDER-NEW-MANUAL"])
+            (DownstreamOrder.channel_sku_id.in_(ALL_IDS + ["", "T-ORDER-NEW-MANUAL"]))
+            | DownstreamOrder.downstream_order_id.like("FS-%")
         ).delete(synchronize_session=False)
         s.query(ShopGoods).filter(ShopGoods.item_id.in_(ALL_IDS)).delete(
             synchronize_session=False
@@ -111,7 +112,7 @@ class SelfOrderNewTest(unittest.TestCase):
         """下单页两种单都在：选品商品订单 / 其他订单（含飞书群模板与传图）。"""
         page = self.client.get("/self/orders/new")
         self.assertEqual(page.status_code, 200)
-        self.assertIn("我要下单", page.text)
+        self.assertIn("我要录单", page.text)
         self.assertIn("选品商品订单", page.text)
         self.assertIn("其他订单", page.text)
         self.assertIn("闲鱼订单详情图", page.text)
@@ -245,3 +246,97 @@ class SelfOrderNewTest(unittest.TestCase):
         resp = self.client.post("/self/orders/parse-buyer", json={"text": "  "})
         self.assertEqual(resp.status_code, 200)
         self.assertFalse(resp.json().get("ok"))
+
+
+class FeishuGroupSyncTest(unittest.TestCase):
+    """2026-10-14「我要录单」：飞书群报的单按运营姓名同步进渔货栈（幂等）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        init_db()
+        ensure_default_admin()
+        cls.client = TestClient(app)
+        resp = cls.client.post(
+            "/login",
+            data={"username": "admin", "password": "xianyu2026"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303, resp.text[:200]
+
+    def setUp(self):
+        _wipe()
+        self._wipe_hub()
+
+    def tearDown(self):
+        _wipe()
+        self._wipe_hub()
+
+    @staticmethod
+    def _wipe_hub():
+        from app.models import Order
+
+        with SessionLocal() as s:
+            s.query(Order).filter(Order.order_no.like("FTS-%")).delete(
+                synchronize_session=False
+            )
+            s.commit()
+
+    def _page(self) -> str:
+        resp = self.client.get("/self/orders")
+        self.assertEqual(resp.status_code, 200)
+        return resp.text
+
+    def test_50_group_orders_sync_in(self):
+        """群里报的单进录单列表：单号 FS- 前缀、运营=飞书发送人、幂等只建一次。"""
+        from sqlalchemy import select
+
+        from app.models import Order
+        from app.timeutil import utc_now
+
+        with SessionLocal() as s:
+            s.add_all(
+                [
+                    Order(
+                        order_no="FTS-1001", product_name="飞书群测试货", quantity=2,
+                        sale_amount=88, deal_amount=88, sender_name="刘宇辉",
+                        receiver_name="张三", receiver_phone="13800000001",
+                        created_at=utc_now().replace(tzinfo=None),
+                    ),
+                    # 撤回的留档单不参与业务，不建录单
+                    Order(
+                        order_no="FTS-1002", product_name="撤回的不算", is_recalled=True,
+                        sender_name="某人", created_at=utc_now().replace(tzinfo=None),
+                    ),
+                ]
+            )
+            s.commit()
+
+        # 打开两次订单列表：同步挂在列表页上，重复打开也不能建重复单
+        self._page()
+        self._page()
+        with SessionLocal() as s:
+            rows = s.scalars(
+                select(DownstreamOrder).where(
+                    DownstreamOrder.downstream_order_id.in_(
+                        ["FS-FTS-1001", "FS-FTS-1002"]
+                    )
+                )
+            ).all()
+            self.assertEqual(len(rows), 1, "只有未撤回的那单建了录单，且幂等只建一次")
+            row = rows[0]
+            self.assertEqual(row.downstream_order_id, "FS-FTS-1001")
+            self.assertEqual(row.status, "pending")
+            self.assertEqual(row.buyer_name, "张三")
+            self.assertEqual(row.qty, 2)
+            raw = row.raw_json or {}
+            self.assertEqual(raw.get("source"), "feishu_group")
+            self.assertEqual(raw.get("operator"), "刘宇辉", "运营姓名取飞书发送人")
+            self.assertEqual(raw.get("title"), "飞书群测试货")
+
+    def test_52_bridge_down_still_lists(self):
+        """渔枢桥断了（表读不到）同步静默跳过，订单列表照常能开。"""
+        import src.web.hub_orders as hub_orders
+
+        page = self._page()
+        self.assertIn("全部订单", page)
+        self.assertEqual(hub_orders.sync_group_orders(None), 0)
