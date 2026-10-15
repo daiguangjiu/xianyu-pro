@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}编辑商品信息 · {{ fish_code }}{% endblock %}
+{% block actions %}
+  <a class="btn" href="/wms/goods/{{ fish_code }}">回这一款</a>
+  <a class="btn" href="/wms/goods">返回台账</a>
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  /* —— 渔货号（款级主 key）：改不了，单独一行摆在最上面 —— */
+  .gk-bar{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+    background:var(--c-primary-soft);border:1px solid var(--c-primary-border);
+    border-left:3px solid var(--c-primary);border-radius:var(--r-input);
+    padding:var(--s-3);margin-bottom:var(--s-3)}
+  .gk-bar .k{font-size:12.5px;color:var(--c-text-muted)}
+  .gk-bar .v{font-weight:700;color:var(--c-primary-hover);font-size:15px;
+    letter-spacing:.5px}
+  .gk-bar .d{margin:0;font-size:12.5px;color:var(--c-text-muted)}
+
+  /* —— 重要信息高亮（照建档页 .hl-box 的口径）—— */
+  .hl-box{background:var(--c-primary-soft);border:1px solid var(--c-primary-border);
+    border-left:3px solid var(--c-primary);border-radius:var(--r-input);
+    padding:var(--s-3)}
+  .field.key input{border-color:var(--c-primary-border);background:#fff;font-weight:600}
+  .prof-tip{font-size:12.5px;color:var(--c-text-muted);margin:6px 0 0}
+</style>
+{% endblock %}
+
+{% block content %}
+
+{# 型号规格空着的时候，检测台会提醒人来这一页补；这里把「为什么填」说清楚 #}
+{% if missing %}
+<div class="note warn">
+  <i class="bi bi-exclamation-triangle"></i>
+  这一款的商品资料还缺：{% for m in missing %}<b>{{ m }}</b>{% if not loop.last %} · {% endif %}{% endfor %}
+  —— 补齐以后，渔枢系统与渔货栈的商品详情页才会带上型号规格（检测台那边也不会再提醒）。
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>编辑商品信息 · {{ fish_code }}</h2>
+  <p class="d">
+    这一页改的是<b>一款货</b>（渔货号 <span class="mono">{{ fish_code }}</span>）的公共资料；
+    保存后，这一款下面挂着的 <b>{{ items | length }}</b> 个条码商品<b>一起生效</b>，
+    <b>条码终身不变</b>。某一台自己的字段（进货货号 / 序列号 / 价格 / 数量）
+    去它自己的编辑页改。
+  </p>
+
+  <div class="gk-bar">
+    <span class="k">渔货号</span><span class="v mono">{{ fish_code }}</span>
+    <span class="d">· 条码商品 <b>{{ items | length }}</b> 个 · 合计 {{ total_qty }} 台</span>
+  </div>
+
+  <datalist id="catList">
+    {% for code, label in categories %}<option value="{{ label }}">{{ code }}</option>{% endfor %}
+  </datalist>
+
+  <form method="post" action="/wms/goods/{{ fish_code }}/edit">
+    <div class="frm-sec">
+      <div class="frm-sec-head"><span class="num">1</span> 商品资料
+        <span class="tip">这四项是<b>一款货</b>的公共信息 —— 型号规格补齐后，
+          渔枢与渔货栈的商品详情页就带得过去</span></div>
+
+      <div class="hl-box">
+        <div class="frm-sub"><i class="bi bi-card-text"></i> 名称与品牌</div>
+        <div class="field-row auto">
+          <div class="field key"><label for="g-product">商品名称</label>
+            <input id="g-product" type="text" name="product_name"
+                   value="{{ values.product_name }}" placeholder="清单里那串商品名"></div>
+          <div class="field"><label for="g-brand">品牌</label>
+            <input id="g-brand" type="text" name="brand"
+                   value="{{ values.brand }}" placeholder="美的"></div>
+        </div>
+
+        <div class="frm-sub"><i class="bi bi-cpu"></i> 型号与规格</div>
+        <div class="field-row auto">
+          <div class="field key"><label for="g-model">型号</label>
+            <input id="g-model" type="text" name="model"
+                 value="{{ values.model }}"
+                 placeholder="如 MJ-PB40E254D（清单里没有就留空）"></div>
+          <div class="field key"><label for="g-spec">规格</label>
+            <input id="g-spec" type="text" name="spec"
+                 value="{{ values.spec }}"
+                 placeholder="如 1.75L / 黑色（清单里没有就留空）"></div>
+        </div>
+        <p class="prof-tip">
+          <i class="bi bi-info-circle"></i>
+          型号 / 规格在渔集里是<b>商品档案字段</b>（不是规格维度）：同一个渔货号下面
+          几台货共用一个型号规格。扫码检测时如果这四项<b>全空</b>，检测台会提醒你去维护。
+        </p>
+      </div>
+
+      <div class="frm-sec">
+        <div class="frm-sec-head"><span class="num">2</span> 品类
+          <span class="tip">留空 = 不动（条码里的品类码是跟着品类发的，改了也不重发）</span></div>
+        <div class="field-row auto">
+          <div class="field key"><label for="g-cat">分类</label>
+            <input id="g-cat" type="text" name="category" list="catList"
+                   value="{{ values.category_raw }}"
+                   placeholder="破壁机 / HA.KC.DFB"></div>
+        </div>
+      </div>
+
+      <div class="bar" style="margin-top:var(--s-4)">
+        <button class="btn primary"><i class="bi bi-check2"></i> 保存（同步 {{ items | length }} 个条码商品）</button>
+        <a class="btn" href="/wms/goods/{{ fish_code }}">取消</a>
+      </div>
+  </form>
+</div>
+
+<div class="card flush">
+  <h2 style="padding:12px 14px 0;margin:0">会一起改的条码商品（{{ items | length }}）</h2>
+  <div class="table-wrap"><table>
+    <thead><tr><th class="num">#</th><th>条码</th><th>显示编码</th><th>进货货号</th>
+      <th class="num">数量</th><th>等级</th><th>状态</th><th>所在仓</th><th>批次</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td class="num muted">{{ loop.index }}</td>
+        <td class="mono">{{ it.barcode or '—' }}</td>
+        <td class="nowrap"><a href="/wms/items/{{ it.id }}/edit">{{ it.display_code }}</a></td>
+        <td class="mono">{{ it.sku_code or '—' }}</td>
+        <td class="num"><span class="qty-pill {{ 'many' if (it.qty or 1) > 1 }}">{{ it.qty or 1 }}</span></td>
+        <td>{{ bits.grade_badge(it.grade) }}</td>
+        <td>{{ bits.status_badge(it.status) }}</td>
+        <td class="nowrap">{{ wms_warehouse_label(it.warehouse_code) }}</td>
+        <td class="mono muted">{{ it.batch_no or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endblock %}

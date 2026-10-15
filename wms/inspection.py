@@ -32,6 +32,7 @@ from .models import (
     GRADE_S,
     GRADE_A,
     GRADE_W,
+    GRADE_LABELS,
     SAFETY_ITEM_KEYS,
     STATUS_GRADED,
     STATUS_HAZARD,
@@ -51,6 +52,7 @@ from .models import (
     l1_code_of,
 )
 from . import audit
+from . import bridge
 from . import grading
 from . import labeling
 from . import ledger
@@ -234,8 +236,19 @@ def preview(session: Session, item: WmsItem, payload: dict) -> dict:
     )
     out = grading.evaluate(session, item.category, facts)
     out["facts"] = facts
+    # 人工指定档位（2026-10-15 用户拍板）：检测员在「最终档位」下拉选了档，
+    # 屏幕上的评级 / 价格 / 标签等级立刻全部按所选档重算 —— 引擎建议照旧展示，
+    # 谁说了算一眼分清。选回「跟随引擎建议」就回到引擎的建议档。
+    manual = str(payload.get("grade") or "").strip().upper()
+    if manual and manual in GRADE_LABELS and manual != out["suggest_grade"]:
+        out["effective_grade"] = manual
+        out["manual_grade"] = True
+    else:
+        out["effective_grade"] = out["suggest_grade"]
+        out["manual_grade"] = False
+    out["grade_label_text"] = grade_label(out["effective_grade"])
     out["price"] = grading.price_of(
-        session, out["suggest_grade"], float(item.base_price or 0.0),
+        session, out["effective_grade"], float(item.base_price or 0.0),
         float(item.purchase_cost or 0.0),
         # 建档 / 编辑时人工填过建议售价的（2026-10-12）以人填的为准：屏幕上的建议售价
         # 与封顶口径必须和提交时一致
@@ -244,7 +257,7 @@ def preview(session: Session, item: WmsItem, payload: dict) -> dict:
     # 与 submit 的落价口径对齐：只有 N / S / A 会写渔货价（B 修完重判、C/D 按故障估值）。
     # 页面靠这个标记决定「直接提交就按这个价」还是「该档不写价」——别让人以为
     # 屏幕上那个数字提交后会存进商品。
-    out["price"]["priced"] = out["suggest_grade"] in grading.PRICED_GRADES
+    out["price"]["priced"] = out["effective_grade"] in grading.PRICED_GRADES
     # 没有启用中的价格系数时 price_of 按 1.0 兜底（毛利会算成 100%），页面要说清为什么
     out["price"]["rule_missing"] = out["price"]["rule_id"] is None
     return out
@@ -270,6 +283,7 @@ def submit(
     opened_unused: bool = False,
     note: str = "",
     manual_price: float | None = None,
+    recheck_reason: str = "",
 ) -> WmsTestRecord:
     """提交一次检测：留痕 + 拍照 + 引擎建议 + 人工确认。"""
     fail_descs = fail_descs or {}
@@ -321,15 +335,33 @@ def submit(
     engine = grading.evaluate(session, item.category, facts)
     suggest = str(engine.get("suggest_grade") or "").upper()
     want = str(final_grade or "").strip().upper()
+    round_no = _next_round(session, item.id)
+    prev_grade = str(item.grade or "W").upper()
+    status_now = str(item.status or "").upper()
+    # 价格同步要跟「改之前」比，先抄下来（提交成功后推给渔枢 / 渔货栈）
+    old_selling = round(float(item.selling_price or 0.0), 2)
+    old_suggest = round(float(item.suggest_price or 0.0), 2)
+
+    # 覆盖理由收口（2026-10-15）：复检理由与改档理由是同一个「覆盖理由」——
+    # 页面一个框两头交；接口直调时填了复检理由也能顶替改档理由（都是「为什么覆盖」）。
+    # 顺序：先按 recheck_reason 兜底 override，再各自校验必填。
+    recheck_reason = str(recheck_reason or "").strip()
+    if not str(override_reason or "").strip() and recheck_reason:
+        override_reason = recheck_reason
     if want and want != suggest and not str(override_reason or "").strip():
         raise ValueError(
             f"覆盖引擎建议（{suggest} → {want}）必须填覆盖理由："
             "这是规则调优的唯一依据"
         )
 
-    round_no = _next_round(session, item.id)
-    prev_grade = str(item.grade or "W").upper()
-    status_now = str(item.status or "").upper()
+    # 复检必填覆盖理由（2026-10-15 用户拍板）：第 2 轮起就是覆盖上一轮结论 ——
+    # 为什么重判必须说清楚，后面翻记录的人才知道哪轮可信、规则该不该跟着改。
+    # 检测台在复检模式下摆了输入框，这里是后端兜底（接口直调也拦）。
+    if round_no > 1 and not recheck_reason:
+        raise ValueError(
+            f"这是复检（第 {round_no} 轮），会覆盖上一轮（第 {round_no - 1} 轮）"
+            "的结论 —— 必须填覆盖理由（为什么重新判 / 哪里变了）"
+        )
 
     record = WmsTestRecord(
         item_id=item.id,
@@ -349,7 +381,8 @@ def submit(
         is_recheck=round_no > 1,
         tester=str(tester or ""),
         photo_urls=list(photos or []),
-        note=str(note or ""),
+        note=(str(note or "") + ("；" if note else "") + "复检覆盖理由：" + recheck_reason)
+        if round_no > 1 and recheck_reason else str(note or ""),
         tested_at=_now(),
         created_at=_now(),
     )
@@ -497,6 +530,26 @@ def submit(
     # 跟实际分级对不上 —— 2026-10-13）
     labeling.sync_queue_grade(session, item)
     session.commit()
+    # 价格同步（2026-10-15 用户拍板）：定级落了渔货价就推给渔枢商品档案 + 渔货栈货源，
+    # 真变了还在渔货栈「通知」里落一条「商品价格变动」。桥断只降级，不影响检测提交。
+    if item.fish_code and (
+        round(float(item.selling_price or 0.0), 2) != old_selling
+        or round(float(item.suggest_price or 0.0), 2) != old_suggest
+    ):
+        try:
+            bridge.push_price_change(
+                item.fish_code,
+                name=str(item.product_name or item.title or ""),
+                selling_price=float(item.selling_price or 0.0),
+                suggest_price=float(item.suggest_price or 0.0),
+                base_price=float(item.base_price or 0.0),
+            )
+        except Exception:  # noqa: BLE001  同步是账，检测是现场 —— 失败不拖提交
+            import logging
+
+            logging.getLogger("wms.inspection").warning(
+                "检测定价同步渔枢 / 渔货栈失败", exc_info=True
+            )
     return record
 
 

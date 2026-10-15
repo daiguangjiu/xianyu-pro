@@ -149,6 +149,101 @@ def hub_suppliers(db, keyword: str = "", limit: int = 500) -> list[dict]:
     ]
 
 
+def hub_order_facts(order_no: str) -> dict:
+    """读一张渔枢订单的事实（渔货栈自营单同步出库用，2026-10-15）。
+
+    渔货栈的订单不走供应商推单，货从渔集发 —— 出库详情页要展示「这张单卖的是
+    哪款货」：产品 / 规格 / 数量 / 收货人 + **渔货号**（商品档案的商家编码就是它，
+    再兜一层来源消息里 YS 开头的串）。桥断 / 订单不存在 / 不是渔货栈的单 →
+    返回空 dict，页面按普通出库单渲染。
+    """
+    order_no = str(order_no or "").strip()
+    if standalone() or not order_no:
+        return {}
+    try:
+        import re
+
+        from sqlalchemy import select
+
+        from app.db import SessionLocal
+        from app.models import Order, Product, RawMessage
+    except Exception:  # noqa: BLE001  独立部署 / 平台表不可读
+        logger.debug("平台订单表不可读", exc_info=True)
+        return {}
+    try:
+        with SessionLocal() as s:
+            order = s.scalar(select(Order).where(Order.order_no == order_no))
+            if not order:
+                return {}
+            codes: list[str] = []
+            seen: set[str] = set()
+            product = s.get(Product, order.product_id) if order.product_id else None
+            if product and (product.code or "").strip():
+                codes.append(str(product.code).strip())
+                seen.add(str(product.code).strip())
+            msg = (
+                s.scalar(
+                    select(RawMessage).where(RawMessage.message_id == order.source_message_id)
+                )
+                if order.source_message_id
+                else None
+            )
+            if msg and getattr(msg, "raw_text", ""):
+                for m in re.findall(r"\bYS\d{8,12}\b", str(msg.raw_text)):
+                    if m not in seen:
+                        seen.add(m)
+                        codes.append(m)
+            return {
+                "order_id": int(order.id),
+                "order_no": order.order_no,
+                "origin": str(order.origin or ""),
+                "product_name": str(order.product_name or ""),
+                "product_archive": str(getattr(product, "name", "") or ""),
+                "spec": str(order.spec or ""),
+                "quantity": int(order.quantity or 1),
+                "buyer": str(order.buyer_nick or ""),
+                "receiver_name": str(order.receiver_name or ""),
+                "receiver_phone": str(order.receiver_phone or ""),
+                "receiver_address": str(order.receiver_address or ""),
+                "fish_codes": codes,
+                "order_url": f"/orders/{order.id}",
+            }
+    except Exception:  # noqa: BLE001  桥断只降级
+        logger.warning("读取渔枢订单事实失败（order_no=%s）", order_no, exc_info=True)
+        return {}
+
+
+def apply_hub_tracking(order_no: str, tracking_no: str, operator: str = "") -> dict:
+    """渔集出库核销后把物流单号**回填渔枢订单**（2026-10-15）。
+
+    单号会出现在渔枢「发货页（已推单记录）」的物流单号栏里，群通知 / 语音播报
+    / 订单状态推进全部走平台同一套（app.services.push.apply_tracking_from_wms）。
+    订单不存在（target_no 不是渔枢订单号）→ 返回空 dict，出库照常成功。
+    """
+    order_no = str(order_no or "").strip()
+    tracking_no = str(tracking_no or "").strip()
+    if standalone() or not order_no or not tracking_no:
+        return {}
+    try:
+        from sqlalchemy import select
+
+        from app.db import SessionLocal
+        from app.models import Order
+        from app.services import push as push_service
+    except Exception:  # noqa: BLE001
+        logger.debug("平台推单服务不可读", exc_info=True)
+        return {}
+    try:
+        with SessionLocal() as s:
+            order = s.scalar(select(Order).where(Order.order_no == order_no))
+            if not order:
+                return {}
+            return push_service.apply_tracking_from_wms(s, order, tracking_no, operator=operator)
+    except Exception:  # noqa: BLE001  桥断只降级，绝不能拖垮出库核销
+        logger.warning("回填渔枢物流单号失败（order_no=%s）", order_no, exc_info=True)
+        return {}
+
+
 def to_fish_rows(rows: list[tuple[str, int]]) -> list[tuple[str, int]]:
     """``[(条码, 变动台数)]`` → ``[(渔货号, 变动台数)]``（2026-10-14）。
 
@@ -226,6 +321,55 @@ def push_stock(rows: list[tuple[str, int]]) -> dict:
     except Exception:  # noqa: BLE001  同步失败不影响渔集出库
         logger.warning("渔枢 / 渔货栈库存同步失败（不影响渔集出库）", exc_info=True)
         return empty
+
+
+def push_price_change(
+    fish_code: str,
+    *,
+    name: str = "",
+    selling_price: float = 0.0,
+    suggest_price: float = 0.0,
+    base_price: float = 0.0,
+) -> dict:
+    """渔集价格更新 → 渔枢商品档案 + 渔货栈货源 + 「商品价格变动」通知（2026-10-15）。
+
+    渔集侧改价（检测定价 / 编辑 / 改价页）提交后各调一次。边界照 ``push_stock``：
+    独立部署直接不推；桥断 / 同步失败只打日志，**绝不让渔集的改价动作失败**。
+    """
+    empty: dict = {"updated": False, "notice": False, "notes": []}
+    code = str(fish_code or "").strip().upper()
+    if standalone() or not code:
+        return empty
+    try:
+        from app.services.wms_bridge import sync_price_from_wms
+    except Exception:  # noqa: BLE001  平台侧没这个模块（独立部署 / 老版本）
+        logger.info("渔枢价格同步不可用（跳过）", exc_info=True)
+        return empty
+    try:
+        return sync_price_from_wms(
+            code,
+            name=str(name or ""),
+            selling_price=float(selling_price or 0.0),
+            suggest_price=float(suggest_price or 0.0),
+            base_price=float(base_price or 0.0),
+        )
+    except Exception:  # noqa: BLE001  同步失败不影响渔集改价
+        logger.warning("渔枢 / 渔货栈价格同步失败（不影响渔集改价）", exc_info=True)
+        return empty
+
+
+def price_sync_note(report: dict | None) -> str:
+    """把 ``push_price_change()`` 的摘要翻成一句人话（页面提示用）。没同步到就空串。"""
+    if not report:
+        return ""
+    bits: list[str] = []
+    if report.get("updated"):
+        bits.append("渔枢 / 渔货栈价格已同步")
+    if report.get("notice"):
+        bits.append("价格变动通知已发到渔货栈")
+    for note in list(report.get("notes") or [])[:2]:
+        bits.append(str(note))
+    return "；".join(bits)
 
 
 def hub_sync_note(report: dict | None) -> str:

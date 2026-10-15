@@ -201,22 +201,28 @@ class RegisterSpecsTest(unittest.TestCase):
         self.assertIn(".btn.off{opacity:.5;cursor:not-allowed}", page, "置灰样式")
         self.assertIn("addEventListener('input', refreshTplBtn)", page, "分类一变就刷新按钮态")
 
-    def test_23_selling_price_required(self):
-        """渔货价必填（2026-10-12 晚 用户要求）：标 * + required（建档页与编辑页都有）。"""
+    def test_23_selling_price_optional(self):
+        """渔货价**选填**（2026-10-15 用户拍板，推翻 2026-10-12 的必填）。
+
+        建档那会儿常常还不知道能卖多少（档口散货 / 等检测定级），硬要求填会卡住录入；
+        留空则检测定级时按「市场价 × 该档系数」算 —— 一样能出价。
+        """
         batch = self._batch()
         page = self.client.get(f"/wms/batches/{batch.id}/register").text
-        self.assertIn('渔货价 <span class="req">*</span>', page)
-        fish = page[page.index('id="m-fish"'):][:200]
-        self.assertIn("required", fish, "输入框带 required，提交前就挡住")
-        self.assertIn("必填", fish, "提示语说清为什么必填")
+        self.assertIn("渔货价", page)
+        fish = page[page.index('id="m-fish"'):][:220]
+        self.assertNotIn("required", fish, "不能再是必输项")
+        self.assertIn("选填", fish, "提示语说清这是选填")
+        # 建档时不填进货货号也要能提交（散货没有供应商编号）
         with SessionLocal() as s:
             item = intake.register(s, batch.id, [
-                {"sku_code": "T-9600", "selling_price": 88, "base_price": 100, "qty": 1}
+                {"sku_code": "", "product_name": "散货测试", "category": "HA.KC.DFB", "qty": 2}
             ], operator="tester")[0]
             item_id = item.id
         edit = self.client.get(f"/wms/items/{item_id}/edit").text
-        self.assertIn('渔货价 <span class="req">*</span>', edit)
-        self.assertIn("required", edit[edit.index('id="m-fish"'):][:200])
+        self.assertNotIn("required", edit[edit.index('id="m-fish"'):][:220])
+        sku = edit[edit.index('id="m-sku"'):][:220]
+        self.assertNotIn("required", sku, "进货货号也不是必填")
 
     def test_24_edit_keeps_model_spec_own_barcode(self):
         """编辑页不再有 型号 / 规格 / 检修后条码 这三格，但**保存不能把它们清掉**。
@@ -451,14 +457,23 @@ class RegisterSpecsTest(unittest.TestCase):
         with SessionLocal() as s:
             self.assertEqual(len(intake.list_items(s, batch_id=batch.id)), 0)
 
-    def test_70_sku_still_required(self):
-        """货号必填 —— 多规格也一样（扫码检测认的是它）。"""
+    def test_70_sku_now_optional(self):
+        """进货货号**选填**（2026-10-15 用户拍板：进货货号不与渔货号同步）。
+
+        进货货号是「供应商清单上那个外部编号」，跟我们系统发的渔货号是两码事 ——
+        以前点「系统生成渔货号」会顺手把它填成渔货号，等于拿自己的号冒了供应商的号。
+        散货没有外部编号就留空，照样能建档。
+        """
         batch = self._batch()
         resp = self._post(batch, sku_code="", category="破壁机",
                           specs_json=json.dumps([{"spec": "黑", "qty": "1"}]))
         self.assertEqual(resp.status_code, 303)
         with SessionLocal() as s:
-            self.assertEqual(len(intake.list_items(s, batch_id=batch.id)), 0)
+            rows = intake.list_items(s, batch_id=batch.id)
+            self.assertEqual(len(rows), 1, "没进货货号也要建得出来")
+            self.assertEqual(str(rows[0].sku_code or ""), "")
+            self.assertTrue(str(rows[0].fish_code or "").startswith("YS"),
+                            "渔货号照发")
 
 
 if __name__ == "__main__":

@@ -181,6 +181,9 @@ class WmsV1011Test(unittest.TestCase):
         # 要测「不填被拒」自己显式传 flaw_desc=""（段描述会带进商品上架的供应商友情提示）
         if grade == "A":
             kw.setdefault("flaw_desc", "外壳轻微划痕（测试）")
+        # 复检（第 2 轮起）必填覆盖理由（2026-10-15）：helper 统一带上，专门测
+        # 「不填被拦」的用例自己显式传 recheck_reason=""
+        kw.setdefault("recheck_reason", "测试：复检覆盖")
         with SessionLocal() as s:
             row = inspection.submit(
                 s, s.get(WmsItem, item.id), tester="tester", results={},
@@ -237,7 +240,8 @@ class WmsV1011Test(unittest.TestCase):
         self._grade(item, "A", manual_price=888.5)
         with SessionLocal() as s:
             row = s.get(WmsItem, item.id)
-            self.assertAlmostEqual(row.selling_price, 888.5)
+            # 人工改价也按整数口径向下取整
+            self.assertAlmostEqual(row.selling_price, 888.0)
             log = s.scalar(
                 select(WmsAuditLog).where(
                     WmsAuditLog.entity == "item", WmsAuditLog.action == "price"
@@ -245,7 +249,8 @@ class WmsV1011Test(unittest.TestCase):
             )
             self.assertIsNotNone(log, "人工改价要留审计")
             self.assertIn("人工改价", log.note)
-            self.assertIn("888.50", log.after)
+            # 人工价 888.5 也按整数口径向下取整落库并写进审计
+            self.assertIn("888.00", log.after)
         self.assertTrue(record.id)
 
     # ---------------------------------------------------------- 退回入库原始状态

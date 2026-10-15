@@ -183,6 +183,30 @@ def my_shop_stats(owner_user_id: int) -> dict[str, int]:
         }
 
 
+def my_account_names(owner_user_id: int) -> list[str]:
+    """我名下店铺对应的**闲鱼账号名**（店铺档案 name = 闲鱼昵称/账号，订单按它对上）。
+
+    口径与「店铺管理」页一致：自己提交的（owner_user_id）+ 从渔枢系统带入的
+    （self_linked_user_id）—— 店铺列表里看得到哪家店，订单里就能看到哪个账号的单。
+    """
+    if not available() or not owner_user_id:
+        return []
+    with _hub_session() as db:
+        rows = _hub_shop.list_shops(db, owner_user_id=owner_user_id)
+    names = {str(getattr(r, "name", "") or "").strip() for r in rows}
+    return sorted(n for n in names if n)
+
+
+def all_account_names() -> list[str]:
+    """全平台店铺对应的闲鱼账号名（给有全量权限的人做「按账号筛选」下拉）。"""
+    if not available():
+        return []
+    with _hub_session() as db:
+        rows = _hub_shop.list_shops(db)
+    names = {str(getattr(r, "name", "") or "").strip() for r in rows}
+    return sorted(n for n in names if n)
+
+
 def my_shops(owner_user_id: int, q: str = "", audit: str = "") -> list[dict[str, Any]]:
     """我提交的店铺（待审核的排前面，方便自己看到进度）。"""
     if not available() or not owner_user_id:

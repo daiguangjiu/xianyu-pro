@@ -1,56 +1,58 @@
 {% extends "base.html" %}
 {% import "wms_bits.html" as bits %}
+{% from "_pager.html" import pager %}
 {% block title %}出库管理{% endblock %}
+{% block actions %}
+  <a class="btn primary" href="/wms/outbound/new"><i class="bi bi-plus-lg"></i> 新建出库单</a>
+{% endblock %}
 {% block sub %}共 {{ total }} 张单 · 拣货扫码校验：错货 / 错等级当场拦{% endblock %}
 
 {% block content %}
-<div class="card">
-  <h2>新建出库单</h2>
-  <form class="filters" method="post" action="/wms/outbound">
-    <div class="field"><label for="o-t">类型</label>
-      <select id="o-t" name="type">{% for v, t in types %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
-    <div class="field"><label for="o-w">发货仓</label>
-      <select id="o-w" name="warehouse_code">
-        {% for w in warehouses %}{% if w.can_out %}<option value="{{ w.code }}">{{ w.name }}</option>{% endif %}{% endfor %}</select></div>
-    <div class="field"><label for="o-tw">目标仓（调拨用）</label>
-      <select id="o-tw" name="to_warehouse"><option value="">—</option>
-        {% for w in warehouses %}<option value="{{ w.code }}">{{ w.name }}</option>{% endfor %}</select></div>
-    <div class="field"><label for="o-tn">关联单据号</label>
-      <input id="o-tn" type="text" name="target_no" placeholder="销售订单号 / 报修单号"></div>
-    <div class="field"><label for="o-r">收货人</label><input id="o-r" type="text" name="receiver_name"></div>
-    <div class="field"><label>&nbsp;</label><button class="btn primary">创建</button></div>
-  </form>
-</div>
-
 <div class="card flush">
-  <div class="filters padded">
-    <form method="get" action="/wms/outbound">
-      <div class="field grow"><label for="f-q">单号 / 关联单号 / 运单号</label>
-        <input id="f-q" type="search" name="q" value="{{ filters.q }}"></div>
-      <div class="field"><label for="f-t">类型</label>
-        <select id="f-t" name="type"><option value="">全部</option>
-          {% for v, t in types %}<option value="{{ v }}" {{ 'selected' if filters.type == v }}>{{ t }}</option>{% endfor %}</select></div>
-      <div class="field"><label for="f-s">状态</label>
-        <select id="f-s" name="status"><option value="">全部</option>
-          {% for v, t in statuses %}<option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ t }}</option>{% endfor %}</select></div>
-      <div class="field"><label>&nbsp;</label><button class="btn">筛选</button></div>
-    </form>
-  </div>
+  {# 筛选横排（2026-10-16 修）：以前 .filters 包在 form 外面、form 又是块级，
+     每个 .field 被挤成一行堆叠 —— 现在把 filters 类直接挂到 form 上，控件一行排开 #}
+  <form class="filters padded" method="get" action="/wms/outbound">
+    <div class="field grow"><label for="f-q">搜索</label>
+      <input id="f-q" type="search" name="q" value="{{ filters.q }}"
+             placeholder="出库单号 / 关联单号 / 运单号 / 收货人"></div>
+    <div class="field"><label for="f-t">类型</label>
+      <select id="f-t" name="type"><option value="">全部类型</option>
+        {% for v, t in types %}<option value="{{ v }}" {{ 'selected' if filters.type == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="f-s">状态</label>
+      <select id="f-s" name="status"><option value="">全部状态</option>
+        {% for v, t in statuses %}<option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ t }}</option>{% endfor %}</select></div>
+    <div class="field"><label>&nbsp;</label><button class="btn">筛选</button></div>
+  </form>
   {% if orders %}
   <div class="table-wrap"><table>
-    <thead><tr><th>出库单号</th><th>类型</th><th>发货仓</th><th>关联单号</th><th class="num">件数</th>
-      <th>收货人</th><th>运单号</th><th>状态</th><th>时间</th></tr></thead>
+    <thead><tr><th>出库单号</th><th>类型 / 仓库</th><th>关联单号</th><th>出库商品（商品名 · 渔货号 / 条码）</th><th class="num">件数</th>
+      <th>收货人</th><th>运单号</th><th>状态</th><th>创建时间</th></tr></thead>
     <tbody>
     {% for o in orders %}
+      {% set olines = (lines_map or {}).get(o.id, []) %}
       <tr>
         <td class="nowrap"><a href="/wms/outbound/{{ o.id }}"><b>{{ o.order_no }}</b></a></td>
-        <td><span class="badge {{ 'ok' if o.type == 'SALE' else 'muted' }}">{{ o.type }}</span></td>
-        <td>{{ wms_warehouse_label(o.warehouse_code) }}</td>
+        <td class="nowrap">
+          <span class="badge {{ 'ok' if o.type == 'SALE' else 'muted' }}">{{ type_labels.get(o.type, o.type) }}</span>
+          <div class="muted" style="font-size:12px;margin-top:2px">{{ wms_warehouse_label(o.warehouse_code) }}{% if o.to_warehouse %} → {{ wms_warehouse_label(o.to_warehouse) }}{% endif %}</div>
+        </td>
         <td class="mono muted">{{ o.target_no or '—' }}</td>
+        <td class="wrap2">
+          {% if olines %}
+            {# 出库商品（2026-10-15 用户拍板）：显示商品名 + 渔货号（条码小字跟上）——
+                光一串条码对不上人脑里的货 #}
+            {% for l in olines[:3] %}<div style="font-size:12px">
+              <span class="clamp2" style="display:inline">{{ l.title or '—' }}</span>
+              {% if l.fish_code %}<a class="mono muted" href="/wms/goods/{{ l.fish_code }}">{{ l.fish_code }}</a>{% endif %}
+              <div class="mono muted" style="font-size:11.5px">{{ l.barcode }}{% if l.qty > 1 %} ×{{ l.qty }} 台{% endif %}</div>
+            </div>{% endfor %}
+            {% if olines | length > 3 %}<div class="muted" style="font-size:12px">…共 {{ olines | length }} 项</div>{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
         <td class="num">{{ o.item_count }}</td>
-        <td>{{ o.receiver_name or '—' }}</td>
+        <td class="nowrap">{{ o.receiver_name or '—' }}</td>
         <td class="mono muted">{{ o.waybill_no or '—' }}</td>
-        <td><span class="badge {{ 'done' if o.status == 'shipped' else 'pending' if o.status == 'picking' else 'muted' }}">{{ o.status }}</span></td>
+        <td class="nowrap"><span class="badge {{ 'done' if o.status == 'shipped' else 'pending' if o.status == 'picking' else 'muted' }}">{{ status_labels.get(o.status, o.status) }}</span></td>
         <td class="nowrap muted">{{ o.created_at | dt }}</td>
       </tr>
     {% endfor %}
@@ -58,4 +60,7 @@
   </table></div>
   {% else %}{{ bits.empty('还没有出库单') }}{% endif %}
 </div>
+
+{# 全站统一分页组件（templates/_pager.html），翻页时筛选条件原样带着走 #}
+{{ pager(page, pages, '/wms/outbound', {'q': filters.q, 'type': filters.type, 'status': filters.status}, total, size=page_size) }}
 {% endblock %}

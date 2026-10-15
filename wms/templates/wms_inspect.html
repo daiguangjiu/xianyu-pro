@@ -9,7 +9,9 @@
 <style>
   /* 标签预览的那套样式（服务端按毫米坐标画出来的那张纸） */
   {{ label_preview_css | safe }}
-  .bench { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+  /* 右侧「引擎建议 / 渔货价」悬浮列（2026-10-15 用户：往左挪一点、缩小一点）
+     —— 列加宽让面板整体往内容方向挪，再用右留白收窄，不再死贴屏幕右缘 */
+  .bench { display: grid; grid-template-columns: minmax(0, 1fr) 396px; gap: 16px; align-items: start; }
   @media (max-width: 1100px) { .bench { grid-template-columns: minmax(0, 1fr); } }
   #scanInput { width: 100%; font-size: 16px; padding: 10px 12px; }
   .scan-hint { display:flex; align-items:center; gap:8px; color: var(--c-text-muted); font-size:12px; margin-top:6px; }
@@ -80,7 +82,7 @@
     background:#fff5e0; box-shadow: 0 0 0 3px rgba(245,158,11,.2); }
   .ask-check:has(input:checked) .bc-title { color:#7c2d12; }
   .ask-check:has(input:checked) .ask-ico { color:#b45309; }
-  .suggest { position: sticky; top: 112px; }
+  .suggest { position: sticky; top: 112px; margin-right: 64px; }
   .suggest .grade { font-size:32px; font-weight:800; letter-spacing:1px; }
   /* ④ 渔货价（2026-10-08）：系统按「分级规则」里的价格系数算出来的默认金额。
      它是最终定价的落点，所以从标题到数字都做得「亮」一点 —— 别让人当成随便一个只读字段，
@@ -271,9 +273,12 @@
           <i class="bi bi-diagram-3"></i> 独立渔货号重新建档
         </button>
       </h2>
-      <p class="d">扫码枪扫出条码 / 货号后，按<b>货号</b>从建档的商品档案里带出这一台的全部入库信息 ——
-        品牌 / 型号 / 规格 / 序列号 / 成本与基准价 / 批次与供应商 / 入库时间，以及导入时
-        <b>沉淀下来的商品字段</b>（顺序与显示名跟「商品字段」页保持一致）。</p>
+      <p class="d">扫条码 / 货号，自动带出这台货的建档信息（品牌 / 型号 / 规格 / 价格 / 批次等），
+        导入沉淀的字段按「商品字段」页的顺序显示。</p>
+      {# 商品资料缺失提醒（2026-10-15 用户拍板）：型号 / 规格这些建档时就该填的
+         字段一个都没填，就在这儿顶一条，检测员点一下跳到编辑页补全 —— 别让空档案
+         一路带到渔货栈 / 渔枢的详情页上显示成一排「—」 #}
+      <div id="profileTip" class="note warn" hidden></div>
       <div id="itemHead" class="kv-grid" style="margin-bottom:var(--s-3)"></div>
     </div>
 
@@ -373,6 +378,14 @@
       {# 拍照留档（2026-10-11 用户：要「多图上传 + 能删图」）：
          去掉 capture —— 手机上带 capture 只会开相机、一次一张；不带的话系统弹「拍照 / 相册」，
          相册里可以一次勾多张，也能分几次接着加。 #}
+      {# 覆盖理由（2026-10-15 用户拍板收口）：一个框管两件事 ——
+         ① 复检覆盖上一轮结论 ② 人工改档覆盖引擎建议（A → B）—— 同一个理由、同一个框。
+         位置按用户指定放在「拍照留档」上面；显示时机由 JS 控制（进复检模式 / 改了档），
+         没填提交会被拦（前端点名 + 后端也拦，接口直调逃不掉）。 #}
+      <div class="field" id="rcReasonBox" style="display:none">
+        <label for="rcReason" id="rcReasonLabel">覆盖理由（必填）</label>
+        <input id="rcReason" type="text" placeholder="如：客户退货复检；上轮判错，外观复查有瑕疵；外观太差，按 B 处理">
+      </div>
       <h3>拍照留档（选填，争议时是唯一凭证）</h3>
       <input id="photoInput" type="file" accept="image/*" multiple>
       <div class="photo-strip" id="photos"></div>
@@ -386,11 +399,18 @@
        上轮档位与「带进来的判定」一眼就能看到。 #}
     <div class="note warn" id="recheckBar" style="display:none">
       <span id="recheckText"></span>
+      {# 覆盖理由输入框（2026-10-15 用户指定挪到「拍照留档」上面，见下面 #rcReasonBox） #}
       <button type="button" class="btn sm" id="rcSwitch" style="display:none">我要重新检测（覆盖上一轮）</button>
     </div>
     <div class="card">
       <h2>④ 引擎建议</h2>
-      <div class="grade" id="suggestGrade">—</div>
+      {# 人工指定档（2026-10-15）：在「最终档位」选了档，这里的大字 / 价格 / 标签
+         立刻全部跟着所选档走，并打「人工指定」标 —— 谁说了算一眼分清 #}
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+        <div class="grade" id="suggestGrade">—</div>
+        <span class="badge" id="gradeSrc" style="display:none" title="你在「最终档位」里选的档，评级 / 价格 / 标签都按它算">人工指定</span>
+        <span class="muted" id="gradeLabelText" style="font-size:13px"></span>
+      </div>
       <div class="muted" id="ruleTitle" class="hint" style="margin-bottom:var(--s-2)"></div>
       <ul class="reasons" id="reasons"></ul>
       {# 渔货价：系统按分级规则的价格系数算出的默认金额，可改（2026-10-08） #}
@@ -424,8 +444,8 @@
           <option value="">跟随引擎建议</option>
           {% for v, t in grades %}<option value="{{ v }}">{{ t }}</option>{% endfor %}
         </select></div>
-      <div class="field" id="overrideBox" style="display:none"><label for="override">覆盖理由（必填）</label>
-        <input id="override" type="text" placeholder="如：外观太差，按 B 处理"></div>
+      {# 改档理由框已下线（2026-10-15 用户拍板）：与复检理由合并成同一个「覆盖理由」框，
+         放在左栏「拍照留档」上面 —— 人工改档（A → B）填的也是那一个框，见 #rcReasonBox #}
       {# 判到 C 档：提交后这里长出「去开报修单」按钮（2026-10-14）—— 检测员手里就是这台货 #}
       <div class="note" id="repairBar" style="display:none">
         <span id="repairText"></span>
@@ -590,6 +610,7 @@ let SAFETY = [];                // 安全红线项 key
 let PENDING_OWN = false;        // 打过标签 → 下一枪扫的是「检修后条码」，不是下一台货
 let LABEL_CODE = '';            // 刚打出来那张标签上印的码（扫进来要跟它比对）
 let RECHECK = null;             // 扫到检测过的货：{round, last} —— 没进复检模式就锁着提交按钮
+let ENGINE_GRADE = '';          // 引擎自己的建议档（refresh() 里存）—— 判断「人工改档」用，不被人工指定档污染
 const $ = id => document.getElementById(id);
 
 function banner(text, kind) {
@@ -709,6 +730,8 @@ async function load(code) {
   $('panelInspect').style.display = '';
   // ② 商品入库信息：扫货号带出来的就是这一台的全部入库档案
   renderHead(data.item, data.item.extra_rows || []);
+  // 商品资料缺了就顶一条提醒（点按钮去「货品台账 → 编辑商品信息」补全）
+  renderProfileTip(data.item);
   // 全新判定两个勾、自动全过提示、改价框都归零 —— 上一台货的勾不能带到下一台（2026-10-10）
   $('sealed').checked = false; $('opened').checked = false;
   // 「缺件严重」的手动标记也清掉 —— 下一台判 D 时照旧自动勾（2026-10-13）
@@ -771,12 +794,14 @@ function enterRecheck() {
   $('recheckMask').style.display = 'none';
   $('recheckBar').style.display = '';
   $('rcSwitch').style.display = 'none';
+  $('rcReasonBox').style.display = '';   // 复检必填覆盖理由（2026-10-15）
+  $('rcReasonLabel').textContent = '覆盖理由（必填）：为什么重新判 / 哪里变了';
   $('recheckText').innerHTML = '<b>复检中（第 ' + ((r.round || 1) + 1) + ' 轮）</b> · 提交后覆盖上一轮（第 '
     + (r.round || 1) + ' 轮 · ' + ((r.last || {}).final || '未定级') + '）的结论'
     + ' —— 上一轮记录留档不删，货品等级与渔货价按这一轮重算。';
   $('submitBtn').textContent = '重新提交检测（覆盖第 ' + (r.round || 1) + ' 轮）';
   $('submitBtn').disabled = false;
-  banner('已进复检模式：提交后写第 ' + ((r.round || 1) + 1) + ' 轮记录', 'warn');
+  banner('已进复检模式：提交后写第 ' + ((r.round || 1) + 1) + ' 轮记录，覆盖理由必填', 'warn');
   $('submitBtn').focus();
 }
 
@@ -986,6 +1011,8 @@ function resetRecheck() {
   $('recheckMask').style.display = 'none';
   $('recheckBar').style.display = 'none';
   $('rcSwitch').style.display = 'none';
+  $('rcReasonBox').style.display = 'none';
+  $('rcReason').value = '';
   $('submitBtn').textContent = '提交检测（Enter）';
   $('submitBtn').disabled = false;
 }
@@ -1127,6 +1154,41 @@ function renderHead(item, extraRows) {
         '</span><span class="v">' + esc(r.value) + '</span></div>').join('');
   }
   $('itemHead').innerHTML = html;
+}
+
+// 商品资料缺失提醒（2026-10-15 用户拍板）：型号 / 规格这些建档时就该填的字段
+// 一个都没填，就在「② 商品入库信息」卡顶一条 —— 扫进来的货空着档案就往下走，
+// 渔货栈 / 渔枢详情页上只会显示成一排「—」，回过头来还得返工。
+function renderProfileTip(item) {
+  const box = $('profileTip');
+  if (!box) return;
+  const miss = (item && item.profile_missing) || [];
+  if (item && item.need_profile) {
+    box.innerHTML = '<b>商品资料还没填</b>：商品名称 / 品牌 / 型号 / 规格 —— 型号与规格'
+      + '决定定级和定价，缺了详情页就是一排「—」。'
+      + (item.fish_code
+         ? '<a class="btn primary" style="margin-left:10px" href="/wms/goods/'
+           + encodeURIComponent(item.fish_code)
+           + '/edit"><i class="bi bi-pencil-square"></i> 补全商品信息</a>'
+         : '<a class="btn primary" style="margin-left:10px" href="/wms/items?q='
+           + encodeURIComponent(item.barcode || '')
+           + '"><i class="bi bi-pencil-square"></i> 去库存台账补全</a>');
+    box.hidden = false;
+    return;
+  }
+  if (miss.length) {
+    box.innerHTML = '还缺：<b>' + miss.map(esc).join(' / ') + '</b> —— 补全后详情页才带得过去。'
+      + (item.fish_code
+         ? '<a class="btn primary" style="margin-left:10px" href="/wms/goods/'
+           + encodeURIComponent(item.fish_code)
+           + '/edit"><i class="bi bi-pencil-square"></i> 补全商品信息</a>'
+         : '<a class="btn primary" style="margin-left:10px" href="/wms/items?q='
+           + encodeURIComponent(item.barcode || '')
+           + '"><i class="bi bi-pencil-square"></i> 去库存台账补全</a>');
+    box.hidden = false;
+    return;
+  }
+  box.hidden = true;
 }
 
 function renderItems(template) {
@@ -1274,6 +1336,8 @@ async function refresh() {
     inhouse_fixable: $('repairList').checked, must_official: $('repairList').checked,
     missing_parts: $('missing').checked,
     sealed: $('sealed').checked, opened_unused: $('opened').checked,   // N 全新
+    // 人工指定档（2026-10-15）：选了档，评级 / 价格 / 标签全部按它重算
+    grade: ($('finalGrade').value || '').trim(),
   };
   const res = await fetch('/wms/api/inspect/preview', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1281,15 +1345,21 @@ async function refresh() {
   });
   const d = await res.json();
   if (!d.ok) return;
-  $('suggestGrade').textContent = d.suggest_grade || '—';
+  // 生效档 = 人工指定档（选了且合法）否则引擎建议 —— 下面评级 / 报修高亮 / 价格
+  // 全部用它；引擎自己的建议留在 ruleTitle / reasons 里对照
+  const eff = d.effective_grade || d.suggest_grade || '—';
+  ENGINE_GRADE = d.suggest_grade || '';   // 引擎建议档（人工指定也保留，改档判断要用）
+  $('suggestGrade').textContent = eff;
+  $('gradeSrc').style.display = d.manual_grade ? '' : 'none';
+  $('gradeLabelText').textContent = d.grade_label_text || '';
   $('ruleTitle').textContent = d.rule_title || '';
   $('reasons').innerHTML = (d.reasons || []).map(x => '<li>' + x + '</li>').join('');
   $('blockedNote').style.display = d.blocked ? '' : 'none';
   // 建议 C 报修：检修判定区整块高亮 + 提示必须选维修方式（2026-10-13 用户拍板）；
-  // 人工勾「缺件严重」判 D 后建议档变 D，高亮自动撤掉
+  // 人工勾「缺件严重」判 D 后建议档变 D，高亮自动撤掉；人工选了 C 也一样高亮
   const zone = $('zoneFix');
   if (zone) {
-    const isC = (d.suggest_grade || '') === 'C';
+    const isC = eff === 'C';
     zone.classList.toggle('urge', isC);
     if (isC) {
       $('repairHint').innerHTML = '这台建议 <b>C 报修</b>：必须在上面选一个维修方式'
@@ -1312,7 +1382,7 @@ async function refresh() {
   //   ③ 系数 / 毛利 / 审批线一起摊开，别让人只能看到一个结果数。
   const priced = p.priced !== false;
   const base = Number(p.base_price || 0);
-  const coeff = '按建议档「' + (d.suggest_grade || '—') + '」系数 ' + p.factor
+  const coeff = (d.manual_grade ? '按人工档「' : '按建议档「') + eff + '」系数 ' + p.factor
     + ' × 基准价 ¥' + base.toFixed(2);
   const missNote = p.rule_missing
     ? '<br><b style="color:var(--c-warn)">这一档没有启用中的价格系数</b>，系统按系数 1.0 兜底'
@@ -1526,9 +1596,18 @@ $('manualPrice').oninput = reflectPrice;
     refresh();
   });
 });
-$('finalGrade').addEventListener('change', () => {
+$('finalGrade').addEventListener('change', async () => {
   const v = $('finalGrade').value;
-  $('overrideBox').style.display = (v && v !== $('suggestGrade').textContent) ? '' : 'none';
+  // 人工选档（2026-10-15）：评级大字 / 渔货价 / 标签预览立刻按所选档重算；
+  // 选回「跟随引擎建议」就回到引擎的建议档
+  await refresh();
+  // 覆盖理由统一框（2026-10-15）：人工改档（与引擎建议不同档）也要填理由 ——
+  // 就是复检那同一个框（拍照留档上面），理由交上去同时作 override_reason
+  const needOverride = v && ENGINE_GRADE && v !== ENGINE_GRADE;
+  $('rcReasonBox').style.display = (RECHECK || needOverride) ? '' : 'none';
+  if (needOverride && !RECHECK) {
+    $('rcReasonLabel').textContent = '覆盖理由（必填）：为什么改成这一档（A → ' + v + ' 等改判，规则调优的唯一依据）';
+  }
 });
 
 // ---------------------------------------------------------------- 拍照留档（多张 + 可删）
@@ -1649,10 +1728,22 @@ async function submit() {
     $('zoneFix').classList.add('urge');
     return;
   }
+  // 覆盖理由一个框管两件事（2026-10-15 收口）：复检覆盖上一轮、人工改档覆盖引擎建议 ——
+  // 同一个值提交时同时作 recheck_reason 与 override_reason，不会再出现「填了理由还报缺 override」
   const finalGrade = $('finalGrade').value;
+  const reason = ($('rcReason').value || '').trim();
+  const gradeOverride = finalGrade && ENGINE_GRADE && finalGrade !== ENGINE_GRADE;
+  if ((RECHECK || gradeOverride) && !reason) {
+    $('rcReasonBox').style.display = '';
+    $('rcReason').focus();
+    banner(RECHECK
+      ? '复检会覆盖上一轮的结论 —— 必须填「覆盖理由」（为什么重新判 / 哪里变了）'
+      : '人工改档（覆盖引擎建议）必须填「覆盖理由」—— 这是规则调优的唯一依据', 'err');
+    return;
+  }
   const payload = {
     item_id: CUR.item.id, results: RESULTS, fail_descs: DESCS,
-    final_grade: finalGrade, override_reason: $('override').value,
+    final_grade: finalGrade, override_reason: reason,
     uncertain: $('uncertain').checked,
     inhouse_fixable: $('repairList').checked, must_official: $('repairList').checked,
     missing_parts: $('missing').checked, note: $('note').value, photos: PHOTOS,
@@ -1660,6 +1751,7 @@ async function submit() {
     location_code: $('location').value,
     own_barcode: $('ownBarcode').value,
     manual_price: $('manualPrice').value,   // 留空 = 用系统按价格系数算的默认价
+    recheck_reason: reason,                 // 与 override_reason 同一个值（2026-10-15 收口）
   };
   const res = await fetch('/wms/api/inspect/submit', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1685,7 +1777,8 @@ async function submit() {
     }
   }
   RESULTS = {}; DESCS = {}; PHOTOS = []; renderPhotos();
-  $('finalGrade').value = ''; $('override').value = ''; $('uncertain').checked = false;
+  $('finalGrade').value = ''; $('rcReason').value = ''; $('uncertain').checked = false;
+  $('rcReasonBox').style.display = RECHECK ? '' : 'none';   // 复检还开着就留框，否则收起
   wmsLocSet('location', '');
   $('ownBarcode').value = '';
   $('labelPrintState').textContent = '';

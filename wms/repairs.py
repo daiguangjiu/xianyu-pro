@@ -1,8 +1,10 @@
-"""报修工单（C 档）：线上 / 线下双通道。
+"""报修工单（C 档）：品牌官方寄回维修 / 品牌到家维修 / 自行维修三通道。
 
 这个模块存在的唯一理由：**不建待修台账，货寄出去就等于丢了** ——
 钱垫着、货在别人手里、没人跟进。所以「承诺时效 + 超时标记」是这里的核心。
 
+状态流（2026-10-15 用户拍板）：待送出 → **送出** → **寄回**（在途回程，只记单号）
+→ **确认再入库**（货真回仓才搬账）→ 结案 / 转拆件。
 回库必须重新检测定级，**不得沿用送修前等级**（维修过程可能引入新伤）。
 """
 from __future__ import annotations
@@ -18,8 +20,11 @@ from .models import (
     REPAIR_C1,
     REPAIR_C2,
     REPAIR_CANCELLED,
+    REPAIR_CH_BRAND_SEND,
+    REPAIR_CHANNELS,
     REPAIR_CLOSED,
     REPAIR_OPEN,
+    REPAIR_RESTOCKED,
     REPAIR_RETURNED,
     REPAIR_SENT,
     REPAIR_STATUS_LABELS,
@@ -49,30 +54,29 @@ def next_repair_no(session: Session, at=None) -> str:
 
 
 def create(session: Session, item: WmsItem, data, operator: str = "") -> WmsRepairOrder:
-    """开报修工单：C1 线上要工单号，C2 线下要网点名 + 电话（送修前必须确认受理）。"""
+    """开报修工单（2026-10-15 用户拍板）：通道固定三选（品牌官方寄回 / 品牌到家 /
+    自行维修），SN 序列号与故障描述必填（争议时的唯一凭证），费用拆维修费 + 快递费。"""
     if item is None:
         raise ValueError("货品不存在")
-    channel = str(data.get("channel") or REPAIR_C1).upper()
-    if channel not in (REPAIR_C1, REPAIR_C2):
-        raise ValueError("报修渠道只支持 C1 线上 / C2 线下")
+    channel = str(data.get("channel") or REPAIR_CH_BRAND_SEND).upper()
+    if channel not in REPAIR_CHANNELS + (REPAIR_C1, REPAIR_C2):
+        raise ValueError("维修通道只能是：品牌官方寄回维修 / 品牌到家维修 / 自行维修")
     vendor = str(data.get("vendor") or "").strip()
     ticket_no = str(data.get("ticket_no") or "").strip()
-    if not vendor:
-        raise ValueError("报修渠道 / 网点不能为空")
-    if channel == REPAIR_C1 and not ticket_no:
-        raise ValueError("C1 线上报修必须填凭证号（工单号 / 寄修单号）")
-    if channel == REPAIR_C2 and not str(data.get("contact_phone") or "").strip():
-        raise ValueError("C2 线下报修必须留网点电话（送修前要电话确认受理）")
     if not str(data.get("serial_no") or item.serial_no or "").strip():
-        raise ValueError("报修必须录序列号 / IMEI（官方无凭证不受理）")
+        raise ValueError("维修商品的 SN 序列号必填（官方无凭证不受理）")
     if not str(data.get("fault_desc") or "").strip():
-        raise ValueError("报修必须填故障描述（争议时是唯一凭证）")
+        raise ValueError("故障描述必填（争议时是唯一凭证）")
 
     try:
         days = int(data.get("promise_days") or REPAIR_TIMEOUT_DAYS)
     except (TypeError, ValueError):
         days = REPAIR_TIMEOUT_DAYS
     days = max(days, 1)
+
+    repair_fee = round(float(data.get("repair_fee") or 0.0), 2)
+    express_fee = round(float(data.get("express_fee") or 0.0), 2)
+    paid = round(float(data.get("paid_amount") or 0.0), 2) or repair_fee + express_fee
 
     row = WmsRepairOrder(
         order_no=next_repair_no(session),
@@ -90,7 +94,9 @@ def create(session: Session, item: WmsItem, data, operator: str = "") -> WmsRepa
         fault_desc=str(data.get("fault_desc") or "").strip(),
         photos=list(data.get("photos") or []),
         promise_days=days,
-        paid_amount=float(data.get("paid_amount") or 0.0),
+        paid_amount=paid,
+        repair_fee=repair_fee,
+        express_fee=express_fee,
         status=REPAIR_OPEN,
         operator=str(operator or ""),
         created_at=_now(),
@@ -169,13 +175,35 @@ def timeouts(session: Session, limit: int = 50) -> list[WmsRepairOrder]:
     )
 
 
-def return_back(session: Session, repair_id: int, operator: str = "") -> WmsRepairOrder:
-    """修回：货品回待检仓并**强制重新检测定级**（不允许直接回可售）。"""
+def return_back(session: Session, repair_id: int, operator: str = "",
+                waybill_no: str = "") -> WmsRepairOrder:
+    """寄回登记（2026-10-15 用户拍板）：货还在**在途回程**，只记单号不搬账 ——
+    人真正点「确认再入库」才把仓与状态搬回来，避免「纸面到货、手里没货」。"""
     row = session.get(WmsRepairOrder, repair_id)
     if not row:
         raise ValueError("报修工单不存在")
-    if row.status not in (REPAIR_SENT,):
-        raise ValueError(f"「{row.status}」状态不能登记修回")
+    if row.status != REPAIR_SENT:
+        raise ValueError(f"「{REPAIR_STATUS_LABELS.get(row.status, row.status)}」状态不能登记寄回（只有送出能寄回）")
+    row.status = REPAIR_RETURNED
+    row.returned_at = _now()
+    if waybill_no:
+        row.waybill_no = str(waybill_no)
+    row.timeout_flag = False
+    row.updated_at = _now()
+    audit.log(session, "repair", row.id, "repair", after="寄回（在途回程）", operator=operator,
+              note=f"回程单号 {waybill_no or row.waybill_no or '—'}")
+    session.commit()
+    return row
+
+
+def restock(session: Session, repair_id: int, operator: str = "") -> WmsRepairOrder:
+    """确认再入库（2026-10-15 用户拍板）：货真回到仓里才搬账 ——
+    回待检仓并**强制重新检测定级**（不允许直接回可售）。"""
+    row = session.get(WmsRepairOrder, repair_id)
+    if not row:
+        raise ValueError("报修工单不存在")
+    if row.status not in (REPAIR_RETURNED,):
+        raise ValueError(f"「{REPAIR_STATUS_LABELS.get(row.status, row.status)}」状态不能确认再入库（先登记寄回）")
     item = session.get(WmsItem, row.item_id)
     if not item:
         raise ValueError("货品不存在")
@@ -186,16 +214,14 @@ def return_back(session: Session, repair_id: int, operator: str = "") -> WmsRepa
         to_warehouse=WH_PENDING,
         to_status=STATUS_REWORK,
         operator=operator,
-        remark="报修修回，强制重新检测定级（不得沿用送修前等级）",
+        remark="报修寄回确认入库，强制重新检测定级（不得沿用送修前等级）",
         idempotent_key=f"REPAIR-BACK:{row.order_no}:{item.id}",
         check_transition=False,
     )
     item.need_recheck = True
-    row.status = REPAIR_RETURNED
-    row.returned_at = _now()
-    row.timeout_flag = False
+    row.status = REPAIR_RESTOCKED
     row.updated_at = _now()
-    audit.log(session, "repair", row.id, "repair", after="修回待重检", operator=operator)
+    audit.log(session, "repair", row.id, "repair", after="确认再入库（待重检）", operator=operator)
     session.commit()
     return row
 
@@ -207,7 +233,7 @@ def close(session: Session, repair_id: int, operator: str = "", note: str = "") 
         raise ValueError("报修工单不存在")
     item = session.get(WmsItem, row.item_id)
     if item and str(item.status or "").upper() == state.STATUS_OUT_REPAIR:
-        raise ValueError("货还在外面（在途），先登记修回或撤单")
+        raise ValueError("货还没确认回仓（在途），先「寄回 → 确认再入库」或撤单")
     row.status = REPAIR_CLOSED
     row.closed_at = _now()
     row.result_note = str(note or "")
@@ -219,7 +245,7 @@ def close(session: Session, repair_id: int, operator: str = "", note: str = "") 
 
 
 def open_order_of(session: Session, item_id) -> WmsRepairOrder | None:
-    """这台货有没有还没收尾的报修单（待送修 / 在途 / 已修回）。
+    """这台货有没有还没收尾的报修单（待送出 / 送出 / 寄回 / 确认再入库）。
 
     一键入口靠它判两件事：重复的给「查看报修单」，没单的才给「开报修单」——
     同一台货不允许出现两张同时在走的单（钱垫两遍、回来对不上账）。
@@ -228,7 +254,9 @@ def open_order_of(session: Session, item_id) -> WmsRepairOrder | None:
         select(WmsRepairOrder)
         .where(
             WmsRepairOrder.item_id == item_id,
-            WmsRepairOrder.status.in_((REPAIR_OPEN, REPAIR_SENT, REPAIR_RETURNED)),
+            WmsRepairOrder.status.in_(
+                (REPAIR_OPEN, REPAIR_SENT, REPAIR_RETURNED, REPAIR_RESTOCKED)
+            ),
         )
         .order_by(WmsRepairOrder.id.desc())
     )
@@ -259,7 +287,7 @@ def to_parts(session: Session, repair_id: int, operator: str = "",
     if not item:
         raise ValueError("这台货已经不在库里了（可能已出库 / 核销）")
     if str(item.status or "").upper() == STATUS_OUT_REPAIR:
-        raise ValueError("货还在外面（在途），先登记修回或撤单 —— 手上没货拆不了件")
+        raise ValueError("货还没确认回仓（在途），先「寄回 → 确认再入库」—— 手上没货拆不了件")
 
     reason = str(note or "").strip() or "官方判不可修 / 无维修价值"
     if str(item.grade or "").upper() != GRADE_D:

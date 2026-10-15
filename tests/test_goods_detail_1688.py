@@ -135,8 +135,47 @@ class GoodsDetail1688Test(unittest.TestCase):
         # 拿整页 assertNotIn 会误命中）
         end = html.find("</title>") + len("</title>")
         title = html[html.find("<title>") : end]
-        self.assertEqual(title, f"<title>{ITEM_TITLE} · 商品详情</title>", title)
+        # 2026-10-14 起 base.html 统一加了【渔货栈】前缀，这里跟着带上
+        self.assertEqual(title, f"<title>【渔货栈】{ITEM_TITLE} · 商品详情</title>", title)
         self.assertNotIn("版式", title)
+
+    @staticmethod
+    def _set_item_code(code: str) -> None:
+        with SessionLocal() as s:
+            row = s.query(SupplierItem).filter(SupplierItem.item_id == ITEM_ID).first()
+            row.item_code = code
+            s.commit()
+
+    def test_16_title_carries_fish_code(self):
+        """标题后面跟着渔货号（2026-10-15 用户拍板）：这款货在渔集的身份证。
+
+        渔货栈的「商家编码」存的就是渔货号；自录入 / 外部档口的货没有这个号，
+        这时候不挂 —— 免得标题后面跟一枚空牌子。
+        """
+        self._set_item_code("YS202610150001")
+        html = self.client.get(f"/self/goods/detail/{ITEM_ID}").text
+        self.assertIn('class="pdp-title-fish"', html, "标题后面要挂渔货号")
+        self.assertIn(">YS202610150001<", html)
+        # 顺序：先标题文字，后渔货号
+        i = html.find('class="pdp-title"')
+        self.assertGreater(html.find('class="pdp-title-fish"', i), -1,
+                           "渔货号要在标题里面")
+
+        self._set_item_code("YHZ-JFJS-0001")
+        html = self.client.get(f"/self/goods/detail/{ITEM_ID}").text
+        self.assertNotIn('class="pdp-title-fish"', html, "没渔货号就别挂空牌")
+
+    def test_17_params_have_fish_code_row(self):
+        """商品参数表里新增「渔货号」一行；没有渔货号时显示「—」。"""
+        self._set_item_code("YS202610150002")
+        html = self.client.get(f"/self/goods/detail/{ITEM_ID}").text
+        row = html[html.find("<tr><th>渔货号</th>"):]
+        self.assertIn("YS202610150002", row[: row.find("</tr>")])
+
+        self._set_item_code("YHZ-JFJS-0001")
+        html = self.client.get(f"/self/goods/detail/{ITEM_ID}").text
+        row = html[html.find("<tr><th>渔货号</th>"):]
+        self.assertIn("—", row[: row.find("</tr>")], "没有渔货号时显示「—」")
 
     def test_20_price_uses_same_numbers(self):
         """与经典版同一口径：渔货价 45.50、建议零售价 99.00。"""

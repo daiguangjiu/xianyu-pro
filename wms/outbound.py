@@ -83,7 +83,7 @@ def create(session: Session, data, operator: str = "") -> WmsOutboundOrder:
     return row
 
 
-def list_orders(session: Session, q: str = "", type: str = "", status: str = "") -> list[WmsOutboundOrder]:
+def _filtered_stmt(q: str = "", type: str = "", status: str = ""):
     stmt = select(WmsOutboundOrder)
     if q:
         like = f"%{q.strip()}%"
@@ -99,7 +99,25 @@ def list_orders(session: Session, q: str = "", type: str = "", status: str = "")
         stmt = stmt.where(WmsOutboundOrder.type == type)
     if status:
         stmt = stmt.where(WmsOutboundOrder.status == status)
-    return list(session.scalars(stmt.order_by(WmsOutboundOrder.id.desc())).all())
+    return stmt
+
+
+def list_orders(
+    session: Session, q: str = "", type: str = "", status: str = "",
+    limit: int | None = None, offset: int = 0,
+) -> list[WmsOutboundOrder]:
+    stmt = _filtered_stmt(q, type, status)
+    stmt = stmt.order_by(WmsOutboundOrder.id.desc())
+    if offset:
+        stmt = stmt.offset(int(offset))
+    if limit is not None:
+        stmt = stmt.limit(int(limit))
+    return list(session.scalars(stmt).all())
+
+
+def count_orders(session: Session, q: str = "", type: str = "", status: str = "") -> int:
+    stmt = _filtered_stmt(q, type, status)
+    return int(session.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0)
 
 
 def lines_of(session: Session, order_id: int) -> list[WmsOutboundItem]:
@@ -110,6 +128,159 @@ def lines_of(session: Session, order_id: int) -> list[WmsOutboundItem]:
             .order_by(WmsOutboundItem.id.asc())
         ).all()
     )
+
+
+def lines_of_orders(session: Session, order_ids: list[int]) -> dict[int, list[dict]]:
+    """一批出库单各自的商品清单（列表页按单分组展示，一次查询别 N+1）。
+
+    2026-10-15 用户拍板：列表「出库商品」列要显示**商品名称 + 渔货号** ——
+    光一串条码对不上人脑里的货。渔货号 / 商品名从货品档案 join 出来；
+    货品已经删了的退回单上留的快照标题。
+    """
+    ids = [int(i) for i in (order_ids or []) if i]
+    if not ids:
+        return {}
+    rows = list(session.scalars(
+        select(WmsOutboundItem)
+        .where(WmsOutboundItem.outbound_id.in_(ids))
+        .order_by(WmsOutboundItem.id.asc())
+    ).all())
+    item_ids = {int(r.item_id) for r in rows if r.item_id}
+    items: dict[int, WmsItem] = {}
+    if item_ids:
+        items = {
+            int(it.id): it
+            for it in session.scalars(
+                select(WmsItem).where(WmsItem.id.in_(item_ids))
+            ).all()
+        }
+    out: dict[int, list[dict]] = {}
+    for row in rows:
+        it = items.get(int(row.item_id)) if row.item_id else None
+        out.setdefault(int(row.outbound_id), []).append(
+            {
+                "barcode": str(row.barcode or ""),
+                "title": str((it.product_name or it.title) if it else (row.title or "")),
+                "fish_code": str((it.fish_code or "") if it else ""),
+                "qty": int((it.qty or 1)) if it else 1,
+            }
+        )
+    return out
+
+
+def _lock_and_pick(
+    session: Session, order: WmsOutboundOrder, item: WmsItem,
+    require_grade: str, operator: str,
+) -> WmsOutboundItem:
+    """把一台货挂到出库单上：可售先锁货再拣（校验全走 :func:`pick` 一条路）。"""
+    if str(item.status or "").upper() == STATUS_SELLABLE:
+        lock(session, order, item, operator=operator)
+    return pick(
+        session, order, item.barcode, require_grade=require_grade, operator=operator,
+    )
+
+
+def add_lines_from_code(
+    session: Session,
+    order: WmsOutboundOrder,
+    *,
+    barcode: str = "",
+    fish_code: str = "",
+    sku_code: str = "",
+    qty: int | str | None = None,
+    require_grade: str = "",
+    operator: str = "",
+) -> tuple[int, list[str]]:
+    """建单时直接把货挂上（2026-10-15）：出库单不用建完再一台台扫。
+
+    · **条码**认一台 —— 一台一条码，最准；
+    · **渔货号**认一款（2026-10-15 加，与详情页「订单商品」面板同一口径）——
+      一款多台按「数量」取前 N 台；
+    · **货号**认同款多台 —— 一个货号可以挂多台，按「数量」取前 N 台；
+    · 条码 > 渔货号 > 货号，填了前一个就不管后两个。
+
+    挂不上的（状态不对 / 已被别的单占用 / 分区放错…）**不拦建单**，
+    把原因一条条返回去，页面黄条说明 —— 别让人为一张写错的货号把单建不成。
+    返回 ``(挂上了几台, 未挂上的原因)``。
+    """
+    want = int(qty or 0) or 1
+    added = 0
+    notes: list[str] = []
+
+    if str(barcode or "").strip():
+        try:
+            _lock_and_pick(session, order, _item_by_code(session, barcode),
+                           require_grade, operator)
+            added += 1
+        except ValueError as exc:
+            notes.append(str(exc))
+        return added, notes
+
+    code = str(fish_code or "").strip().upper() or str(sku_code or "").strip()
+    if not code:
+        return 0, notes
+    if str(fish_code or "").strip():
+        rows = list(session.scalars(
+            select(WmsItem).where(WmsItem.fish_code == code).order_by(WmsItem.id.asc())
+        ).all())
+        if not rows:
+            return 0, [f"渔货号 {code} 在货品台账里查不到，先确认再挂"]
+        label = "渔货号"
+    else:
+        rows = list(session.scalars(
+            select(WmsItem).where(WmsItem.sku_code == code).order_by(WmsItem.id.asc())
+        ).all())
+        if not rows:
+            return 0, [f"货号 {code} 在货品台账里查不到，先确认再挂"]
+        label = "货号"
+    already: set[int] = {
+        int(x.item_id) for x in lines_of(session, order.id) if x.item_id
+    }
+    for item in rows:
+        if added >= want:
+            break
+        if item.id in already:
+            continue
+        try:
+            _lock_and_pick(session, order, item, require_grade, operator)
+            added += 1
+        except ValueError as exc:
+            notes.append(str(exc))
+    if not added and not notes:
+        notes.append(f"{label} {code} 名下没有可出库的货")
+    elif added and added < want:
+        notes.append(f"{label} {code} 只挂上 {added} 台（要 {want} 台）")
+    return added, notes
+
+
+def _item_by_code(session: Session, code: str) -> WmsItem:
+    """按条码 / 显示编码 / 货号认一台货（建单挂货用，别再让运营抄两遍）。"""
+    compact = str(code or "").strip().replace("-", "").upper()
+    item = session.scalar(select(WmsItem).where(WmsItem.barcode == compact))
+    if not item:
+        item = session.scalar(select(WmsItem).where(WmsItem.sku_code == str(code or "").strip()))
+    if not item:
+        raise ValueError(f"条码 / 货号 {code} 在货品台账里查不到")
+    return item
+
+
+def pick_item(session: Session, order: WmsOutboundOrder, item_id: int, operator: str = "") -> WmsOutboundItem:
+    """从「订单商品」面板点选一台出库（2026-10-15）。
+
+    与扫码拣货走**同一套校验**（:func:`pick`）：可售先自动锁货再拣，
+    已被别的单占用 / 分区放错 / 账实不符照样拦 —— 面板只是把条码替人填了。
+    """
+    item = session.get(WmsItem, int(item_id or 0))
+    if not item:
+        raise ValueError("货品不存在")
+    if session.scalar(
+        select(WmsOutboundItem).where(
+            WmsOutboundItem.outbound_id == order.id,
+            WmsOutboundItem.item_id == item.id,
+        )
+    ):
+        raise ValueError(f"{item.display_code} 已经在本单里了")
+    return _lock_and_pick(session, order, item, "", operator)
 
 
 def lock(session: Session, order: WmsOutboundOrder, item: WmsItem, operator: str = "") -> None:
@@ -320,6 +491,27 @@ def ship(session: Session, order_id: int, operator: str = "", waybill_no: str = 
     # 放在渔集自己的事务提交之后 —— 同步是「账」，出库是「现场动作」，
     # 同步失败（桥断 / 商品没认到）绝不能把出库回滚掉。
     order.hub_sync = _sync_hub_stock(session, order, sold_rows, operator)
+
+    # 渔货栈的订单（target_no = 渔枢订单号）：出库填了运单号就把单号回填渔枢 ——
+    # 发货页的物流单号栏、群里 @ 发送人、语音播报全部走平台同一套（2026-10-15）。
+    # 桥断 / 订单不存在只降级（报告记进审计），绝不能拖垮出库核销。
+    order.tracking_sync = {}
+    if order.type == OUT_SALE and order.waybill_no and order.target_no:
+        order.tracking_sync = bridge.apply_hub_tracking(
+            order.target_no, order.waybill_no, operator
+        )
+        if order.tracking_sync:
+            audit.log(
+                session, "outbound", order.id, "tracking_sync",
+                after=f"{order.waybill_no}",
+                operator=operator,
+                note=(
+                    "物流单号已回填渔枢订单并发群通知"
+                    if order.tracking_sync.get("ok")
+                    else "渔枢订单没找到，单号只留在渔集"
+                ),
+            )
+            session.commit()
     return order
 
 

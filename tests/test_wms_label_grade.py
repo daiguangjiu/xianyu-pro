@@ -52,6 +52,11 @@ class LabelGradeSyncTest(unittest.TestCase):
     def setUp(self) -> None:
         with SessionLocal() as s:
             s.query(WmsLabelPrint).delete(synchronize_session=False)
+            # 检测记录也要清：SQLite 复用 item id，残留记录会让新货被当成「复检第 2 轮」
+            from wms.models import WmsTestItem, WmsTestRecord
+
+            s.query(WmsTestItem).delete(synchronize_session=False)
+            s.query(WmsTestRecord).delete(synchronize_session=False)
             s.query(WmsItem).delete(synchronize_session=False)
             s.commit()
 

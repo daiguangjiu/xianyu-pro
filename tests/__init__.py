@@ -24,6 +24,19 @@ os.environ.setdefault("FEISHU_APP_SECRET", "")
 os.environ["ADMIN_USERNAME"] = "admin"
 os.environ["ADMIN_PASSWORD"] = "xianyu2026"
 os.environ["SECRET_KEY"] = "test-secret-key"
+# 通知 / 推单模板一律置空：本地 .env 里可能存着极简模板（如「推单 {{ 收货人 }}」），
+# 会让 test_push 对系统内置文案的断言落空 —— 测试要测的是系统内置格式。
+# 做法：把 .env 里出现的所有 *_TEMPLATE 键先设成空串（config 的 dotenv 用 setdefault，
+# 已存在的键不会被覆盖，删键则会被原值填回 —— 所以必须置空不能删）。
+_env_file = ROOT / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if not _line or _line.startswith("#") or "=" not in _line:
+            continue
+        _key = _line.partition("=")[0].strip()
+        if _key.endswith("_TEMPLATE"):
+            os.environ[_key] = ""
 
 # 每次运行从干净库开始（test.db 在 .gitignore 的 data/ 下）
 for suffix in ("", "-wal", "-shm"):

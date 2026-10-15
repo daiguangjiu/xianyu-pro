@@ -632,23 +632,37 @@ def outbound_status_label(value: str) -> str:
 
 
 # ---------------------------------------------------------------- 报修
-REPAIR_C1 = "C1"
-REPAIR_C2 = "C2"
-REPAIR_CHANNELS = (REPAIR_C1, REPAIR_C2)
-REPAIR_CHANNEL_LABELS = {REPAIR_C1: "C1 线上（京东 / 400）", REPAIR_C2: "C2 线下（授权网点）"}
+# 通道固定三选（2026-10-15 用户拍板）：品牌官方寄回维修 / 品牌到家维修 / 自行维修。
+# 列只有 String(4)，存短码；老数据里的 C1/C2 照旧显示成历史文案。
+REPAIR_CH_BRAND_SEND = "BS"     # 品牌官方寄回维修（我们寄回官方）
+REPAIR_CH_BRAND_HOME = "BH"     # 品牌到家维修（官方上门）
+REPAIR_CH_SELF = "SF"           # 自行维修
+REPAIR_C1 = "C1"                # 历史值：C1 线上（京东 / 400）
+REPAIR_C2 = "C2"                # 历史值：C2 线下（授权网点）
+REPAIR_CHANNELS = (REPAIR_CH_BRAND_SEND, REPAIR_CH_BRAND_HOME, REPAIR_CH_SELF)
+REPAIR_CHANNEL_LABELS = {
+    REPAIR_CH_BRAND_SEND: "品牌官方寄回维修",
+    REPAIR_CH_BRAND_HOME: "品牌到家维修",
+    REPAIR_CH_SELF: "自行维修",
+    REPAIR_C1: "C1 线上（京东 / 400）",
+    REPAIR_C2: "C2 线下（授权网点）",
+}
 
-REPAIR_OPEN = "open"            # 已开单，待送修
-REPAIR_SENT = "sent"            # 已寄出（在途）
-REPAIR_RETURNED = "returned"    # 已修回（待重检）
+REPAIR_OPEN = "open"            # 已开单，待送出
+REPAIR_SENT = "sent"            # 送出（在途）
+REPAIR_RETURNED = "returned"    # 寄回（在途回程，货还没确认回仓）
+REPAIR_RESTOCKED = "restocked"  # 确认再入库（货回仓待重检）
 REPAIR_CLOSED = "closed"        # 结案（重检完成 / 转拆件）
 REPAIR_CANCELLED = "cancelled"  # 撤单
 REPAIR_STATUS_CHOICES = (
-    REPAIR_OPEN, REPAIR_SENT, REPAIR_RETURNED, REPAIR_CLOSED, REPAIR_CANCELLED,
+    REPAIR_OPEN, REPAIR_SENT, REPAIR_RETURNED, REPAIR_RESTOCKED,
+    REPAIR_CLOSED, REPAIR_CANCELLED,
 )
 REPAIR_STATUS_LABELS = {
-    REPAIR_OPEN: "待送修",
-    REPAIR_SENT: "在途报修",
-    REPAIR_RETURNED: "已修回",
+    REPAIR_OPEN: "待送出",
+    REPAIR_SENT: "送出",
+    REPAIR_RETURNED: "寄回",
+    REPAIR_RESTOCKED: "确认再入库",
     REPAIR_CLOSED: "已结案",
     REPAIR_CANCELLED: "已撤单",
 }
@@ -1269,6 +1283,69 @@ class WmsOutboundItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class WmsDeliveryOrder(Base):
+    """发货单主表（渔枢中台 → 渔集 WMS，2026-10-15 用户定稿字段）。
+
+    供应链是渔货栈（YS001 / 名称带「渔货栈」）的订单视为渔货栈自营商品：
+    渔枢推单不走外部供应商，而是把发货单同步到渔集，仓库按发货单拣货出库，
+    出库核销后物流单号自动回传渔枢发货页。
+    delivery_no 是幂等键；同一单重推字段有变时 version 递增防乱序。
+    status / tracking_no / express_company 是 WMS 处理侧字段（跟随关联出库单）。
+    """
+
+    __tablename__ = "wms_delivery_orders"
+    __table_args__ = (
+        UniqueConstraint("delivery_no", name="uq_wms_delivery_no"),
+        Index("ix_wms_delivery_pno", "platform_order_no"),
+        Index("ix_wms_delivery_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    delivery_no: Mapped[str] = mapped_column(String(32), default="")
+    # 渔枢平台订单 ID（64 位长整型，最大 12 位数字）
+    order_no: Mapped[str] = mapped_column(String(32), default="")
+    # 平台编码：XY / XHS
+    platform_code: Mapped[str] = mapped_column(String(16), default="XY")
+    # 平台原始单号（回传平台发货要用，不能改）＝ 渔枢系统里的订单号
+    platform_order_no: Mapped[str] = mapped_column(String(64), default="")
+    shop_code: Mapped[str] = mapped_column(String(32), default="")
+    # WMS 处理状态：pending 待拣货 / shipped 已发货 / cancelled 已取消
+    status: Mapped[str] = mapped_column(String(16), default="pending")
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    pay_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    ship_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    receiver_name: Mapped[str] = mapped_column(String(64), default="")
+    receiver_phone: Mapped[str] = mapped_column(String(20), default="")
+    # 四级地址拆开存（省 / 市 / 区县 / 街道乡镇 + 详细地址）
+    receiver_province: Mapped[str] = mapped_column(String(32), default="")
+    receiver_city: Mapped[str] = mapped_column(String(32), default="")
+    receiver_district: Mapped[str] = mapped_column(String(32), default="")
+    receiver_town: Mapped[str] = mapped_column(String(32), default="")
+    receiver_address: Mapped[str] = mapped_column(String(256), default="")
+    # 快递 / 自提 / 同城配送
+    delivery_type: Mapped[str] = mapped_column(String(16), default="快递")
+    # 普通 / 预售 / 换货 / 赠品
+    order_type: Mapped[str] = mapped_column(String(16), default="普通")
+    urgent_flag: Mapped[int] = mapped_column(Integer, default=0)
+    # 金额四项：对账参考，非结算依据
+    order_sales_price: Mapped[float] = mapped_column(Float, default=0.0)
+    order_cj_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    order_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    order_yunfei: Mapped[float] = mapped_column(Float, default=0.0)
+    invoice_flag: Mapped[int] = mapped_column(Integer, default=0)
+    invoice_info: Mapped[str] = mapped_column(String(512), default="")
+    remark: Mapped[str] = mapped_column(String(256), default="")
+    # 同一单号重推时递增，防乱序
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    # WMS 处理侧：关联的出库单与回传物流
+    outbound_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tracking_no: Mapped[str] = mapped_column(String(64), default="")
+    express_company: Mapped[str] = mapped_column(String(64), default="")
+    operator: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 class WmsRepairOrder(Base):
     """报修工单（C 档）：线上 / 线下双通道，解决「货寄出去没人跟进」的黑洞。"""
 
@@ -1286,8 +1363,8 @@ class WmsRepairOrder(Base):
     category: Mapped[str] = mapped_column(String(32), default=CATEGORY_PHONE)
     title: Mapped[str] = mapped_column(String(255), default="")
     serial_no: Mapped[str] = mapped_column(String(64), default="")
-    # C1 线上（京东 / 400）/ C2 线下（授权网点）
-    channel: Mapped[str] = mapped_column(String(4), default=REPAIR_C1)
+    # 通道固定三选（2026-10-15 用户拍板）：BS 品牌官方寄回 / BH 品牌到家 / SF 自行维修
+    channel: Mapped[str] = mapped_column(String(4), default=REPAIR_CH_BRAND_SEND)
     vendor: Mapped[str] = mapped_column(String(128), default="")
     # 凭证号：C1 是工单号 / 寄修单号，C2 是网点联单号
     ticket_no: Mapped[str] = mapped_column(String(128), default="")
@@ -1301,6 +1378,9 @@ class WmsRepairOrder(Base):
     promise_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # 垫付金额（钱垫着、货在别人手里，是这里最需要被看见的数）
     paid_amount: Mapped[float] = mapped_column(Float, default=0.0)
+    # 费用拆分（2026-10-15 用户拍板）：维修费 + 快递费（垫付总额 = 两者之和）
+    repair_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    express_fee: Mapped[float] = mapped_column(Float, default=0.0)
     status: Mapped[str] = mapped_column(String(16), default=REPAIR_OPEN)
     timeout_flag: Mapped[bool] = mapped_column(Boolean, default=False)
     outbound_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

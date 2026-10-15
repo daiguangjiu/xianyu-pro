@@ -325,5 +325,104 @@ class FishGoodsTest(unittest.TestCase):
             "/wms/api/item/fish-standalone", json={"item_id": 99999999}).status_code, 404)
 
 
+    # ---------------------------------------------- 台账筛选与显示（2026-10-15）
+    def _seed_two_fish(self) -> tuple[str, str]:
+        """A 款：2 条码 / 共 2 台、已定价（渔货价>0）没设建议售价、品牌「美的」；
+        B 款：1 条码 / 5 台、未定价也没设建议售价、品牌「九阳」。"""
+        batch = self._batch(qty=7)
+        a1, a2, b = self._register(batch, [
+            {"sku_code": "FA-1", "product_name": "筛选测试电饭煲", "fish_code": "YS202610150101",
+             "brand": "美的", "qty": 1, "selling_price": 199.0, "suggest_price": 0,
+             "base_price": 398.0},
+            {"sku_code": "FA-2", "product_name": "筛选测试电饭煲", "fish_code": "YS202610150101",
+             "brand": "美的", "qty": 1, "selling_price": 189.0, "base_price": 378.0},
+            {"sku_code": "FB-1", "product_name": "筛选测试豆浆机", "fish_code": "YS202610150102",
+             "brand": "九阳", "qty": 5, "selling_price": 0, "base_price": 0},
+        ])
+        return "YS202610150101", "YS202610150102"
+
+    def test_90_goods_filters(self):
+        fish_a, fish_b = self._seed_two_fish()
+        page = self.client.get("/wms/goods")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn(fish_a, page.text)
+        self.assertIn(fish_b, page.text)
+        # 新筛选控件都在（品牌 / 渔货价 / 建议售价 / 台数区间 / 重置）
+        for mark in ('id="f-b"', 'id="f-priced"', 'id="f-sug"',
+                     'id="f-qmin"', 'id="f-qmax"', ">重置</a>"):
+            self.assertIn(mark, page.text)
+        # 定价筛选：已定价只出 A，未定价只出 B
+        p = self.client.get("/wms/goods", params={"priced": "yes"}).text
+        self.assertIn(fish_a, p)
+        self.assertNotIn(fish_b, p)
+        p = self.client.get("/wms/goods", params={"priced": "no"}).text
+        self.assertIn(fish_b, p)
+        self.assertNotIn(fish_a, p)
+        # 建议售价筛选：两款都没设 → 「没设」出全，「已设」出空
+        p = self.client.get("/wms/goods", params={"suggested": "no"}).text
+        self.assertIn(fish_a, p)
+        self.assertIn(fish_b, p)
+        p = self.client.get("/wms/goods", params={"suggested": "yes"}).text
+        self.assertNotIn(fish_a, p)
+        # 「有渔货价但没销售价」= priced=yes + suggested=no → 正是 A 这种款
+        p = self.client.get("/wms/goods", params={"priced": "yes", "suggested": "no"}).text
+        self.assertIn(fish_a, p)
+        self.assertNotIn(fish_b, p)
+        # 品牌筛选
+        p = self.client.get("/wms/goods", params={"brand": "美的"}).text
+        self.assertIn(fish_a, p)
+        self.assertNotIn(fish_b, p)
+        # 合计台数区间：B 共 5 台、A 共 2 台
+        p = self.client.get("/wms/goods", params={"qty_min": "3"}).text
+        self.assertIn(fish_b, p)
+        self.assertNotIn(fish_a, p)
+        p = self.client.get("/wms/goods", params={"qty_max": "2"}).text
+        self.assertIn(fish_a, p)
+        self.assertNotIn(fish_b, p)
+
+    def test_95_goods_row_display(self):
+        fish_a, _ = self._seed_two_fish()
+        page = self.client.get("/wms/goods").text
+        # 建议售价没设：显示渔货价 + 「未设」标（不再假装是自己的价）
+        self.assertIn(">未设</span>", page)
+        self.assertIn("导入渔枢时按市场价 × 0.5 兜底", page)
+        # 条码商品列：胶囊 + 悬停可见这一款名下的显示编码
+        self.assertIn("条码</span>", page)
+        self.assertIn("title=\"QC-", page)
+
+    def test_97_multi_barcode_split_rows(self):
+        """多条码产品拆行（2026-10-15 用户）：A 款 2 条码 → 主行下面两条子行，
+        各显示条码 / 台数 / 价格；单条码的 B 款不拆；点名的 YS202610120001 暂不拆。"""
+        fish_a, fish_b = self._seed_two_fish()
+        page = self.client.get("/wms/goods").text
+        self.assertIn("sub-row", page)
+        # A 款两条子行：显示编码直接挂在台账页上，各带各的渔货价
+        self.assertIn("href=\"/wms/items/", page)
+        self.assertIn("└", page)
+        self.assertIn("199.00", page)
+        self.assertIn("189.00", page)
+        # hint 已挪进字段名旁的 ? 悬停提示（不再占一行影响布局）
+        self.assertIn("f-q-tip", page)
+        self.assertIn("扫码枪对着这页扫一下就直接搜", page)
+        self.assertNotIn('class="hint"', page)
+
+    def test_98_no_split_excluded_fish(self):
+        """YS202610120001 用户点名暂不拆：多条码也只留汇总行。"""
+        from wms.web.router import _GOODS_NO_SPLIT, _goods_item_rows
+        self.assertIn("YS202610120001", _GOODS_NO_SPLIT)
+        batch = self._batch(qty=2)
+        self._register(batch, [
+            {"sku_code": "NE-1", "product_name": "不拆款", "fish_code": "YS202610120001", "qty": 1},
+            {"sku_code": "NE-2", "product_name": "不拆款", "fish_code": "YS202610120001", "qty": 1},
+        ])
+        with SessionLocal() as s:
+            out = _goods_item_rows(s, ["YS202610120001"])
+        self.assertEqual(out, {}, "点名不拆的款不出子行数据")
+        page = self.client.get("/wms/goods").text
+        self.assertIn("YS202610120001", page)
+        # 它名下的条码不出现在台账页（子行被排除）
+        self.assertNotIn("NE-1", page)
+
+
 if __name__ == "__main__":
     unittest.main()

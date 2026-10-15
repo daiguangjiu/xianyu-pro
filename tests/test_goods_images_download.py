@@ -15,6 +15,7 @@ import unittest
 import zipfile
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -98,14 +99,16 @@ class GoodsImagesDownloadTest(unittest.TestCase):
         self.assertIn("attachment", resp.headers["content-disposition"])
         zf = zipfile.ZipFile(io.BytesIO(resp.content))
         names = zf.namelist()
-        self.assertIn("主图/01.jpg", names)
-        self.assertIn("主图/02.jpg", names)
-        self.assertIn("主图/03.jpg", names, "主图 = main_image + images，去重保序")
-        self.assertIn("详情图/01.jpg", names)
-        self.assertIn("详情图/02.jpg", names)
+        # 图片文件名 = 渔货号 + 产品名称 + 序号（2026-10-15 用户拍板）
+        self.assertIn("主图/测试_无线蓝牙耳机（有图）_01.jpg", names)
+        self.assertIn("主图/测试_无线蓝牙耳机（有图）_02.jpg", names)
+        self.assertIn("主图/测试_无线蓝牙耳机（有图）_03.jpg", names,
+                      "主图 = main_image + images，去重保序")
+        self.assertIn("详情图/测试_无线蓝牙耳机（有图）_01.jpg", names)
+        self.assertIn("详情图/测试_无线蓝牙耳机（有图）_02.jpg", names)
         self.assertIn("README.txt", names, "包里给一份说明（含没抓到的清单）")
         self.assertIn("测试", zf.read("README.txt").decode("utf-8"), "说明里要有商品标题")
-        self.assertEqual(zf.read("主图/01.jpg"), PNG)
+        self.assertEqual(zf.read("主图/测试_无线蓝牙耳机（有图）_01.jpg"), PNG)
 
     def test_12_default_pack_is_1080_slim(self):
         """默认按 1080 宽打包（2026-10-15 用户拍板）：文件名与 README 都要体现尺寸。
@@ -128,7 +131,8 @@ class GoodsImagesDownloadTest(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
             self.assertIn("原图直出", zf.read("README.txt").decode("utf-8"))
-            self.assertEqual(zf.read("主图/01.jpg"), PNG, "原图包字节不变")
+            self.assertEqual(zf.read("主图/测试_无线蓝牙耳机（有图）_01.jpg"), PNG,
+                             "原图包字节不变")
 
     def test_15_relative_media_path_goes_absolute(self):
         """站内图是 /media/... 相对路径：抓图前必须补成绝对地址，否则一个都抓不到。"""
@@ -141,6 +145,62 @@ class GoodsImagesDownloadTest(unittest.TestCase):
         self.assertEqual(
             _abs_image_url("https://x.com/a.jpg", None), "https://x.com/a.jpg",
             "本来就是绝对路径的别动它",
+        )
+
+    def test_14_zip_named_by_fish_code_and_title(self):
+        """下载的包按「渔货号 + 产品名称」命名（2026-10-15 用户拍板）。
+
+        以前叫「商品名 + 图片 + 尺寸 + 货源 ID」—— 下载目录里一堆包分不清谁是谁。
+        现在渔货号打头，包内每张图也带同一前缀，散图存手机相册也不会跟别的货混。
+        没有渔货号的货（自录入 / 外部档口）就只用产品名，包末尾兜一个货源 ID 防重名。
+        """
+        from src.goods.service import fish_code_of
+
+        item = self._make_item()
+
+        def zip_name_of(code: str) -> str:
+            """改一下商家编码再下一次包，返回 UTF-8 那个文件名。"""
+            with SessionLocal() as s:
+                row = s.get(SupplierItem, item.id)
+                row.item_code = code
+                s.commit()
+                want = fish_code_of(row)
+            resp = self.client.get(f"/self/goods/{item.item_id}/images.zip")
+            self.assertEqual(resp.status_code, 200)
+            disp = resp.headers.get("content-disposition", "")
+            self.assertIn("1080w", disp, "默认的尺寸标记别丢了")
+            utf8 = unquote(disp.split("filename*=UTF-8''")[-1])
+            # 有渔货号就打头，没有就只用产品名
+            self.assertTrue(utf8.startswith(want or "测试_无线蓝牙耳机（有图）"), utf8)
+            return utf8
+
+        # ① 有渔货号：YS 打头，后面跟产品名
+        self.assertTrue(
+            zip_name_of("YS202610150001").startswith("YS202610150001_"),
+            "包名要以渔货号打头",
+        )
+        # ② 没有渔货号（商家编码是 YHZ-…）：只用产品名，尾巴兜货源 ID 防重名
+        name = zip_name_of("YHZ-JFJS-0001")
+        self.assertTrue(name.startswith("测试_无线蓝牙耳机（有图）"))
+        self.assertIn("hub-img-1", name, "没渔货号时兜一个货源 ID")
+
+    def test_16_zip_entry_names_carry_fish_code(self):
+        """包内每张图 = 渔货号_产品名称_序号（散图存相册也能认出是哪一款）。"""
+        from src.goods.service import fish_code_of
+
+        item = self._make_item()
+        with SessionLocal() as s:
+            row = s.get(SupplierItem, item.id)
+            row.item_code = "YS202610150007"
+            s.commit()
+            self.assertEqual(fish_code_of(row), "YS202610150007")
+        resp = self.client.get(f"/self/goods/{item.item_id}/images.zip?part=head")
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
+            names = zf.namelist()
+        self.assertIn("头图/YS202610150007_测试_无线蓝牙耳机（有图）_01.jpg", names)
+        self.assertTrue(
+            all(n.startswith("头图/YS202610150007_测试") for n in names if n.endswith(".jpg")),
+            "这一包里的每张图都该带渔货号前缀",
         )
 
     def test_20_zip_missing_item_is_404(self):

@@ -305,6 +305,10 @@
       {% if push.tracking_no %}
         <span class="chip ok">物流单号：{{ push.tracking_no }}</span>
       {% endif %}
+      {% if wms_outbound %}
+        <a class="chip ok" href="/wms/outbound/{{ wms_outbound.id }}" target="_blank" rel="noopener"
+           title="已同步到渔集出库管理，点开看拣货发货进度">渔集出库单：{{ wms_outbound.order_no }}（{{ wms_outbound.status }}）</a>
+      {% endif %}
       {% if not order.cost_amount or order.cost_amount <= 0 %}
         <span class="chip danger" title="成本未维护：毛利会虚高，请先补全成本">成本未维护 ¥0</span>
       {% endif %}
@@ -336,6 +340,14 @@
         <option value="unpaid" {{ 'selected' if push.transfer != 'paid' }}>未转账</option>
       </select>
     </label>
+    {% if is_self_supply and not order.is_refund and not order.is_recalled %}
+    {# 渔货栈自营商品（自营单 / 供应链 = 渔货栈YS001）不走供应商推单：一键同步成渔集发货单（2026-10-15） #}
+    <button class="btn primary" type="submit" form="wms-sync-form">
+      <i class="bi bi-box-seam" aria-hidden="true"></i>同步订单到渔集发货
+    </button>
+    <button class="btn" type="button" data-copy="#push-text">仅复制</button>
+    <span class="muted" id="push-hint">渔货栈的订单不用推给供应商：点上面的按钮把订单 / 商品 / 收货人信息同步到渔集「出库管理」，仓库按单拣货发货；出库后物流单号自动回填到发货页。</span>
+    {% else %}
     <button class="btn primary" type="button" data-copy="#push-text" data-push-url="/orders/{{ order.id }}/push"
             {% if order.is_recalled %}disabled title="该订单的群消息已撤回，不参与推单流程"{% endif %}
             {% if push.supplier_missing %}data-confirm="该订单供应商未指定，仍要复制推单文案吗？"{% endif %}>
@@ -346,8 +358,13 @@
             {% if push.supplier_missing %}data-confirm="该订单供应商未指定，仍要复制推单文案吗？"{% endif %}>仅复制</button>
     <noscript><button class="btn" type="submit" {% if order.is_recalled %}disabled{% endif %}>（复制后）标记为已推单</button></noscript>
     <span class="muted" id="push-hint">{% if order.is_recalled %}该订单已撤回：仅留档，不再走推单流程。{% else %}复制即视为已推单：订单会标记为「已推单」并记录推单时间。改「是否转账」会立即刷新上面的推单文案。{% endif %}</span>
+    {% endif %}
     {{ help_btn('push', '推单流程说明', '推单从头到尾怎么走：复制文案 → 等回单 → 填物流单号（自动同步群）→ 结算') }}
   </form>
+  {% if is_self_supply %}
+  {# 「同步订单到渔集发货」按钮的真实提交目标（按钮用 form 属性跨表单关联） #}
+  <form id="wms-sync-form" method="post" action="/orders/{{ order.id }}/sync-wms"></form>
+  {% endif %}
 </section>
 {% else %}
 {{ locked_block('推单信息', '推单文案、成本、供应商、是否转账、物流单号', 'push') }}
@@ -423,6 +440,12 @@
           </select>
           <button class="btn sm">保存</button>
         </form>
+      </div>
+      <div class="k">关联渔货号</div>
+      <div class="v">
+        {% if fish_codes %}
+          {% for code in fish_codes %}<a class="mono" href="/wms/goods/{{ code }}" title="查看渔集货品台账">{{ code }}</a>{% if not loop.last %}、{% endif %}{% endfor %}
+        {% else %}<span class="muted">—（飞书订单模板里没写 YS 开头的渔货号）</span>{% endif %}
       </div>
       <div class="k">数量</div><div class="v">{{ order.quantity }}</div>
       {# 收货三件套：只有截图里有 / 与群里对不上 / 两边都没有 都会标「待核对」，写错会发错货 #}

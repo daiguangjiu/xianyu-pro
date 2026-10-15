@@ -65,11 +65,15 @@ NAV_SECTIONS: tuple[NavSection, ...] = (
     NavSection(
         "库存与出库",
         [
-            NavItem("库存台账", "/wms/items", icon="bi-boxes", view="wms.item.view", write="wms.item.manage"),
+            # 菜单顺序（2026-10-16 用户拍板）：货品台账（按款）→ 库存台账（按台）
+            # → 发货管理 → 出库管理 → 库存账本
             # 货品台账（2026-10-14）：以渔货号为维度看「这一款货」，条码台账看的是「这一台货」
             NavItem("货品台账", "/wms/goods", icon="bi-collection", view="wms.item.view", write="wms.item.manage"),
-            NavItem("库存账本", "/wms/ledger", icon="bi-journal-text", view="wms.ledger.view"),
+            NavItem("库存台账", "/wms/items", icon="bi-boxes", view="wms.item.view", write="wms.item.manage"),
+            # 发货管理（2026-10-15）：渔货栈自营商品的发货单（渔枢中台 → 渔集）
+            NavItem("发货管理", "/wms/deliveries", icon="bi-truck", view="wms.outbound.view", write="wms.outbound.manage"),
             NavItem("出库管理", "/wms/outbound", icon="bi-box-arrow-up", view="wms.outbound.view", write="wms.outbound.manage"),
+            NavItem("库存账本", "/wms/ledger", icon="bi-journal-text", view="wms.ledger.view"),
         ],
     ),
     NavSection(
@@ -127,6 +131,8 @@ _API_PERMS: dict[str, str] = {
     "/wms/api/item/fish-code": "wms.item.manage",
     # 检测台里「独立渔货号重新建档」（2026-10-15）：同样是改商品归属，同一把钥匙
     "/wms/api/item/fish-standalone": "wms.item.manage",
+    # 报修开单的货品模糊搜索（2026-10-15）：只读查询，货品查看权限即可
+    "/wms/api/item/search": "wms.item.view",
 }
 
 # 谁都能进的路径（不需要任何检测仓权限，登录即可）

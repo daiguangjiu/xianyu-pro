@@ -149,10 +149,14 @@
             </div></div>
         </div>
         <div class="field-row id-row">
-          <div class="field key"><label for="m-sku">进货货号 <span class="req">*</span></label>
+          {# 进货货号（2026-10-15 用户拍板：它是「供应商清单上写的那个外部编号」，
+             跟我们自己发的渔货号是两码事 —— 所以不跟着渔货号自动同步，自己照清单填；
+             散货没有外部编号就留空，提交不卡你 #}
+          <div class="field key"><label for="m-sku">进货货号
+            <span class="d" style="font-weight:400">（供应商清单上的编号 · 没有就留空）</span></label>
             <div style="display:flex;gap:6px;align-items:center">
-              <input id="m-sku" type="text" name="sku_code" required value="{{ values.sku_code }}"
-                     placeholder="供应商清单上的编号（没有就点上面生成渔货号）"
+              <input id="m-sku" type="text" name="sku_code" value="{{ values.sku_code }}"
+                     placeholder="供应商清单上的编号（没有就留空）"
                      oninput="renderSpecTable && renderSpecTable()">
             </div></div>
           <div class="field"><label for="m-brand">品牌</label>
@@ -199,11 +203,13 @@
           <div class="field key"><label for="m-cost">成本价</label>
             <input id="m-cost" type="number" step="0.01" name="purchase_cost"
                    value="{{ values.purchase_cost }}" placeholder="对供应链 / 回收的采购价"></div>
-          {# 渔货价必填（2026-10-12 晚 用户要求）：检测出价不能高于它，所以不能留空 ——
-             页面标 *，输入框加 required（浏览器挡在提交前）。 #}
-          <div class="field key"><label for="m-fish">渔货价 <span class="req">*</span></label>
-            <input id="m-fish" type="number" step="0.01" name="selling_price" required
-                   value="{{ values.selling_price }}" placeholder="必填 · 检测出价不能高于它"></div>
+          {# 渔货价（2026-10-15 用户拍板：**不是必输项**）——
+             建档时往往还不知道卖多少（档口散货、等检测定级），填了就是「出价上限」，
+             留空则由检测定级时按「市场价 × 该档系数」算出来，一样能用。 #}
+          <div class="field key"><label for="m-fish">渔货价
+            <span class="d" style="font-weight:400">（选填 · 填了就是出价上限）</span></label>
+            <input id="m-fish" type="number" step="0.01" name="selling_price"
+                   value="{{ values.selling_price }}" placeholder="选填 · 留空按检测定级算"></div>
           <div class="field key"><label for="m-suggest">建议售价</label>
             <input id="m-suggest" type="number" step="0.01" name="suggest_price"
                    value="{{ values.suggest_price }}" placeholder="闲鱼建议卖价"></div>
@@ -291,9 +297,12 @@
       <div class="field-row auto">
         <div class="field key"><label for="m-cost">成本价（清单里的下单价格）</label>
           <input id="m-cost" type="number" step="0.01" name="purchase_cost" value="{{ values.purchase_cost }}"></div>
-        <div class="field key"><label for="m-fish">渔货价 <span class="req">*</span></label>
-          <input id="m-fish" type="number" step="0.01" name="selling_price" required
-                 value="{{ values.selling_price }}" placeholder="必填 · 检测出价不能高于它"></div>
+        {# 渔货价选填（2026-10-15 用户拍板）：与建档页同一口径，
+           留空 = 等检测定级时按「市场价 × 该档系数」算出来 #}
+        <div class="field key"><label for="m-fish">渔货价
+          <span class="d" style="font-weight:400">（选填 · 留空按检测定级算）</span></label>
+          <input id="m-fish" type="number" step="0.01" name="selling_price"
+                 value="{{ values.selling_price }}" placeholder="选填 · 留空按检测定级算"></div>
         <div class="field key"><label for="m-suggest">建议售价</label>
           <input id="m-suggest" type="number" step="0.01" name="suggest_price" value="{{ values.suggest_price }}"
                  placeholder="留空 = 市场价 × 建议售价系数"></div>
@@ -383,10 +392,8 @@
       .then(function (d) {
         if (!d || !d.fish_code) { throw new Error('empty'); }
         el.value = d.fish_code;
-        // 进货货号（供应商清单编号）还空着时就先用它顶上 —— 那格是必填，
-        // 没外部编号的货不该卡在这里交不上去。
-        var sku = document.getElementById('m-sku');
-        if (sku && !String(sku.value || '').trim()) { sku.value = d.fish_code; }
+        // 进货货号**不动** —— 那是供应商清单上的外部编号，跟我们发的渔货号是两码事，
+        // 以前图省事会顺手把它填成渔货号，等于把外部编号污染成内部号，现在各填各的。
         renderSpecTable();     // 多规格那列的货号派生提示跟着刷新
       })
       .catch(function () { alert('生成渔货号失败 —— 刷新页面再点一次'); });

@@ -22,6 +22,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
+
 logger = logging.getLogger(__name__)
 
 
@@ -135,6 +137,101 @@ def lookup_item(code: str) -> dict[str, Any] | None:
         return None
     finally:
         db.close()
+
+
+def sync_price_from_wms(
+    fish_code: str,
+    *,
+    name: str = "",
+    selling_price: float = 0.0,
+    suggest_price: float = 0.0,
+    base_price: float = 0.0,
+) -> dict[str, Any]:
+    """渔集价格更新 → 渔枢商品档案 + 渔货栈货源一起跟着改（2026-10-15 用户拍板）。
+
+    口径与 :func:`app.services.product.import_from_yushangzai` 完全一致：
+      渔货价 = ``selling_price``（同时写 ``cost_amount``）；
+      建议售价 = ``suggest_price``，没设按「市场价 × 0.5」兜底，再没有回落渔货价；
+      市场价 = ``base_price``（>0 才写，别把人手填的划线价清成 0）。
+
+    渔货价或销售价真变了时，往 ``price_change_notices`` 落一条「商品价格变动」通知
+    （渔货栈「异常提醒」/self/logs 页顶部的通知区块直接读它）。渔枢里认不到这款
+    商品不报错，返回摘要让调用方自己决定说不说。
+    """
+    empty: dict[str, Any] = {"updated": False, "notice": False, "notes": []}
+    code = str(fish_code or "").strip().upper()
+    if not code:
+        return empty
+
+    fish = round(float(selling_price or 0.0), 2)
+    base = round(float(base_price or 0.0), 2)
+    suggest = round(float(suggest_price or 0.0), 2) or round(base * 0.5, 2) or fish
+
+    from ..db import SessionLocal
+    from ..models import Product
+    from ..timeutil import now
+
+    with SessionLocal() as db:
+        product = db.scalar(select(Product).where(Product.code == code))
+        if product is None:
+            return {**empty, "notes": [f"渔枢里没有商家编码为 {code} 的商品，价格没同步"]}
+
+        old_fish = round(float(product.fish_price or product.cost_amount or 0.0), 2)
+        old_price = round(float(product.price or 0.0), 2)
+        product.fish_price = fish
+        product.cost_amount = fish
+        product.price = suggest
+        if base > 0:
+            product.original_price = base
+        product.updated_at = now()
+
+        # 渔货栈那条货源（hub-prd-<商品id>）一起改：cost_price=渔货价、sale_price=建议售价
+        notice = False
+        try:
+            from src.models import SupplierItem
+
+            src_item = db.scalar(
+                select(SupplierItem).where(SupplierItem.item_id == f"hub-prd-{product.id}")
+            )
+            if src_item is not None:
+                src_item.cost_price = fish
+                src_item.fish_price = fish
+                src_item.sale_price = suggest
+                if base > 0:
+                    src_item.market_price = base
+        except Exception:  # noqa: BLE001  渔货栈表不在（分端部署）→ 只改渔枢
+            logger.info("渔货栈货源价格同步跳过（表不可读）", exc_info=True)
+
+        if abs(old_fish - fish) > 0.005 or abs(old_price - suggest) > 0.005:
+            notice = True
+            try:
+                from src.models import PriceChangeNotice
+
+                db.add(
+                    PriceChangeNotice(
+                        fish_code=code,
+                        product_code=str(product.code or ""),
+                        product_name=str(name or product.name or ""),
+                        old_fish_price=old_fish,
+                        new_fish_price=fish,
+                        old_price=old_price,
+                        new_price=suggest,
+                        direction="up" if fish > old_fish else ("down" if fish < old_fish else ""),
+                        created_at=now(),
+                    )
+                )
+            except Exception:  # noqa: BLE001  通知表不在 → 价格照常同步
+                logger.info("价格变动通知落库跳过（表不可读）", exc_info=True)
+
+        db.commit()
+        return {
+            "updated": True,
+            "notice": notice,
+            "notes": [
+                f"{product.name}：渔货价 ¥{old_fish:g} → ¥{fish:g}，销售价 ¥{old_price:g} → ¥{suggest:g}"
+                + ("（价格变动通知已发出）" if notice else "")
+            ],
+        }
 
 
 def search_items(keyword: str = "", limit: int = 20) -> list[dict[str, Any]]:

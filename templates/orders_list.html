@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pager.html" import pager %}
 {% block title %}订单 · 供应链小鱼{% endblock %}
 
 {% macro status_badge(s) -%}
@@ -47,8 +48,9 @@
   <div class="page-title">
     <h1>订单</h1>
     <span class="page-subtitle">
-      渔货栈出的单先落在这里 · 共 {{ total }} 笔（最近 200）
+      渔货栈出的单先落在这里 · 共 {{ total }} 笔
       {% if hub_available %}· 其中 {{ hub_count }} 笔已在渔枢系统建档{% endif %}
+      {% if not full_view %}· 只显示你名下店铺账号的单{% endif %}
     </span>
   </div>
 </div>
@@ -57,21 +59,43 @@
 <div class="alert alert-{{ 'danger' if kind == 'err' else ('warning' if kind == 'warn' else 'success') }}">{{ msg }}</div>
 {% endif %}
 
-{# 状态筛选 chips #}
+{% if not full_view and not my_accounts %}
+<div class="alert alert-warning">
+  你名下还没有店铺档案，订单按店铺（闲鱼账号）匹配显示 —— 先去「店铺管理」新建或同步店铺。
+</div>
+{% endif %}
+
+{# 状态筛选 chips（选了账号时 chips 链接把 account 一路带上）#}
+{% set acc_qs = ('&account=' ~ (account | urlencode)) if account else '' %}
 <div class="d-flex gap-2 flex-wrap mb-4 align-items-center">
-  <a href="{{ self_url('/orders') }}"
+  <a href="{{ self_url('/orders' ~ (('?account=' ~ (account | urlencode)) if account else '')) }}"
      class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-outline-secondary{% endif %}">
     全部 <span class="ms-1" style="font-family: var(--font-mono);">{{ total }}</span>
   </a>
   {# 状态机里定义过的状态都列出来（含新增的已发货 / 退款中 / 已取消），顺序也按正向流程 #}
   {% for st in status_order %}
     {% set cnt = status_counts.get(st, 0) %}
-    <a href="{{ self_url('/orders?status=' ~ st) }}"
+    <a href="{{ self_url('/orders?status=' ~ st ~ acc_qs) }}"
        class="btn btn-sm {% if status_filter == st %}btn-primary{% else %}btn-outline-secondary{% endif %}">
       {{ status_badge(st) }}
       <span class="ms-1" style="font-family: var(--font-mono);">{{ cnt }}</span>
     </a>
   {% endfor %}
+
+  {# 按账号筛选（2026-10-16）：订单挂在哪个闲鱼账号名下，就在这里切 #}
+  {% if account_options %}
+  <form method="get" action="{{ self_url('/orders') }}" class="ms-auto d-flex gap-2 align-items-center">
+    {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+    <label class="small text-secondary mb-0">账号</label>
+    <select name="account" onchange="this.form.submit()" class="form-select form-select-sm" style="width:auto;min-width:140px;">
+      <option value="">全部账号</option>
+      {% for name in account_options %}
+        <option value="{{ name }}" {% if account == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <noscript><button class="btn btn-sm btn-outline-secondary">筛选</button></noscript>
+  </form>
+  {% endif %}
 </div>
 
 <div class="card">
@@ -82,6 +106,7 @@
           {# 金额列与渔枢系统同一口径：售价 → 退款给客户 → 采购成本 → 供应链退款 → 平台技术服务费 → 毛利 #}
           <th>订单号</th>
           <th>商品</th>
+          <th title="订单挂在哪个闲鱼账号名下（按店铺档案的账号匹配）">账号</th>
           <th>收货人</th>
           <th class="text-end" title="买家实付：优先取渔枢系统端成交价，没有就用渔货栈下游单售价">售价</th>
           <th class="text-end" title="毛利 = 售价 − 采购成本 − 运费 − 平台技术服务费（以渔枢系统为准）">毛利</th>
@@ -119,6 +144,9 @@
               </div>
             </td>
             <td class="small">
+              {% if r.account %}{{ r.account }}{% else %}<span class="text-secondary">—</span>{% endif %}
+            </td>
+            <td class="small">
               {% if hub and hub.receiver_name %}{{ hub.receiver_name }}
               {% else %}{{ dso.buyer_name or '—' }}{% endif %}
               <div class="mono-sm text-secondary">{% if hub and hub.quantity %}{{ hub.quantity }}{% else %}{{ dso.qty }}{% endif %} 件</div>
@@ -145,10 +173,13 @@
             </td>
           </tr>
         {% else %}
-          <tr><td colspan="9" class="text-center text-secondary py-5">暂无订单</td></tr>
+          <tr><td colspan="10" class="text-center text-secondary py-5">暂无订单</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+{# 全站统一分页组件（templates/_pager.html），翻页时状态 / 账号筛选原样带着走 #}
+{{ pager(page, pages, self_url('/orders'), {'status': status_filter, 'account': account}, total, size=per_page) }}
 {% endblock %}

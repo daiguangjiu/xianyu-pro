@@ -208,6 +208,23 @@
             </select>
           </div>
         </div>
+        {# 型号 / 规格（2026-10-15 用户拍板）：渔集建档时填的商品档案字段，
+           扫渔集条码建档会一并带过来；上架到渔货栈时同步给那边详情页的「规格参数」。
+           两者都选填 —— 清单没写就留空，页面显示「—」。 #}
+        <div class="field-row auto">
+          <div class="field">
+            <label>型号</label>
+            <input type="text" name="model" id="modelInput" placeholder="选填，如 MJ-PB40E254D"
+                   oninput="syncPreview()">
+            <p class="help">商品档案字段（不是规格维度）；扫渔集条码会自动带过来</p>
+          </div>
+          <div class="field">
+            <label>规格</label>
+            <input type="text" name="spec" id="specInput" placeholder="选填，如 1.75L / 黑色"
+                   oninput="syncPreview()">
+            <p class="help">商品档案字段（不是规格维度）；扫渔集条码会自动带过来</p>
+          </div>
+        </div>
         {# 商品标签（固定标签）：勾选后存进商品资料，上架到渔货栈时一并同步；
            「直降 x 元 / 高毛利 x%」这类动态标签由渔货栈按数据当场算，不在这里勾 #}
         <div class="field">
@@ -1647,6 +1664,10 @@
     };
     set('titleInput', it.product_name);      // 商品名称 ← 渔集的产品名
     set('brandInput', it.brand);             // 品牌 ← 渔集建档填的品牌
+    // 型号 / 规格（2026-10-15）：渔集建档的商品档案字段一并带过来 ——
+    // 以前只带名称与品牌，详情页上型号规格永远是「—」
+    set('modelInput', it.model);
+    set('specInput', it.spec);
     set('fishInput', it.fish_price);         // 渔货价 ← 渔集定级后的售价
     set('saleInput', it.suggest_price);      // 建议售价 ← 渔集的建议售价（基准价 × 建议售价系数）
     set('marketInput', it.market_price);     // 市场价 ← 渔集的基准价

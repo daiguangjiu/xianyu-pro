@@ -139,6 +139,10 @@ class SupplierItem(Base):
     item_code: Mapped[str | None] = mapped_column(String(64))  # 商家编码
     # 品牌：商品属性，可留空（型号 / 成色 / 重量属于规格维度，走 spec_defs）
     brand: Mapped[str | None] = mapped_column(String(64))
+    # 型号 / 规格（2026-10-15 用户拍板）：由渔集建档的商品档案字段同步过来
+    # （渔集里这两项是「一款货」的公共资料，不是规格维度），详情页「规格参数」里看
+    model: Mapped[str | None] = mapped_column(String(128))
+    spec: Mapped[str | None] = mapped_column(String(128))
     selling_points: Mapped[str | None] = mapped_column(String(512))  # 卖点
     # 自营定价：sale_price 售价 / market_price 划线价
     sale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
@@ -573,6 +577,9 @@ from src.models.shop_link import (  # noqa: E402
     source_text as shop_link_source_text,
 )
 
+# 渔集价格变动通知（2026-10-15）：渔集改价同步过来时在这里落一条人话通知
+from src.models.price_change_notice import PriceChangeNotice  # noqa: E402,F401
+
 
 __all__ = [
     "Base",
@@ -609,4 +616,6 @@ __all__ = [
     "LINK_SOURCE_MANUAL",
     "LINK_SOURCE_TEXT",
     "shop_link_source_text",
+    # 渔集价格变动通知
+    "PriceChangeNotice",
 ]

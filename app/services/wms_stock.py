@@ -139,9 +139,20 @@ def apply_stock_deltas(rows: list[tuple[str, int]]) -> dict:
             shot = _shift_supplier_item(db, product, delta)
             if shot is not None:
                 tail = f"，渔货栈 {shot[0]} → {shot[1]}"
+            # 售罄自动下架（2026-10-15 用户拍板）：渔集出库核销把这款渔货号的库存
+            # 减到 0 —— 渔枢这边还在「在售」就自动下架，商品列表打「售罄」标。
+            # 只在真减到 0 时动，回库（delta>0）不自动重新上架（那是人的决定）。
+            sellout = ""
+            if (
+                after <= 0
+                and getattr(product, "stock_enabled", True)
+                and str(product.status or "") == "on_sale"
+            ):
+                product.status = "off_sale"
+                sellout = "，库存归零已自动下架（售罄）"
             report["updated"] += 1
             report["notes"].append(
-                f"{product.name}：渔枢库存 {before} → {after}{tail}"
+                f"{product.name}：渔枢库存 {before} → {after}{tail}{sellout}"
             )
             db.commit()
     return report

@@ -233,7 +233,7 @@
   /* 图片包尺寸切换（2026-10-15）：1080 精简 / 原图，两个小按钮合成一个分段控件 */
   .pdp-zip-size { display: inline-flex; border: 1px solid var(--c-border, #e2e8f0);
     border-radius: 6px; overflow: hidden; }
-  .pdp-zip-size button { border: 0; background: #fff; padding: 6px 12px; font-size: 12.5px;
+  .pdp-zip-size button { border: 0; background: #fff; padding: 6px 12px; font-size: 13px;
     cursor: pointer; color: var(--c-text-muted, #64748b); }
   .pdp-zip-size button + button { border-left: 1px solid var(--c-border, #e2e8f0); }
   .pdp-zip-size button.on { background: var(--pdp-soft, #fff6f0);
@@ -284,6 +284,13 @@
   .pdp-params { width: 100%; border-collapse: collapse; font-size: 13px; }
   .pdp-params th, .pdp-params td { border: 1px solid var(--c-border); padding: 8px 10px; }
   .pdp-params th { width: 140px; background: var(--c-surface-2); color: var(--c-text-muted); font-weight: 500; text-align: left; }
+  /* 参数值统一（2026-10-15 用户拍板）：以前金额 / 编号格套 mono-sm，JetBrains Mono
+     的 x-height 比中文字体高，同一张表里看着大一号。这里把值统一成同一字号同一字体
+     （数字保留 tabular 等宽特性，列不会跳），整个表看起来一样大。 */
+  .pdp-params td { font-size: 13px; line-height: 1.55; }
+  .pdp-params td.mono-sm, .pdp-params td .mono-sm {
+    font-family: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+  }
 
   /* ======== 左列底部：上架与库存情况 ======== */
   .pdp-statcard { margin-top: var(--s-3); padding: var(--s-4); }
@@ -301,6 +308,14 @@
     font-size: 12px; color: var(--c-text-muted);
   }
   .pdp-title { font-size: 17px; font-weight: 600; line-height: 1.5; margin: 8px 0 0; }
+  /* 标题后面那个渔货号：做成一枚等宽小牌，跟标题文字拉开字号，别抢标题的视觉 */
+  .pdp-title-fish {
+    display: inline-block; margin-left: 6px; padding: 1px 7px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px; font-weight: 500; line-height: 1.6; vertical-align: 2px;
+    color: var(--c-text-muted);
+    background: var(--pdp-soft); border: 1px solid var(--pdp-border); border-radius: 999px;
+  }
   /* 商品卖点页签：一条一个浅橙行（卖点来自渔枢系统商品档案，随商品同步过来） */
   .pdp-points { display: grid; gap: 8px; }
   .pdp-point {
@@ -318,9 +333,9 @@
     margin-top: var(--s-3); padding: 12px 14px;
     background: var(--pdp-soft); border: 1px solid var(--pdp-border); border-radius: 6px;
   }
-  /* 两个价并排、**同一个骨架**（标签 + 大字价一行，说明一行）：
-     以前渔货价是一行内联、建议零售价是右下角的卡片，一高一低看着不齐
-     （2026-10-12 用户拍板：建议零售价和渔货价保持对齐显示）。 */
+  /* 价块骨架（2026-10-16 用户拍板）：市场价单独一行放最上面（价格走双划线，
+     参考 1688 的划线价呈现），下面主行只留 建议零售价 + 渔货价 两块并排、
+     同一个骨架（标签 + 大字价一行，说明一行）。没有市场价就不渲染那一行。 */
   .pdp-price-main {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px; align-items: stretch;
@@ -330,6 +345,23 @@
     padding: 9px 12px; border-radius: 8px;
     background: #fff; border: 1px solid var(--pdp-border);
   }
+  /* 市场价独立行（2026-10-16 二次调整）：与下面两块同一款白卡骨架、数字同尺寸，
+     只是走双划线 + 深灰 —— 让「市场参考价值」这块明显占得住位置 */
+  .pdp-price-marketline {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 9px 12px; border-radius: 8px; margin-bottom: 10px;
+    background: #fff; border: 1px solid var(--pdp-border);
+  }
+  .pdp-price-marketline .tag {
+    font-size: 11px; font-weight: 600; color: #fff; background: #4b5563;
+    border-radius: 3px; padding: 2px 6px; align-self: center;
+  }
+  .pdp-price-marketline .val {
+    font-family: var(--font-mono); font-size: 26px; font-weight: 700;
+    color: var(--c-text); letter-spacing: -0.02em; line-height: 1.05;
+    text-decoration: line-through double; text-decoration-thickness: 2px;
+  }
+  .pdp-price-marketline .hint { font-size: 12px; color: var(--c-text-muted); }
   /* 渔货价 = 下单按它结算（主价）：橙描边 + 淡橙底，还是最扎眼的那一块 */
   .pdp-price-fish { border-color: var(--pdp-brand); background: var(--pdp-soft); }
   .pdp-price-cell .row1 { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
@@ -540,7 +572,7 @@
     .pdp-title { font-size: 16px; }
     /* 手机：两个价各自独占一行（并排会挤成两行小字），都是靠左对齐 */
     .pdp-price-main { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-    .pdp-price-cell .val { font-size: 24px; }
+    .pdp-price-cell .val, .pdp-price-marketline .val { font-size: 24px; }
     .pdp-statgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .pdp-sim-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .pdp-panel { padding: var(--s-3); }
@@ -621,7 +653,9 @@
         <div class="pdp-thumbs-col">
           <div class="pdp-thumbs-v" id="pdpThumbs">
             {% for img in images %}
-              <img src="{{ img }}" alt="图 {{ loop.index }}" loading="lazy"
+              {# 缩略列只要 240px 宽（2026-10-15 提速）：走 /thumb 按需裁图，几十 KB，
+                  不再拉 2MB 原图画小方块 #}
+              <img src="{{ thumb_url(img, 240) }}" alt="图 {{ loop.index }}" loading="lazy"
                    data-idx="{{ loop.index0 }}" class="{% if loop.first %}active{% endif %}"
                    onclick="pdpSwitch(this)" onmouseenter="pdpSwitch(this)">
             {% endfor %}
@@ -636,7 +670,12 @@
           {% if images %}
             <div class="pdp-stage-track" id="pdpStage">
               {% for img in images %}
-                <div class="pdp-slide"><img src="{{ img }}" alt="{{ item.title }} 图 {{ loop.index }}" loading="lazy"></div>
+                {# 大图 1080 宽足够铺满舞台（2026-10-15 提速）；第一张立即加载当 LCP，
+                    其余 lazy #}
+                <div class="pdp-slide"><img
+                  src="{{ thumb_url(img, 1080) }}" alt="{{ item.title }} 图 {{ loop.index }}"
+                  {% if loop.first %}fetchpriority="high"{% else %}loading="lazy"{% endif %}
+                  decoding="async"></div>
               {% endfor %}
             </div>
             {% if images|length > 1 %}
@@ -710,7 +749,11 @@
         {% endif %}
       </div>
 
-      <h1 class="pdp-title">{{ item.title }}</h1>
+      {# 标题后面跟着渔货号（2026-10-15 用户拍板）：这一款在渔集的身份证，
+         现场拿图 / 对库存 / 跟渔集沟通都按它认；不是渔集建档的货（fish_code 为空）就不显示 #}
+      <h1 class="pdp-title">{{ item.title }}{% if fish_code %}
+        <span class="pdp-title-fish" title="这款货在渔集的渔货号">{{ fish_code }}</span>
+      {% endif %}</h1>
 
       {% if unlisted %}
         <div class="pdp-unlisted">
@@ -724,39 +767,38 @@
         </div>
       {% endif %}
 
-      {# 价格块（2026-10-11 用户拍板重排；2026-10-12 再调：两个价**并排对齐**）：
-         ① 几个数以前全挤在一行，看不清 —— 改成「渔货价 / 建议零售价」两块并排，
-            两块同一个骨架（标签 + 大字价 + 下面一行说明），左右齐平、上沿对齐；
-         ② 「规格价区间」与上面的建议售价两个数打架（区间以前按加价规则现算，¥40.38，
-            而建议售价是 ¥30.00）—— 现在规格行的建议售价与商品级同源，区间改按**渔货价**算
-            （下单结算就是按渔货价，这个区间才是有用的那个）；
-         ③ 单规格只显示一个价，多规格才是 min ~ max；
-         ④ 原价 → 市场价；建议零售价下面写清「建议闲鱼售价不低于此价」。 #}
+      {# 价格块（2026-10-16 用户拍板）：市场价单独一行放最上面（双划线价，市场参考价值），
+         下面主行两块并排 —— 建议零售价（可以卖多少钱）在左、渔货价（供货价，下单按它结算）在右。
+         没有市场价的货不渲染那一行，主行照旧两块。 #}
       {% set sku_costs = sku_rows | map(attribute='cost_price') | select | list %}
       <div class="pdp-pricebox">
+        {% if item.market_price %}
+        <div class="pdp-price-marketline">
+          <span class="tag">市场价</span>
+          <span class="val">¥{{ '%.2f' % item.market_price }}</span>
+          <span class="hint">这款货的市场参考价值</span>
+        </div>
+        {% endif %}
         <div class="pdp-price-main">
+          <div class="pdp-price-cell pdp-price-sug">
+            <div class="row1">
+              <span class="tag">建议零售价</span>
+              <span class="val">{% if suggested_price %}¥{{ '%.2f' % suggested_price }}{% else %}待定{% endif %}</span>
+            </div>
+            <div class="hint"><i class="bi bi-info-circle"></i> 可以卖的钱 · 建议闲鱼售价不低于此价</div>
+          </div>
           <div class="pdp-price-cell pdp-price-fish">
             <div class="row1">
               <span class="tag">渔货价</span>
               {# 渔枢系统侧留空时按「待定」显示，不要编一个 ¥0.00 出来 #}
               <span class="val">{% if cost and cost > 0 %}¥{{ '%.2f' % cost }}{% else %}待定{% endif %}</span>
             </div>
-            <div class="hint">下单按这个价结算</div>
-          </div>
-          <div class="pdp-price-cell pdp-price-sug">
-            <div class="row1">
-              <span class="tag">建议零售价</span>
-              <span class="val">{% if suggested_price %}¥{{ '%.2f' % suggested_price }}{% else %}待定{% endif %}</span>
-            </div>
-            <div class="hint"><i class="bi bi-info-circle"></i> 建议闲鱼售价不低于此价</div>
+            <div class="hint">渔货栈供货价 · 下单按这个价结算</div>
           </div>
         </div>
         <div class="pdp-price-sub">
           <span>单件毛利 ¥<span class="v">{{ '%.2f' % profit_amount }}</span>
             <span class="rate">{{ '%.1f' % (profit_rate * 100) }}%</span></span>
-          {% if item.market_price %}
-            <span>市场价 <s>¥{{ '%.2f' % item.market_price }}</s></span>
-          {% endif %}
           {# 渔货价区间：只算「定过价」的规格（没定渔货价的不参与，也不显示 0）；
              单规格就一个价，不写成「x ~ x」 #}
           {% if sku_costs %}
@@ -893,7 +935,8 @@
         <div class="pdp-prefill-grid">
           <div class="s"><span class="n">¥{{ '%.2f' % suggested_price }}</span><span class="l">销售价</span></div>
           <div class="s"><span class="n">{{ package.stock }}</span><span class="l">库存</span></div>
-          <div class="s"><span class="n">{{ package.images | length }}</span><span class="l">图片</span></div>
+          {# 图片张数（2026-10-15 用户拍板）：主图 + 详情图**合计**，与下面 ZIP 按钮同一个数 #}
+          <div class="s"><span class="n">{{ (images | length) + (detail_images | length) }}</span><span class="l">图片</span></div>
           <div class="s"><span class="n">{{ package.skus | length }}</span><span class="l">规格</span></div>
         </div>
       </div>
@@ -999,14 +1042,16 @@
             </div>
             <div class="pdp-imgpick">
               <div class="pdp-imgpick-stage">
-                <img src="{{ group[0] }}" alt="详情图 第 {{ loop.index }} 组" loading="lazy"
+                {# 详情图同样走 /thumb 1080（2026-10-15 提速），原图只进下载包 #}
+                <img src="{{ thumb_url(group[0], 1080) }}" alt="详情图 第 {{ loop.index }} 组" loading="lazy"
+                     decoding="async"
                      onerror="this.parentNode.classList.add('is-broken')">
                 <span class="pdp-img-index">1/{{ group | length }}</span>
               </div>
               {% if group | length > 1 %}
               <div class="pdp-imgpick-thumbs">
                 {% for img in group %}
-                  <img src="{{ img }}" alt="" loading="lazy" data-src="{{ img }}"
+                  <img src="{{ thumb_url(img, 240) }}" alt="" loading="lazy" data-src="{{ thumb_url(img, 1080) }}"
                        class="{{ 'active' if loop.first }}" title="第 {{ loop.index }} 张"
                        onclick="pdpPick(this)" onerror="this.style.display='none'">
                 {% endfor %}
@@ -1022,8 +1067,15 @@
           <h4>商品参数</h4>
           <table class="pdp-params">
             <tr><th>商品 ID</th><td class="mono-sm">{{ item.item_id }}</td></tr>
+            {# 渔货号（2026-10-15）：渔集建档的商品款编号，与标题后面那个是同一个号；
+               商家编码存的就是它（自录入 / 外部档口的货没有这个号，显示「—」） #}
+            <tr><th>渔货号</th><td class="mono-sm">{{ fish_code or '—' }}</td></tr>
             <tr><th>商家编码</th><td class="mono-sm">{{ item.item_code or '—' }}</td></tr>
             <tr><th>品牌</th><td>{{ item.brand or '—' }}</td></tr>
+            {# 型号 / 规格（2026-10-15 用户拍板）：渔集建档的商品档案字段同步过来；
+               空着就显示「—」（渔集那边也还没填） #}
+            <tr><th>型号</th><td class="mono-sm">{{ item.model or '—' }}</td></tr>
+            <tr><th>规格</th><td>{{ item.spec or '—' }}</td></tr>
             <tr><th>类目</th><td>{{ category_text }}</td></tr>
             <tr><th>供应商</th><td class="mono-sm">{{ item.supplier_id or '—' }}</td></tr>
             {# 渔货价就是学员看到的进货价（渔货栈这边没有「成本价」这个概念），
@@ -1102,7 +1154,7 @@
             <div class="prefill-row"><span class="k">销售价</span>
               <span class="v mono">¥{{ '%.2f' % suggested_price }}{% if package.original_price %} ／ 市场价 ¥{{ package.original_price }}{% endif %}</span></div>
             <div class="prefill-row"><span class="k">库存</span><span class="v mono">{{ package.stock }} 件</span></div>
-            <div class="prefill-row"><span class="k">图片</span><span class="v mono">{{ package.images | length }} 张</span></div>
+            <div class="prefill-row"><span class="k">图片</span><span class="v mono">{{ (images | length) + (detail_images | length) }} 张（主图 {{ images | length }} + 详情图 {{ detail_images | length }}）</span></div>
             <div class="prefill-row"><span class="k">建议类目</span><span class="v">{{ package.category_text }}</span></div>
             <div class="prefill-row"><span class="k">成色</span><span class="v">{{ package.condition }}</span></div>
             <div class="prefill-row"><span class="k">发货 / 售后</span>

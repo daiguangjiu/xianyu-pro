@@ -148,6 +148,11 @@ _NEW_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
     "wms_import_logs": (
         ("errors", "JSON DEFAULT '[]'", "JSON DEFAULT '[]'::json"),
     ),
+    # 报修工单费用拆分（2026-10-15 用户拍板）：维修费 + 快递费（垫付金额 = 两者之和）
+    "wms_repair_orders": (
+        ("repair_fee", "FLOAT DEFAULT 0", "FLOAT DEFAULT 0"),
+        ("express_fee", "FLOAT DEFAULT 0", "FLOAT DEFAULT 0"),
+    ),
     # 建议售价系数（2026-10-10）：渔枢 / 渔货栈的建议售价以它为基准
     "wms_price_rules": (
         ("suggest_factor", "FLOAT DEFAULT 1.0", "FLOAT DEFAULT 1.0"),

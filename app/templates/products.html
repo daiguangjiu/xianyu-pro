@@ -156,7 +156,11 @@
             <td class="text-end mono">{{ money(p.fish_price) if p.fish_price else '—' }}</td>
             <td class="text-end mono">{{ money(p.price) if p.price else '—' }}</td>
             <td class="text-end mono">
-              {% if p.stock_enabled %}{{ p.stock }}{% else %}<span class="text-secondary">按单采购</span>{% endif %}
+              {% if p.stock_enabled %}
+                {{ p.stock }}
+                {# 售罄（2026-10-15）：渔集出库核销把库存减到 0 —— 自动下架并打标 #}
+                {% if (p.stock or 0) <= 0 %}<span class="badge bg-danger" title="库存归零，渔枢已自动下架">售罄</span>{% endif %}
+              {% else %}<span class="text-secondary">按单采购</span>{% endif %}
             </td>
             <td class="text-end">
               {% set mc = sku_counts.get(p.id, 0) %}
@@ -250,6 +254,7 @@
           {% elif p.audit_status == 'rejected' %}<span class="badge badge-audit-rejected">已驳回</span>
           {% else %}<span class="badge badge-audit-draft">草稿</span>{% endif %}
           {% if p.condition %}<span class="badge bg-light">{{ condition_label(p) }}</span>{% endif %}
+          {% if p.stock_enabled and (p.stock or 0) <= 0 %}<span class="badge bg-danger" title="库存归零，渔枢已自动下架">售罄</span>{% endif %}
         </div>
 
         <div class="gcard-kv">

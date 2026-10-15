@@ -1272,6 +1272,9 @@ class Product(Base):
     category: Mapped[str] = mapped_column(String(128), default="")
     brand: Mapped[str] = mapped_column(String(64), default="")
     model: Mapped[str] = mapped_column(String(128), default="")
+    # 规格（2026-10-15）：与渔集建档的「规格」同一个字段（如 1.75L / 黑色），
+    # 渔集那边是商品档案字段、不是规格维度；扫渔集条码建档时一并带过来
+    spec: Mapped[str] = mapped_column(String(128), default="")
     # 成色：见 services/product.py 的 CONDITION_CHOICES
     condition: Mapped[str] = mapped_column(String(32), default="")
     # 闲鱼商品 ID 与商品链接（上架后用，便于与平台对上）

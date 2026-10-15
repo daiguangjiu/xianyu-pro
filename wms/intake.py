@@ -202,6 +202,34 @@ def set_fish_code(session: Session, item: WmsItem, code: str, operator: str = ""
     return item
 
 
+def split_fish(session: Session, code: str, operator: str = "") -> list[str]:
+    """**多条码拆分**（2026-10-15 用户拍板）：一个渔货号只该对应一个条码商品。
+
+    一款下面挂了多个条码时，把**最早建档那台**留在原号上（渔枢商品档案的商家编码
+    就是它，别动），其余每台各自**拆出去发一个新渔货号**（同款但成色 / 配置不同
+    本来就不该挤在一个号里卖）。返回发出去的新渔货号清单。
+
+    审计每台一条（action=fish_code，note=多条码拆分），来源可查。
+    """
+    rows = find_items_by_fish(session, code)
+    if len(rows) <= 1:
+        raise ValueError(
+            f"{code or '（空号）'} 名下只有 {len(rows)} 个条码商品，不用拆"
+        )
+    keep, extras = rows[0], rows[1:]
+    new_codes: list[str] = []
+    for row in extras:
+        row_text = row.display_code or row.barcode or f"#{row.id}"
+        set_fish_code(session, row, "", operator=operator,
+                      note=f"多条码拆分：{row_text} 从 {code} 拆出，独立发新渔货号")
+        new_codes.append(str(row.fish_code or ""))
+    audit.log(session, "item", keep.id, "fish_code", before=code, after=code,
+              operator=operator,
+              note=f"多条码拆分：保留 {len(extras)} 台拆出（{'、'.join(new_codes)}）")
+    session.commit()
+    return new_codes
+
+
 def find_items_by_fish(session: Session, code: str) -> list[WmsItem]:
     """一个渔货号下挂着的所有条码商品（台账详情 / 检测台挑货用）。"""
     raw = str(code or "").strip().upper()
@@ -266,6 +294,47 @@ def fish_candidates(session: Session, item: WmsItem, limit: int = 5) -> list[dic
                      "qty": group["qty"]})
     hits.sort(key=lambda x: (-int(x["items"]), x["fish_code"]))
     return hits[:max(1, int(limit or 1))]
+
+
+# 「这台货的商品资料齐不齐」就看这几个核心档案字段（2026-10-15 用户拍板）：
+# 型号 / 规格决定检测定级与上架定价，品牌与商品名称决定详情页能不能看明白。
+# 顺序即页面与提示里的展示顺序。
+PROFILE_FIELDS: tuple[tuple[str, str], ...] = (
+    ("product_name", "商品名称"),
+    ("brand", "品牌"),
+    ("model", "型号"),
+    ("spec", "规格"),
+)
+
+# 型号 / 规格是「同一款里区分两台货」的关键：缺了它，详情页上就是一排「—」，
+# 定价也无从下手 —— 所以只要这两项有空的，检测台就提醒人去维护。
+KEY_PROFILE_KEYS: tuple[str, ...] = ("model", "spec")
+
+
+def profile_missing(item: object) -> list[str]:
+    """这台货「商品名称 / 品牌 / 型号 / 规格」里还空着哪几个（返回中文标签）。
+
+    给检测台用：缺了就在「② 商品入库信息」卡顶上写清缺哪几项，让人去补全。
+    """
+    if item is None:
+        return []
+    out = []
+    for key, label in PROFILE_FIELDS:
+        if not str(getattr(item, key, "") or "").strip():
+            out.append(label)
+    return out
+
+
+def need_profile(item: object) -> bool:
+    """**要不要提醒**检测员去维护商品资料：型号 / 规格只要有一个空着就要提醒。
+
+    建档时常常只认到货号与商品名，型号规格得等拆箱看铭牌才补得齐 ——
+    所以这里不看品牌（无品牌的货太多了），只看这两个区分字段。
+    """
+    if item is None:
+        return False
+    return any(not str(getattr(item, key, "") or "").strip()
+               for key in KEY_PROFILE_KEYS)
 
 
 def next_batch_no(session: Session, at: datetime | None = None) -> str:
@@ -703,11 +772,19 @@ def update_item(
     货号要查重：货号是扫码检测认货的凭据，两台货挂同一个货号，扫出来就不知道是哪台了。
     """
     changed: list[str] = []
+    # 价格同步要跟「改之前」比，先抄下来（提交成功后推给渔枢 / 渔货栈，2026-10-15）
+    old_selling = round(float(item.selling_price or 0.0), 2)
+    old_suggest = round(float(item.suggest_price or 0.0), 2)
     text_fields = (
         ("sku_code", "货号"), ("product_name", "产品名"), ("brand", "品牌"),
         ("model", "型号"), ("spec", "规格"), ("serial_no", "序列号"), ("category", "品类"),
     )
     for key, label in text_fields:
+        if key not in fields:
+            # 部分更新（整款改商品资料只传商品名称 / 品牌 / 型号 / 规格四项）——
+            # 没传进来的字段一律不动。以前这里会把「没传」当成空值写回，
+            # 结果整款一改就把每台货的货号与品类清空、市场价归零。
+            continue
         new = str(fields.get(key) or "").strip()
         old = str(getattr(item, key) or "").strip()
         if key == "category":
@@ -730,6 +807,8 @@ def update_item(
         ("purchase_cost", "成本价"), ("selling_price", "渔货价"),
         ("suggest_price", "建议售价"), ("base_price", "市场价"),
     ):
+        if key not in fields:
+            continue
         new_cost = round(float(fields.get(key) or 0.0), 2)
         old_cost = round(float(getattr(item, key) or 0.0), 2)
         if new_cost != old_cost:
@@ -763,7 +842,67 @@ def update_item(
                   after="；".join(changed[:6]), operator=operator,
                   note=remark or "改商品字段（条码终身不变）")
         session.commit()
+        # 价格同步（2026-10-15 用户拍板）：编辑把渔货价 / 建议售价改了就推给
+        # 渔枢商品档案 + 渔货栈货源，真变了在渔货栈「通知」里落一条。桥断只降级。
+        if item.fish_code and (
+            round(float(item.selling_price or 0.0), 2) != old_selling
+            or round(float(item.suggest_price or 0.0), 2) != old_suggest
+        ):
+            try:
+                from . import bridge
+
+                bridge.push_price_change(
+                    item.fish_code,
+                    name=str(item.product_name or item.title or ""),
+                    selling_price=float(item.selling_price or 0.0),
+                    suggest_price=float(item.suggest_price or 0.0),
+                    base_price=float(item.base_price or 0.0),
+                )
+            except Exception:  # noqa: BLE001  同步失败不影响编辑保存
+                import logging
+
+                logging.getLogger("wms.intake").warning(
+                    "编辑改价同步渔枢 / 渔货栈失败", exc_info=True
+                )
     return changed
+
+
+def update_goods_profile(
+    session: Session,
+    code: str,
+    *,
+    fields: dict,
+    operator: str = "",
+) -> tuple[int, list[str]]:
+    """改**一款货**的商品资料（2026-10-15）：渔货号下面每一台条码商品一起改。
+
+    货品台账详情页（``/wms/goods/{fish_code}``）的「编辑商品信息」走这里 ——
+    商品名称 / 品牌 / 型号 / 规格是**一款货的公共资料**，同款多台各存一份；
+    改一次要整款同步，否则台账里会出现「同一款货两台型号不一样」。
+
+    **条码终身不变**（见 :func:`update_item`），改品类也不重发条码。
+    返回 ``(同步了几台, 改动摘要)`` —— 整款同改，摘要取第一台的看一份就够。
+    """
+    rows = find_items_by_fish(session, code)
+    if not rows:
+        raise ValueError(f"没有这个渔货号：{code or '（空）'}")
+    picked = {k: v for k, v in (fields or {}).items() if v is not None}
+    # 进货货号是「供应商清单上那一列」、一台一个，整款同步必然撞号 —— 款级编辑不带这一项
+    picked.pop("sku_code", None)
+    if not picked:
+        return 0, []
+    total = 0
+    summary: list[str] = []
+    for row in rows:
+        changed = update_item(
+            session, row, fields=picked, operator=operator,
+            remark="整款改商品资料（商品名称 / 品牌 / 型号 / 规格）",
+        )
+        if changed:
+            total += 1
+            if not summary:
+                summary = changed
+    return total, summary
 
 
 def delete_item(session: Session, item: WmsItem, *, operator: str = "",

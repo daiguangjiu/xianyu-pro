@@ -1,17 +1,134 @@
 {% extends "base.html" %}
 {% import "wms_bits.html" as bits %}
 {% block title %}{{ order.order_no }}{% endblock %}
+{% block head_extra %}
+<style>
+  /* 订单信息置顶（2026-10-15）：重点信息分区高亮 —— 左边「发什么 / 发给谁」，
+     右边单据事实，一眼看清这张单要干什么 */
+  .od-wrap { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: var(--s-4); padding: 14px 16px; }
+  .od-sec { border: 1px solid var(--c-line); border-radius: var(--r-card, 10px); padding: 12px 14px; min-width: 0; }
+  .od-sec.hl { background: var(--c-primary-soft, rgba(13,127,116,.06)); border-color: var(--c-primary); border-left: 3px solid var(--c-primary); }
+  .od-lab { font-size: 12px; color: var(--c-muted); margin-bottom: 2px; display: flex; align-items: center; gap: 8px; }
+  .od-title { font-size: 15px; font-weight: 700; line-height: 1.5; word-break: break-all; }
+  .od-recv { margin-top: var(--s-3); line-height: 1.7; font-size: 13.5px; }
+  .od-fish { margin-top: var(--s-3); font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; }
+  .od-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; align-content: start; }
+  .od-cell { min-width: 0; }
+  .od-cell .v { font-size: 13.5px; font-weight: 600; margin-top: 2px; word-break: break-all; }
+  .od-cell .v.plain { font-weight: 500; }
+  .od-cell.wide { grid-column: 1 / -1; }
+  @media (max-width: 900px) { .od-wrap { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
 {% block actions %}
   <a class="btn" href="/wms/outbound">返回列表</a>
 {% endblock %}
 
 {% block content %}
-<div class="grid grid-4">
-  <div class="stat"><div class="label">类型</div><div class="value sm">{{ order.type }}</div></div>
-  <div class="stat"><div class="label">状态</div><div class="value sm">{{ order.status }}</div></div>
-  <div class="stat"><div class="label">件数</div><div class="value">{{ order.item_count }}</div></div>
-  <div class="stat"><div class="label">发货仓</div><div class="value sm">{{ wms_warehouse_label(order.warehouse_code) }}</div>
-    <div class="hint">{% if order.to_warehouse %}→ {{ wms_warehouse_label(order.to_warehouse) }}{% endif %}</div></div>
+{# 顶部：订单信息 / 出库单信息（2026-10-15 用户拍板：原「类型/状态/件数/发货仓」四张统计卡撤掉，
+   关键信息合到这里 —— 有渔货栈订单就把订单事实放最上面，收货人可一键复制 #}
+<div class="card flush">
+  <h2>{% if hub_order %}订单信息 · 渔货栈订单
+      <a class="btn sm" href="{{ hub_order.order_url }}" target="_blank" rel="noopener">查看渔枢订单</a>
+    {% else %}出库单信息{% endif %}</h2>
+  <div class="od-wrap">
+    <div class="od-sec hl">
+      {% if hub_order %}
+      <div class="od-lab">卖的是什么</div>
+      <div class="od-title">{{ hub_order.product_name or hub_order.product_archive or '—' }}
+        {% if hub_order.spec %}<span class="muted" style="font-weight:400">（{{ hub_order.spec }}）</span>{% endif %}</div>
+      <div class="od-lab" style="margin-top:6px">
+        数量 <b style="color:var(--c-ink);font-size:14px">{{ hub_order.quantity }}</b> 台
+        {% if hub_order.buyer %} · 买家 {{ hub_order.buyer }}{% endif %}</div>
+      <div class="od-recv">
+        <div class="od-lab">收货人
+          <button type="button" class="btn sm" id="copyRecv"
+                  data-text="{{ '收货人：' ~ (hub_order.receiver_name or '') ~ '
+电话：' ~ (hub_order.receiver_phone or '') ~ '
+地址：' ~ (hub_order.receiver_address or '') }}">复制信息</button>
+        </div>
+        <b>{{ hub_order.receiver_name or '—' }}</b> · {{ hub_order.receiver_phone or '—' }}
+        <div>{{ hub_order.receiver_address or '—' }}</div>
+      </div>
+      <div class="od-fish">渔货号：
+        {% for code in hub_order.fish_codes %}
+          <a class="mono" href="/wms/goods/{{ code }}">{{ code }}</a>
+        {% else %}<span class="muted">—（订单没挂到渔货号，扫条码或手填货号挂单）</span>{% endfor %}
+      </div>
+      {% else %}
+      <div class="od-lab">出库单</div>
+      <div class="od-title">{{ order.order_no }}</div>
+      <div class="od-lab" style="margin-top:6px">{{ OUTBOUND_LABELS.get(order.type, order.type) }}出库
+        · 件数 {{ order.item_count }}{% if order.remark %} · {{ order.remark }}{% endif %}</div>
+      {% endif %}
+    </div>
+    <div class="od-sec">
+      <div class="od-facts">
+        <div class="od-cell"><div class="od-lab">类型</div>
+          <div class="v">{{ OUTBOUND_LABELS.get(order.type, order.type) }}</div></div>
+        <div class="od-cell"><div class="od-lab">状态</div>
+          <div class="v"><span class="badge {{ 'done' if order.status == 'shipped' else 'pending' if order.status == 'picking' else 'muted' }}">{{ OUTBOUND_STATUS_LABELS.get(order.status, order.status) }}</span></div></div>
+        <div class="od-cell"><div class="od-lab">已挂 / 总件数</div>
+          <div class="v">{{ lines | length }} / {{ order.item_count }}</div></div>
+        <div class="od-cell"><div class="od-lab">发货仓</div>
+          <div class="v plain">{{ wms_warehouse_label(order.warehouse_code) }}</div></div>
+        {% if order.to_warehouse %}
+        <div class="od-cell"><div class="od-lab">目标仓</div>
+          <div class="v plain">{{ wms_warehouse_label(order.to_warehouse) }}</div></div>
+        {% endif %}
+        <div class="od-cell"><div class="od-lab">快递 / 运单号</div>
+          <div class="v plain mono">{{ (order.express_company or '—') ~ ' ' ~ (order.waybill_no or '—') }}</div></div>
+        {% if order.receiver_name and not hub_order %}
+        <div class="od-cell wide"><div class="od-lab">收货人</div>
+          <div class="v plain">{{ order.receiver_name }}{% if order.receiver_phone %} · {{ order.receiver_phone }}{% endif %}</div></div>
+        {% endif %}
+        <div class="od-cell wide"><div class="od-lab">关联单号 / 创建时间</div>
+          <div class="v plain">{{ order.target_no or '—' }} · <span class="muted">{{ order.created_at | dt }}</span></div></div>
+      </div>
+    </div>
+  </div>
+
+  {# 该订单名下的渔货号商品（状态 / 库位一台一行），点「出库」直接挂单 —— 校验与扫码拣货同一套 #}
+  {% if hub_order and order_goods %}
+  <div class="table-wrap"><table>
+    <thead><tr><th>渔货号</th><th>条码 / 显示编码</th><th>商品</th><th>等级</th>
+      <th>状态</th><th>所在仓</th><th>库位</th><th></th></tr></thead>
+    <tbody>
+    {% for g in order_goods %}
+      <tr>
+        <td class="mono nowrap"><a href="/wms/goods/{{ g.fish_code }}">{{ g.fish_code }}</a></td>
+        <td class="nowrap mono">{{ g.barcode }}<br><span class="muted">{{ g.display_code }}</span></td>
+        <td class="wrap2"><span class="clamp2">{{ g.title or '—' }}</span></td>
+        <td>{{ bits.grade_badge(g.grade) }}</td>
+        <td>
+          {{ g.status }}
+          {% if g.picked %}<span class="badge done">已在本单</span>
+          {% elif g.locked_by_me %}<span class="badge">已为本单锁货</span>{% endif %}
+        </td>
+        <td class="nowrap">{{ g.warehouse or '—' }}</td>
+        <td class="nowrap mono">{{ g.location or '—（未上架）' }}</td>
+        <td class="nowrap">
+          {% if g.picked %}
+            <span class="muted">已挂单</span>
+          {% elif order.status != 'shipped' and order.status != 'cancelled' %}
+            <form method="post" action="/wms/outbound/{{ order.id }}/pick-item" class="inline-form">
+              <input type="hidden" name="item_id" value="{{ g.id }}">
+              <button class="btn sm primary">出库</button>
+            </form>
+          {% else %}
+            <span class="muted">—</span>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% elif hub_order %}
+  <div style="padding:0 16px 14px"><div class="note warn">
+    这个渔货号在渔集还没有货品（还没入库或号没对上）：按上面的条码 / 货号手工挂单，
+    或到渔枢确认商品档案的商家编码。
+  </div></div>
+  {% endif %}
 </div>
 
 <div class="grid grid-2">
@@ -55,7 +172,8 @@
        渔货栈平台库存按条码跟着减，不用再让人手动去改两边的数 #}
     <div class="note">
       核销时按<b>条码</b>把库存同步出去：渔枢那款商品的库存、以及它上架到渔货栈后的平台库存
-      会一起减掉（一台带 N 台就减 N）。渔枢没这款商品（没扫条码建过档）也不影响出库，只是没得同步。
+      会一起减掉（一台带 N 台就减 N）。<b>减到 0 的那款渔枢会自动下架并打「售罄」标</b>。
+      渔枢没这款商品（没扫条码建过档）也不影响出库，只是没得同步。
     </div>
     {% if order.status != 'shipped' and order.status != 'cancelled' %}
     <form method="post" action="/wms/outbound/{{ order.id }}/cancel" style="margin-top:var(--s-3)">
@@ -99,12 +217,13 @@
   {% if lines %}
   <div class="table-wrap"><table>
     {# 数量（2026-10-10）：一台货可以带 N 台，出库发的是「台」不是「条」 #}
-    <thead><tr><th>条码</th><th>品牌型号</th><th class="num">数量</th><th>要求等级</th>
+    <thead><tr><th>条码</th><th>商品货号</th><th>品牌型号</th><th class="num">数量</th><th>要求等级</th>
       <th>实际等级</th><th class="num">售价</th><th class="num">成本</th><th>时间</th></tr></thead>
     <tbody>
     {% for l in lines %}
       <tr>
         <td class="nowrap mono">{{ l.barcode }}</td>
+        <td class="mono">{{ l.sku_code or '—' }}</td>
         <td class="wrap2"><span class="clamp2">{{ l.title }}</span></td>
         <td class="num"><span class="qty-pill {{ 'many' if (l.qty or 1) > 1 }}">{{ l.qty or 1 }}</span></td>
         <td>{{ bits.grade_badge(l.require_grade) if l.require_grade else '—' }}</td>
@@ -118,4 +237,29 @@
   </table></div>
   {% else %}{{ bits.empty('还没拣货') }}{% endif %}
 </div>
+
+<script>
+(function () {
+  var btn = document.getElementById('copyRecv');
+  if (!btn) return;
+  btn.addEventListener('click', function () {
+    var text = btn.dataset.text || '';
+    var done = function () {
+      var t = btn.textContent;
+      btn.textContent = '已复制 ✓';
+      setTimeout(function () { btn.textContent = t; }, 1600);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(); });
+    } else { fallback(); }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      ta.remove();
+    }
+  });
+})();
+</script>
 {% endblock %}

@@ -39,6 +39,9 @@ from sqlalchemy.orm import Session
 from src import __version__
 from src.config import get_settings
 from src.deps import get_db
+# 图片地址归一（2026-10-15）：库里存的是站内地址 /media/...，交给 app.utils 统一
+# 处理成「带版本号的站内地址 / 按需生成的缩略图」，页面不再自己拼路径
+from app.utils import media_url, thumb_url
 from src.version import (
     APP_NAME,
     APP_TAGLINE,
@@ -82,12 +85,13 @@ from src.goods.catalog import (
     tag_kind_of,
 )
 from src.goods.hub_price import resolve_cost
-from src.goods.service import next_item_code
+from src.goods.service import fish_code_of, next_item_code
 from src.merchant.router import _current_user
 from src.models import (
     ChannelListing,
     DownstreamOrder,
     ExceptionLog,
+    PriceChangeNotice,
     PriceRule,
     PurchaseOrder,
     Shop,
@@ -222,6 +226,8 @@ templates.env.globals["app_tagline"] = APP_TAGLINE
 templates.env.filters["mask_token"] = _mask_token
 templates.env.filters["dt"] = _dt_filter
 templates.env.filters["ts"] = _ts_filter
+templates.env.globals["media_url"] = media_url
+templates.env.globals["thumb_url"] = thumb_url
 
 
 # 货源广场链接构造器（暴露给模板）：让切榜单 / 切类目 / 切三级类目时
@@ -1650,10 +1656,50 @@ async def order_create(request: Request, db: Session = Depends(get_db)) -> Redir
 # =====================================================================
 # 3. 订单列表 /orders
 # =====================================================================
+def _order_account_of(row: dict) -> str:
+    """这笔订单挂在哪个**闲鱼账号**名下：优先渔枢系统端 xianyu_account，
+    没建档的回落渔货栈 raw_json 里存的账号字段（「我要下单」会塞店铺/账号）。"""
+    hub = row.get("hub")
+    acc = _field_of(hub, "xianyu_account") if hub else ""
+    if acc:
+        return acc
+    raw = getattr(row.get("dso"), "raw_json", None)
+    if isinstance(raw, dict):
+        for key in ("xianyu_account", "account", "shop_name"):
+            val = str(raw.get(key) or "").strip()
+            if val:
+                return val
+    return ""
+
+
+# 订单可见范围（2026-10-16 用户拍板）：管理员与「自营账号组」看全量；
+# 其余账号（学员等）**只看自己店铺账号**的单 —— 不能把所有人的单都塞给部分权限的账号。
+ORDERS_FETCH_CAP = 2000
+ORDERS_PER_PAGE = 50
+
+
+def _orders_view_scope(request: Request) -> tuple[bool, list[str], list[str]]:
+    """返回 (是否看全量, 我的账号名列表, 账号筛选下拉选项)。"""
+    hub = hub_shops.viewer(request)
+    role_name = hub_shops.viewer_role_name(hub)
+    full_view = (
+        hub is None  # 未接渔枢系统（单独部署）：无从对账号，维持全量
+        or str(getattr(hub, "role", "") or "") == "admin"
+        or role_name.strip() == hub_shops.SELF_RUN_ROLE_NAME
+    )
+    uid = getattr(hub, "id", None)
+    my_accounts = hub_shops.my_account_names(int(uid)) if uid else []
+    if full_view:
+        return True, my_accounts, hub_shops.all_account_names()
+    return False, my_accounts, my_accounts
+
+
 @router.get("/orders", response_class=HTMLResponse)
 def orders_list(
     request: Request,
     status: str | None = None,
+    account: str = "",
+    page: int = 1,
     msg: str = "",
     kind: str = "",
     db: Session = Depends(get_db),
@@ -1663,6 +1709,7 @@ def orders_list(
     金额口径（售价 / 采购成本 / 退款 / 平台技术服务费 / 毛利）和推单状态在渔枢系统维护，
     这里按单号把渔枢系统侧的事实取回来合并展示（只读，见 `src/web/hub_orders.py`）；
     单子还没推到渔枢系统就显示「未建档」，页面上能一键补推。
+    订单按**闲鱼账号**匹配显示（2026-10-16）：非管理员 / 非自营账号组只看自己店铺账号的单。
     """
     # 2026-10-14「我要录单」：内部自营同学在飞书群报的单也按运营姓名同步进来，
     # 幂等（同单号只建一次）；桥断了不挡订单列表。
@@ -1671,10 +1718,12 @@ def orders_list(
     except Exception:  # noqa: BLE001
         logger.debug("飞书群报单同步失败（不挡订单列表）", exc_info=True)
 
+    full_view, my_accounts, account_options = _orders_view_scope(request)
+
     stmt = select(DownstreamOrder).order_by(DownstreamOrder.created_at.desc())
     if status:
         stmt = stmt.where(DownstreamOrder.status == status)
-    dsos = db.execute(stmt.limit(200)).scalars().all()
+    dsos = db.execute(stmt.limit(ORDERS_FETCH_CAP)).scalars().all()
 
     dso_ids = [d.downstream_order_id for d in dsos]
     po_by_dso: dict[str, list[PurchaseOrder]] = {k: [] for k in dso_ids}
@@ -1687,24 +1736,37 @@ def orders_list(
 
     # 渔枢系统同一单号的订单事实（金额 / 收货 / 推单状态）：字段两边一致
     hub_map = hub_orders.by_order_nos(dso_ids)
-    rows = []
+    account_want = str(account or "").strip()
+    my_set = set(my_accounts)
+    rows: list[dict] = []
+    visible: list[DownstreamOrder] = []
     for d in dsos:
         no = hub_orders.base_order_no(d.downstream_order_id)
-        rows.append(
-            {
-                "dso": d,
-                "order_no": no,
-                "pos": po_by_dso.get(d.downstream_order_id, []),
-                "hub": hub_map.get(no),
-            }
-        )
+        row = {
+            "dso": d,
+            "order_no": no,
+            "pos": po_by_dso.get(d.downstream_order_id, []),
+            "hub": hub_map.get(no),
+        }
+        row["account"] = _order_account_of(row)
+        # ① 权限过滤：部分权限的账号只看自己店铺账号的单（对不上账号的一律不给看）
+        if not full_view and row["account"] not in my_set:
+            continue
+        # ② 按账号筛选（全量权限的人可切账号看）
+        if account_want and row["account"] != account_want:
+            continue
+        rows.append(row)
+        visible.append(d)
 
-    status_counts = dict(
-        db.execute(
-            select(DownstreamOrder.status, sql_func.count(DownstreamOrder.id))
-            .group_by(DownstreamOrder.status)
-        ).all()
-    )
+    status_counts: dict[str, int] = {}
+    for d in visible:
+        status_counts[d.status] = status_counts.get(d.status, 0) + 1
+
+    # 统一分页（2026-10-16 用户拍板「所有列表都按分页逻辑走」）
+    total = len(rows)
+    pages = max(1, (total + ORDERS_PER_PAGE - 1) // ORDERS_PER_PAGE)
+    page = max(1, min(int(page or 1), pages))
+    rows = rows[(page - 1) * ORDERS_PER_PAGE: page * ORDERS_PER_PAGE]
 
     ctx = _common_ctx(
         request, "orders", db=db,
@@ -1713,7 +1775,15 @@ def orders_list(
         rows=rows,
         status_filter=status,
         status_counts=status_counts,
-        total=sum(status_counts.values()),
+        total=total,
+        # 账号匹配（2026-10-16）：全部 / 我的账号集合 / 筛选下拉选项 / 当前选中
+        full_view=full_view,
+        my_accounts=my_accounts,
+        account_options=account_options,
+        account=account_want,
+        page=page,
+        pages=pages,
+        per_page=ORDERS_PER_PAGE,
         hub_available=hub_orders.available(),
         hub_count=sum(1 for r in rows if r["hub"]),
         # 状态机：列表页的筛选 chips 与状态列都按这套状态来（含新增的已发货 / 退款中 / 已取消）
@@ -1795,6 +1865,19 @@ def order_detail(
             not_found=True, dso_id=dso_id,
         )
         return templates.TemplateResponse("order_detail.html", ctx)
+
+    # 账号权限（2026-10-16）：部分权限的账号只能看自己店铺账号的单，
+    # 别人的单按「找不到」处理（列表页同样过滤，这里兜住直接敲 URL 的情况）。
+    full_view, my_accounts, _ = _orders_view_scope(request)
+    if not full_view:
+        acc = _field_of(hub_orders.one(hub_orders.base_order_no(dsos[0].downstream_order_id)), "xianyu_account")
+        if not acc:
+            raw = getattr(dsos[0], "raw_json", None)
+            if isinstance(raw, dict):
+                for key in ("xianyu_account", "account", "shop_name"):
+                    acc = acc or str(raw.get(key) or "").strip()
+        if acc not in set(my_accounts):
+            return _redirect("/orders", "这笔订单不在你名下的店铺账号里，无法查看", "warn")
 
     # 采购单（PO）与异常日志两个区块 2026-10-15 按用户要求从详情页撤掉：
     # PO 采购进度去「采购单」页看，异常去「日志」页按单号筛 —— 详情页只留履约信息。
@@ -2363,6 +2446,9 @@ def goods_detail(
         active_sub="goods_self:list" if item.source_type == "self_operated" else "goods:list",
         nav_crumb=["渔货栈", "货源广场", "商品详情"],
         item=item,
+        # 渔货号（2026-10-15）：渔集建档的商品款编号，标题后面与参数表都展示它；
+        # 不是渔集建档的货（商家编码是 YHZ-… / 档口自编号）这里就是空串，页面上不显示
+        fish_code=fish_code_of(item),
         detail_groups=_detail_groups,
         detail_image_groups=hub_product.detail_image_groups(_detail_images),
         detail_image_group_size=hub_product.DETAIL_IMAGE_GROUP_SIZE,
@@ -2616,6 +2702,9 @@ def _images_zip_of(
     包里按目录分好、编号 01、02…（顺序即详情页的顺序）；
     个别图抓不下来不影响出包，缺哪些写进 README.txt。
 
+    2026-10-15 起文件名一律以「渔货号 + 产品名称」打头（包名与包内每张图都这样）——
+    散图存进手机相册、下载目录里堆了一堆包时，看名字就能认出是哪一款的货。
+
     2026-10-15 起支持只打包其中一部分 —— 详情页「头图」「第 N 组」各自有下载按钮：
       · part=all（默认）：头图 + 详情图，两个目录，跟以前一样；
       · part=head：只要头图（发布页封面用的就是这几张）；
@@ -2625,6 +2714,12 @@ def _images_zip_of(
     from ..self_purchase.shop_pool import _ext_of, _fetch  # noqa: PLC0415
 
     mains, details = _item_image_sets(item)
+    # 文件名前缀：「渔货号 + 产品名称」（2026-10-15 用户拍板）——
+    # 下载下来一包图，看文件名就知道是哪一款货；散图存进手机相册也不会跟别的货混在一起。
+    # 没有渔货号的货就只用产品名，包的名字后面会再兜一个货源 ID，避免重名覆盖。
+    fish = fish_code_of(item)
+    title = re.sub(r"[\\/:*?\"<>|\s]+", "_", str(getattr(item, "title", "") or "")).strip("_")[:20]
+    base = f"{fish}_{title}" if fish else (title or "商品")
     part = str(part or "all").strip().lower()
     try:
         idx = max(1, int(idx or 1))
@@ -2661,7 +2756,9 @@ def _images_zip_of(
                     failed.append(f"{folder} {index:02d}  {url}")
                     continue
                 data, ext = _zip_image(data, url, max_width)
-                zf.writestr(f"{folder}/{index:02d}{ext}", data)
+                # 2026-10-15 用户拍板：图片文件名 = 渔货号 + 产品名称 + 序号
+                # （以前是光秃秃的 01.jpg，存到手机相册里跟别的货混在一起分不清）
+                zf.writestr(f"{folder}/{base}_{index:02d}{ext}", data)
         readme = [
             "渔货栈 · 商品图片包",
             f"商品：{item.title or ''}",
@@ -2678,10 +2775,14 @@ def _images_zip_of(
             readme += ["", "以下图片这次没抓到（图床临时挂了，稍后重下即可）：", *failed]
         zf.writestr("README.txt", "\n".join(readme) + "\n")
 
+    # 包名也是「渔货号 + 产品名称」（2026-10-15）：下载目录里一眼认出是哪一款货。
+    # 没有渔货号的货（自录入 / 外部档口）末尾再挂一个货源 ID，避免同名包互相覆盖
     code = str(item.item_id or "images").replace("/", "-")
-    title = re.sub(r"[\\/:*?\"<>|\s]+", "_", str(item.title or ""))[:20]
     sized = f"{max_width}w" if max_width else ""
-    return buf.getvalue(), f"{title or '商品'}{suffix}{sized}_{code}.zip"
+    bits = [base] + ([suffix] if suffix else []) + ([sized] if sized else [])
+    if not fish:
+        bits.append(code)
+    return buf.getvalue(), "_".join(bits) + ".zip"
 
 
 @router.get("/goods/{item_id}/images.zip")
@@ -2705,7 +2806,9 @@ def goods_images_zip(item_id: str, request: Request, part: str = "all", idx: int
         "-head" if str(part).lower() == "head" else f"-group{idx}")
     if w:
         tag += f"-{int(w)}w"
-    ascii_name = "images-" + str(item.item_id or "").replace("/", "-") + tag + ".zip"
+    # 兜底名也跟着带渔货号（有号就用号，没号才退回货源 ID）
+    stamp = fish_code_of(item) or str(item.item_id or "")
+    ascii_name = "images-" + stamp.replace("/", "-") + tag + ".zip"
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/zip",
@@ -3898,6 +4001,13 @@ def logs_page(
     elif resolved == "false":
         stmt = stmt.where(ExceptionLog.resolved.is_(False))
     rows = db.execute(stmt).scalars().all()
+    # 渔集价格变动通知（2026-10-15 用户拍板）：渔集改价同步过来时落一条人话通知，
+    # 顶上摆最近 20 条 —— 「xxx 涨价了 / 降价了」一眼看见，不用翻渔集。
+    price_notices = list(
+        db.execute(
+            select(PriceChangeNotice).order_by(PriceChangeNotice.id.desc()).limit(20)
+        ).scalars().all()
+    )
     type_options = [
         r[0] for r in db.execute(
             select(ExceptionLog.type).distinct().order_by(ExceptionLog.type)
@@ -3913,7 +4023,7 @@ def logs_page(
     ctx = _common_ctx(
         request, "logs", db=db,
         nav_crumb=["系统", "异常日志"],
-        logs=rows, type_options=type_options,
+        logs=rows, type_options=type_options, price_notices=price_notices,
         type_filter=type, resolved_filter=resolved,
         counts={"resolved": counts.get(True, 0), "unresolved": counts.get(False, 0)},
     )

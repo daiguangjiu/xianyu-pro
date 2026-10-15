@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% block title %}新建出库单{% endblock %}
+{% block head_extra %}
+<style>
+  /* 新建出库单分区（2026-10-15）：照详情页的逻辑分三段 —— 单据 / 挂货 / 物流收货 */
+  .ob-sec { font-size: 12.5px; color: var(--c-muted); display: flex; align-items: center; gap: 8px; margin: 14px 0 10px; }
+  .ob-sec b { color: var(--c-ink); font-size: 13px; }
+  .ob-sec::after { content: ""; flex: 1; height: 1px; background: var(--c-line); }
+  .ob-sec:first-child { margin-top: 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+{# 新建出库单（2026-10-16 用户拍板独立成页）：列表页只留入口，填单到这页来 #}
+<div class="card">
+  <h2>新建出库单</h2>
+  <form method="post" action="/wms/outbound">
+    {# ① 单据：发什么类型的单、从哪个仓发、关联哪张单 #}
+    <div class="ob-sec"><b>① 单据</b>类型、发货仓、关联单号（销售出库填渔枢订单号，报修填报修单号）</div>
+    <div class="field-row auto">
+      <div class="field"><label for="o-t">类型</label>
+        <select id="o-t" name="type">{% for v, t in types %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
+      <div class="field"><label for="o-w">发货仓</label>
+        <select id="o-w" name="warehouse_code">
+          {% for w in warehouses %}{% if w.can_out %}<option value="{{ w.code }}">{{ w.name }}</option>{% endif %}{% endfor %}</select></div>
+      <div class="field"><label for="o-tw">目标仓（调拨用）</label>
+        <select id="o-tw" name="to_warehouse"><option value="">—</option>
+          {% for w in warehouses %}<option value="{{ w.code }}">{{ w.name }}</option>{% endfor %}</select></div>
+      <div class="field grow"><label for="o-tn">关联单号</label>
+        <input id="o-tn" type="text" name="target_no" placeholder="销售：渔枢订单号 / 报修：报修单号"></div>
+    </div>
+
+    {# ② 挂货：与详情页「订单商品」面板同一口径 —— 渔货号 / 条码 / 货号，建单就把货锁上 #}
+    <div class="ob-sec"><b>② 挂货</b>渔货号认一款（同款多台）、条码认一台最准；挂不上的会说明原因，不拦建单</div>
+    <div class="field-row auto">
+      <div class="field grow"><label for="o-fish">渔货号（YS…）</label>
+        <input id="o-fish" type="text" name="fish_code" placeholder="一款一码，自动取名下可售的货" autocomplete="off"></div>
+      <div class="field"><label for="o-b">商品条码</label>
+        <input id="o-b" type="text" name="barcode" placeholder="扫一台（QC…）" autocomplete="off"></div>
+      <div class="field"><label for="o-sku">商品货号</label>
+        <input id="o-sku" type="text" name="sku_code" placeholder="供应商货号"></div>
+      <div class="field"><label for="o-qty">数量（台）</label>
+        <input id="o-qty" type="number" name="qty" min="1" value="1"></div>
+      <div class="field"><label for="o-rg">要求等级</label>
+        <select id="o-rg" name="require_grade"><option value="">不限</option>
+          {% for g, t in grades %}<option value="{{ g }}">{{ t }}</option>{% endfor %}</select></div>
+    </div>
+
+    {# ③ 物流与收货：核销要用的快递信息，发货后也可补 #}
+    <div class="ob-sec"><b>③ 物流与收货</b>出库核销时填运单号，填了就能看轨迹并回传渔枢</div>
+    <div class="field-row auto">
+      <div class="field"><label for="o-exp">快递公司</label>
+        <input id="o-exp" type="text" name="express_company" placeholder="顺丰 / 中通 …"></div>
+      <div class="field grow"><label for="o-wb">运单号</label>
+        <input id="o-wb" type="text" name="waybill_no" placeholder="可先建单，核销时补填"></div>
+      <div class="field"><label for="o-r">收货人</label><input id="o-r" type="text" name="receiver_name"></div>
+      <div class="field"><label>&nbsp;</label><button class="btn primary">创建出库单</button></div>
+    </div>
+  </form>
+</div>
+{% endblock %}

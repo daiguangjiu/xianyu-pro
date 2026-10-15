@@ -46,6 +46,51 @@
   </div>
 </div>
 
+{% if price_notices %}
+<div class="card mb-3">
+  <div class="card-body pb-0">
+    <h2 class="h6 mb-2"><span class="badge bg-primary">通知</span> 商品价格变动（渔集同步）</h2>
+  </div>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead>
+        <tr>
+          <th>时间</th><th>商品</th><th>渔货价</th><th>销售价</th><th>变动</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for n in price_notices %}
+          <tr>
+            <td class="mono-sm text-secondary">{{ n.created_at | dt('%m-%d %H:%M') }}</td>
+            <td>
+              {% if n.fish_code %}<span class="mono-sm text-secondary">{{ n.fish_code }}</span> · {% endif %}
+              {{ n.product_name or n.product_code or '—' }}
+            </td>
+            <td class="mono-sm">
+              {% if n.old_fish_price is not none and n.new_fish_price is not none and n.old_fish_price != n.new_fish_price %}
+                <s class="text-secondary">¥{{ '%.2f' % n.old_fish_price }}</s> →
+                <strong>¥{{ '%.2f' % n.new_fish_price }}</strong>
+              {% else %}¥{{ '%.2f' % (n.new_fish_price or 0) }}{% endif %}
+            </td>
+            <td class="mono-sm">
+              {% if n.old_price is not none and n.new_price is not none and n.old_price != n.new_price %}
+                <s class="text-secondary">¥{{ '%.2f' % n.old_price }}</s> →
+                <strong>¥{{ '%.2f' % n.new_price }}</strong>
+              {% else %}¥{{ '%.2f' % (n.new_price or 0) }}{% endif %}
+            </td>
+            <td>
+              {% if n.direction == 'up' %}<span class="badge bg-danger">涨价</span>
+              {% elif n.direction == 'down' %}<span class="badge bg-success">降价</span>
+              {% else %}<span class="badge bg-secondary">调整</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
 <div class="card">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
@@ -67,7 +112,7 @@
             <td class="mono-sm text-secondary">{{ log.created_at | dt('%m-%d %H:%M:%S') }}</td>
             <td><span class="badge bg-warning text-dark">{{ log.type }}</span></td>
             <td class="text-danger small mono-sm">{{ log.error or '—' }}</td>
-            <td><code class="k" title="{{ log.payload }}">{{ (log.payload or '')[:48] }}{% if log.payload and log.payload|length > 48 %}…{% endif %}</code></td>
+            <td><code class="k" title="{{ log.payload | tojson }}">{% if log.payload %}{{ (log.payload | tojson)[:48] }}{% if (log.payload | tojson) | length > 48 %}…{% endif %}{% else %}—{% endif %}</code></td>
             <td class="text-end mono-sm">{{ log.retry_count }}</td>
             <td>
               {% if log.resolved %}

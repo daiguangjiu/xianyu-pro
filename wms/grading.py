@@ -17,6 +17,8 @@ facts 字段（检测工作台算好后传进来）：
 """
 from __future__ import annotations
 
+import math
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -672,32 +674,35 @@ def price_of(
     approve_below = float(rule.need_approval_below) if rule else 0.0
     base = float(base_price or 0.0)
     cost = float(purchase_cost or 0.0)
-    # 人工填的建议售价优先（建档 / 编辑页那格「建议售价」）
-    manual_suggest_value = round(float(manual_suggest), 2) if manual_suggest else 0.0
-    suggest_price = manual_suggest_value or (
-        round(base * suggest_factor, 2) if base > 0 else 0.0
+    # 价格一律**向下取整到元**（2026-10-15 用户拍板）：¥218.99 这种小数没人会用，
+    # 报价、打印、渔枢渔货栈三边对不上的祸根就是它。人工填的也照取整收。
+    manual_suggest_value = (
+        math.floor(float(manual_suggest)) if manual_suggest else 0.0
     )
-    price = float(manual_price) if manual_price else round(base * factor, 2)
+    suggest_price = manual_suggest_value or (
+        math.floor(base * suggest_factor) if base > 0 else 0.0
+    )
+    price = math.floor(float(manual_price)) if manual_price else math.floor(base * factor)
     if price <= 0:
-        price = round(base * factor, 2)
+        price = math.floor(base * factor)
     # 封顶：渔货价不能高过建议售价（人工改价改超了也一样压回来）
-    clamped_by_suggest = bool(suggest_price > 0 and round(price, 2) > suggest_price)
+    clamped_by_suggest = bool(suggest_price > 0 and price > suggest_price)
     if clamped_by_suggest:
         price = suggest_price
     margin = round((price - cost) / price, 4) if price > 0 else 0.0
-    floor = round(base * approve_below, 2) if approve_below > 0 else 0.0
+    floor = math.floor(base * approve_below) if approve_below > 0 else 0.0
     # 人工改价只许往上调（2026-10-10）：填的数低于「低于基准价此比例需审批」那条线
     # 就是**不许改**（不是提醒一下就算）—— 检测台与货品详情页都用这个标记拦提交。
     manual_below_floor = bool(
         manual_price and float(manual_price) > 0 and floor > 0
-        and round(float(manual_price), 2) < floor
+        and math.floor(float(manual_price)) < floor
     )
     return {
         "grade": str(grade or "").upper(),
         "factor": factor,
         "base_price": base,
         "cost": cost,
-        "price": round(price, 2),
+        "price": price,
         "margin": margin,
         "min_margin": min_margin,
         # 低于底价：需主管审批

@@ -46,6 +46,27 @@ TRANSFER_LABELS = {"paid": "已转账", "unpaid": "未转账"}
 # 改单号会在该订单的飞书群里 @ 发送人，来回改会刷屏，也给对账留下多个版本；
 # 填错一次还能救回来，之后就锁死（要再改找管理员）。
 TRACKING_MAX_EDIT = 1
+
+# 渔货栈自营供应链的识别口径（2026-10-15 用户拍板）：
+# 供应商档案编码 YS001，或名称带「渔货栈」——这类订单视为渔货栈自营商品，
+# 推单走「同步订单到渔集发货」（发货单 → 渔集仓库拣货出库），不推给外部供应商。
+SELF_SUPPLY_CHAIN_CODES = ("YS001",)
+SELF_SUPPLY_CHAIN_NAME_KEY = "渔货栈"
+
+
+def is_self_supply_chain(session: Session, order: Order) -> bool:
+    """这张订单是否走渔集发货：渔货栈自营单（origin=self）或供应链是渔货栈（YS001）。"""
+    if (order.origin or "") == "self":
+        return True
+    name = (order.supplier_name or "").strip()
+    if not name:
+        return False
+    if SELF_SUPPLY_CHAIN_NAME_KEY in name:
+        return True
+    from ..models import Supplier
+
+    row = session.scalar(select(Supplier).where(Supplier.name == name))
+    return bool(row and (row.code or "").strip().upper() in SELF_SUPPLY_CHAIN_CODES)
 # 推单状态（order.supplier_status）的展示文案
 SUPPLIER_STATUS_LABELS = {
     "pending": "待推单发货",
@@ -859,3 +880,69 @@ def batch_mark_pushed(session: Session, orders: Iterable[Order]) -> int:
         mark_pushed(session, order)
         count += 1
     return count
+
+
+def apply_tracking_from_wms(
+    session: Session, order: Order, tracking_no: str, operator: str = ""
+) -> dict:
+    """渔集出库发货后**自动回填物流单号**（2026-10-15）。
+
+    渔货栈的订单不走供应商推单 —— 货从渔集仓发。渔集出库核销填了运单号后，
+    由这里把单号写回订单，与 /batches/tracking 手工回填走**同一套事实**：
+    单号 / 物流公司 / 订单状态（已发货）/ 批次明细同步更新、群里 @ 订单发送人、
+    语音播报。返回报告 dict 供渔集审计留痕；任何一步失败不抛异常。
+    """
+    from .notify import sync_tracking_to_group
+    from . import logistics as logistics_service
+    from . import voice as voice_service
+
+    tracking_no = str(tracking_no or "").strip()
+    if not tracking_no:
+        return {"ok": False, "reason": "empty_tracking"}
+    before = (order.tracking_no or "").strip()
+    if before == tracking_no:
+        return {"ok": True, "noop": True, "tracking_no": tracking_no}
+
+    order.tracking_no = tracking_no
+    # 物流公司按单号规则自动认（顺丰速运 / 中通快递 …），与手工回填同一口径
+    order.tracking_company = logistics_service.guess_company(tracking_no)
+    order_state_service.advance(session, order, order_state_service.ORDER_STATE_SHIPPED)
+    # 批次明细的单号一起更新：批次详情 / 导出与订单保持一致
+    from ..models import PushBatchItem
+
+    for item in session.scalars(
+        select(PushBatchItem).where(PushBatchItem.order_id == order.id)
+    ).all():
+        item.tracking_no = tracking_no
+
+    from . import order_log as order_log_service
+
+    order_log_service.log(
+        session,
+        order,
+        order_log_service.ACTION_TRACKING,
+        detail=(
+            f"渔集出库自动回填物流单号：{tracking_no}"
+            + (f"（{order.tracking_company}）" if order.tracking_company else "")
+        ),
+        operator=operator or "渔集出库",
+        commit=True,
+    )
+    voice_service.tracking_event(session, order)
+    # 单号 / 状态 / 批次明细先落库 —— 群通知挂了也不能把回填吞掉
+    session.commit()
+
+    try:
+        status, error = sync_tracking_to_group(order, session=session, is_update=bool(before))
+        session.commit()
+    except Exception:  # noqa: BLE001  通知失败只降级：单号已经保存了
+        session.rollback()
+        logger.warning("渔集回填单号后的群通知失败（order=%s）", order.order_no, exc_info=True)
+        status, error = "failed", "群通知异常（单号已保存）"
+    return {
+        "ok": True,
+        "tracking_no": tracking_no,
+        "company": order.tracking_company,
+        "notified": status,
+        "notify_error": error,
+    }

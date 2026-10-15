@@ -166,6 +166,47 @@ class SelfGoodsDetailTest(unittest.TestCase):
         html2 = self.client.get(f"/self/goods/detail/{plain.item_id}").text
         self.assertNotIn('data-tab="pdpTabPoints"', html2)
 
+    def test_87_three_prices_and_unified_params(self):
+        """2026-10-16 用户拍板：①市场价单独一行放最上面（价格双划线），
+        主行两块并排且建议零售价在左、渔货价在右；②参数表值同一字号（mono-sm 不再放大）；
+        ③页面显示图走 /thumb 缩略图，张数合计 = 主图 + 详情图。"""
+        item = self._make_item(
+            main_image="/media/oh/main.png",
+            images=["/media/oh/g1.png", "/media/oh/g2.png"],
+            detail_images=["/media/oh/d1.png"],
+            market_price=Decimal("244.54"),
+        )
+        html = self.client.get(f"/self/goods/detail/{item.item_id}").text
+        # ① 市场价独立行在最上面 + 双划线；主行两块并排
+        i_line = html.find('class="pdp-price-marketline"')
+        i_main = html.find('class="pdp-price-main"')
+        self.assertGreater(i_line, -1, "市场价要有独立一行")
+        self.assertLess(i_line, i_main, "市场价行要放在主行上面")
+        self.assertIn('<span class="tag">市场价</span>', html)
+        self.assertIn("line-through double", html, "市场价走双划线")
+        self.assertIn("这款货的市场参考价值", html)
+        self.assertIn("渔货栈供货价 · 下单按这个价结算", html)
+        self.assertIn("可以卖的钱 · 建议闲鱼售价不低于此价", html)
+        self.assertNotIn("pdp-price-3", html, "市场价不再占主行格")
+        # 换位：建议零售价在左（前）、渔货价在右（后）
+        i_sug = html.find('class="pdp-price-cell pdp-price-sug"')
+        i_fish = html.find('class="pdp-price-cell pdp-price-fish"')
+        self.assertGreater(i_sug, -1)
+        self.assertGreater(i_fish, -1)
+        self.assertLess(i_sug, i_fish, "建议零售价要在渔货价前面")
+        # 下沿一行不再重复放市场价（挪到主行），毛利与渔货价区间照旧
+        self.assertIn("单件毛利", html)
+        self.assertNotIn("<s>¥", html.split("pdp-price-sub", 1)[-1].split("</div>", 1)[0])
+        # ② 参数表值统一字号（mono-sm 在参数表里不再换大一号的等宽字体）
+        self.assertIn(".pdp-params td.mono-sm", html)
+        # ③ 显示图走 /thumb：主图区 1080、缩略列 240；原图只留给下载包
+        self.assertIn("/thumb/oh/main.png", html)
+        self.assertIn("w=1080", html)
+        self.assertIn("w=240", html)
+        self.assertIn('fetchpriority="high"', html, "第一张大图立即加载当 LCP")
+        # 预填卡「图片」= 主图 1 + 图组 2 + 详情图 1 = 4（合计口径不变）
+        self.assertIn('class="n">4</span><span class="l">图片', html)
+
     def test_82_detail_images_inside_html_get_own_tab(self):
         """1688 抓来的货没有 detail_images 字段：detail_html 里混着的图要捞进「商品详情图」页签，
         文案组里只剩文字（不然分组展示里文案和图又混在一起）。"""
@@ -208,6 +249,24 @@ class SelfGoodsDetailTest(unittest.TestCase):
         for text in ("品牌", "在售闲鱼号", "默认运费", "最近上架", "发货方式", "供应商提示"):
             self.assertIn(text, html, f"渔货栈详情页应有「{text}」")
         self.assertIn("罗技", html)
+
+    def test_15_detail_shows_model_and_spec_from_fish(self):
+        """「规格参数」页签新增型号 / 规格两行 —— 渔集建档维护的商品档案字段
+        经渔枢系统同步过来（2026-10-15 用户拍板），没维护就显示「—」。"""
+        item = self._make_item()
+        html = self.client.get(f"/self/goods/detail/{item.item_id}").text
+        self.assertIn("<th>型号</th>", html, "规格参数要有型号一行")
+        self.assertIn("<th>规格</th>", html, "规格参数要有规格一行")
+        # 新建的货源没有型号规格 → 显示占位；填上以后详情页就该跟着变
+        self.assertIn("<th>型号</th><td", html)
+        with SessionLocal() as s:
+            row = s.get(SupplierItem, item.id)
+            row.model = "MX Master 3S"
+            row.spec = "石墨黑 / 蓝牙"
+            s.commit()
+        html2 = self.client.get(f"/self/goods/detail/{item.item_id}").text
+        self.assertIn("MX Master 3S", html2, "渔集维护的型号要显示在详情页")
+        self.assertIn("石墨黑 / 蓝牙", html2, "渔集维护的规格要显示在详情页")
 
     def test_20_live_shop_count_comes_from_listings(self):
         """在售闲鱼号是统计值：有已发布的铺货记录才计数（右列「在售闲鱼号（个）」）。"""

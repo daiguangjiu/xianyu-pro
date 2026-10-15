@@ -9,19 +9,39 @@ from .config import settings
 
 
 def media_url(local_path: str) -> str:
-    """把本地绝对路径转换成 /media/... 访问地址。
+    """把图片地址统一成 /media/... 访问地址。
 
     带上文件修改时间做版本号：商品图重裁后文件名不变，浏览器会按新地址重新拉图，
     不会继续显示缓存的旧图。
+
+    **库里三种写法都得吃**（2026-10-15 修线上「商品详情页的图全没了」）：
+      · 站内地址 `/media/products/xxx.jpg` —— 渔枢商品档案一直是这么存的；
+      · 相对路径 `products/xxx.jpg` —— 导入 / 同步时拼出来的；
+      · 绝对路径 `/app/data/media/products/xxx.jpg` —— 早期同步脚本写的。
+    以前只认最后一种，前两种会被 `relative_to` 抛错后退化成「只剩文件名」，
+    于是 `/thumb/12889ec1eff5487a.jpg?w=800` 一律 404，图整片消失。
     """
     if not local_path:
         return ""
-    p = Path(local_path)
-    try:
-        rel = p.relative_to(settings.media_path)
-    except ValueError:
-        rel = Path(p.name)
-    url = "/media/" + rel.as_posix()
+    s = str(local_path).strip()
+    # 外链图不在我们服务器手里，原样放行（裁不动）
+    if s.startswith(("http://", "https://", "//", "data:")):
+        return s
+    media_root = Path(settings.media_path)
+    if s.startswith("/media/"):
+        rel = s[len("/media/"):]
+        p = media_root / rel
+    else:
+        p = Path(s)
+        if p.is_absolute():
+            try:
+                rel = p.relative_to(media_root).as_posix()
+            except ValueError:
+                p = Path(p.name)
+                rel = p.as_posix()
+        else:
+            rel = p.as_posix()
+    url = "/media/" + rel
     try:
         stamp = int(p.stat().st_mtime)
     except OSError:

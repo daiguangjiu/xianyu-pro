@@ -105,6 +105,12 @@
         <div class="kv-grid">
           <div class="kv"><span class="k">商品标题</span><span class="v">{{ product.name }}</span></div>
           <div class="kv"><span class="k">品牌</span><span class="v">{{ product.brand or '—' }}</span></div>
+          {# 型号 / 规格（2026-10-15 用户拍板）：渔枢这边没填时，回落到渔集那台货的资料
+             （按「商家编码 == 渔货号」取），两边口径一致，不会一边有一边「—」 #}
+          <div class="kv"><span class="k">型号</span>
+            <span class="v">{{ product.model or (wms_profile or {}).get('model') or '—' }}</span></div>
+          <div class="kv"><span class="k">规格</span>
+            <span class="v">{{ product.spec or (wms_profile or {}).get('spec') or '—' }}</span></div>
           <div class="kv"><span class="k">商家编码</span><span class="v mono-sm">{{ product.code or '—' }}</span></div>
           <div class="kv"><span class="k">承诺发货时效</span><span class="v">{{ product.delivery_days or '—' }} 天</span></div>
         </div>

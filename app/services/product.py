@@ -257,7 +257,7 @@ AFTER_SALE_OPTIONS: list[str] = [
 ]
 
 TEXT_FIELDS = (
-    "name", "code", "category", "brand", "model", "condition", "status",
+    "name", "code", "category", "brand", "model", "spec", "condition", "status",
     "source_type", "audit_status", "audit_note", "listing_id", "listing_url",
     "shipping_mode", "freight_template", "delivery_days", "after_sale",
     "supplier_name", "shop_name", "image_path", "selling_points", "detail_html",
@@ -1466,6 +1466,9 @@ def edit_fields(product: Product) -> dict:
         # 类目走三级下拉，这里给的是「选不出来时的原值」兜底（见编辑页的 ensureCatOption）
         "category": product.category or "",
         "brand": product.brand or "",
+        "model": product.model or "",
+        # 规格（2026-10-15）：渔集建档带过来的商品档案字段，详情页「商品信息」里看
+        "spec": product.spec or "",
         "selling_points": product.selling_points or "",
         # 商品标签：前端按字典标签名回填勾选状态（勾选的拼进 hidden 的 tags 字段）
         "tags": product.tags or "",
@@ -2181,3 +2184,225 @@ def overview(session: Session) -> dict:
         "profit_rate": round(profit_total / sale_total, 4) if sale_total else 0.0,
         "moving": len(best),
     }
+
+
+# ---------------------------------------------------------------- 渔货栈图包导入
+# 2026-10-15 数据需求：本地按「渔货号/一组图/二三四组详情图」整理好的商品图包
+# 导入渔枢自营商品 —— 渔货号即商家编码（code），资料 / 价格 / 库存按渔货号从
+# 渔集（wms）带过来，一组图作商品图片，二三四组作图文详情图片。
+
+# 自营供应链的供应商编码 / 名称（与 push.is_self_supply_chain 同一口径）
+YUSHANGZAI_SUPPLIER_CODE = "YS001"
+YUSHANGZAI_SUPPLIER_NAME = "渔货栈YS001"
+# 一组 = 商品图片，二三四组 = 图文详情图片
+IMPORT_IMAGE_MAX_BYTES = 15 * 1024 * 1024
+
+
+def _save_import_image(fish_code: str, group: str, idx: int,
+                       filename: str, data: bytes) -> str:
+    """导入图片落盘：文件名带渔货号与组号（重导同款直接覆盖，不攒垃圾）。"""
+    from pathlib import Path
+
+    from ..config import settings
+
+    suffix = str(Path(filename or "").suffix or ".jpg").lower()
+    if suffix not in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        suffix = ".jpg"
+    folder = Path(settings.media_path) / "products"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{fish_code.lower()}-g{group}-{idx:02d}{suffix}"
+    (folder / name).write_bytes(data)
+    return f"/media/products/{name}"
+
+
+def _yushangzai_supplier(session: Session) -> tuple[str, int]:
+    """自营供应链（渔货栈YS001）档案：有档案带 id，没有就只记名字。"""
+    from sqlalchemy import select
+
+    row = session.scalar(
+        select(Supplier).where(Supplier.code == YUSHANGZAI_SUPPLIER_CODE)
+    )
+    if row:
+        return str(row.name or YUSHANGZAI_SUPPLIER_NAME), int(row.id or 0)
+    return YUSHANGZAI_SUPPLIER_NAME, 0
+
+
+def import_from_yushangzai(
+    session: Session,
+    fish_code: str,
+    groups: dict[str, list[tuple[str, bytes]]],
+    operator: str = "",
+) -> dict:
+    """按渔货号导入一款渔货栈自营商品（2026-10-15 数据需求）。
+
+    导入规则（用户拍板）：
+    · 目录名 / fish_code = 渔货号 = 商家编码（Product.code，也即新增页的条码）；
+    · 商品标题 / 品牌 / 型号 / 规格 / 三级类目按渔货号从渔集带（存在才带）；
+    · 渔货价 = 渔集渔货价，建议售价 = 渔集建议售价，市场价 = 渔集基准价，
+      库存 = 该渔货号名下台数合计；渔货价同时是自营成本（成本口径一致）；
+    · 一组图 → 商品图片（第一张为主图），二三四组 → 图文详情图片（按组顺序）；
+    · 默认「48 小时内发货」，自营商品直接上架（on_sale / approved）；
+    · 幂等：同渔货号重导 = 覆盖更新（图片按文件名覆盖，不攒垃圾）。
+    """
+    import re as _re
+
+    from sqlalchemy import select
+
+    from wms import intake as wms_intake
+    from wms import models as wms_models
+
+    fish_code = str(fish_code or "").strip().upper()
+    if not _re.fullmatch(r"YS\d{8,12}", fish_code):
+        raise ValueError(f"渔货号格式不对：{fish_code}（应为 YS + 日期 + 流水）")
+    items = wms_intake.find_items_by_fish(session, fish_code)
+    if not items:
+        raise ValueError(f"渔货号 {fish_code} 在渔集货品台账里查不到，先确认再导入")
+
+    src = items[0]
+    total_qty = sum(int(it.qty or 1) for it in items)
+    # 三级类目：优先 1688 对标路径（与渔枢类目管理同名），回落渔集自己的三级路径
+    cat = wms_models.category_1688(str(src.category or "")) or wms_models.category_path(
+        str(src.category or "")
+    )
+    category = cat.replace(" › ", " / ") if cat and cat != "—" else ""
+
+    name = str(src.title or "").strip() or fish_code
+    clash = session.scalar(select(Product).where(Product.name == name, Product.code != fish_code))
+    if clash:
+        name = f"{name}（{fish_code}）"
+
+    selling = float(src.selling_price or 0.0)
+    suggest = float(src.suggest_price or 0.0)
+    base_price = float(src.base_price or 0.0)
+    sup_name, sup_id = _yushangzai_supplier(session)
+
+    product = session.scalar(select(Product).where(Product.code == fish_code))
+    created = product is None
+    if product is None:
+        product = Product(code=fish_code, created_by=operator or "渔货栈导入")
+        session.add(product)
+    product.name = name
+    product.brand = str(src.brand or "")
+    product.model = str(src.model or "")
+    product.spec = str(src.spec or "")
+    if category:
+        product.category = category
+    # 价格口径（2026-10-15 用户拍板方案 B）：渔货价 = 渔集渔货价；
+    # 销售价（建议售价）= 渔集建议售价，没填（渔集 864/866 都没填）→
+    # **市场价 × 0.5 兜底**（与存量老商品「销售价 = 市场价一半」口径一致），
+    # 市场价也没有才回落渔货价 —— 保证导入出来的商品有毛利空间，不再销售价=渔货价
+    fallback_price = round(base_price * SUGGEST_FALLBACK_RATIO, 2)
+    product.fish_price = selling
+    product.price = suggest or fallback_price or selling
+    product.original_price = base_price
+    product.cost_amount = selling
+    product.stock = total_qty
+    product.stock_enabled = True
+    product.delivery_days = "48 小时内发货"
+    product.source_type = "self_operated"
+    product.supplier_name = sup_name
+    if sup_id:
+        product.supplier_id = sup_id
+    product.status = "on_sale"
+    product.audit_status = "approved"
+    product.updated_at = now()
+
+    # 图片：一组 = 商品图片（第一张主图）；二三四组 = 详情图按组顺序
+    main_groups = sorted(groups.get("1") or [], key=lambda x: x[0])
+    detail_groups = [sorted(groups.get(k) or [], key=lambda x: x[0]) for k in ("2", "3", "4")]
+    if main_groups:
+        urls = [
+            _save_import_image(fish_code, "1", i, fn, data)
+            for i, (fn, data) in enumerate(main_groups, start=1)
+        ]
+        product.image_path = urls[0]
+        product.images = json.dumps(urls[1:], ensure_ascii=False)
+    detail_urls: list[str] = []
+    for gi, files in enumerate(detail_groups, start=2):
+        detail_urls.extend(
+            _save_import_image(fish_code, str(gi), i, fn, data)
+            for i, (fn, data) in enumerate(files, start=1)
+        )
+    if detail_urls:
+        product.detail_html = "".join(
+            f'<p><img src="{u}" /></p>' for u in detail_urls
+        )
+    # 同渔货号下多 SKU 默认分拆（2026-10-15 用户拍板）：渔集那边一款多台各一个
+    # 进货货号，渔枢这边就按台分出规格行，价格 / 库存各算各的
+    sku_count = split_product_skus(session, product, items=items)
+    session.commit()
+
+    return {
+        "ok": True,
+        "created": created,
+        "product_id": product.id,
+        "code": product.code,
+        "name": product.name,
+        "category": product.category,
+        "brand": product.brand,
+        "model": product.model,
+        "spec": product.spec,
+        "fish_price": product.fish_price,
+        "price": product.price,
+        "original_price": product.original_price,
+        "stock": product.stock,
+        "skus": sku_count,
+        "main_images": len(main_groups),
+        "detail_images": len(detail_urls),
+        "url": f"/products/{product.code}",
+    }
+
+
+# 同渔货号下多 SKU 分拆（2026-10-15 用户拍板）：一个渔货号在渔集名下有多个条码商品
+# （多个进货货号）时，渔枢商品默认分拆出对应的规格行；一款只一条记录的（哪怕一台
+# 带 20 台）不拆。这一款用户点名不拆：一条记录 20 台共用一个条码。
+SKU_SPLIT_EXCLUDED = {"YS202610120001"}
+
+# 销售价兜底系数（2026-10-15 用户拍板方案 B）：渔集「建议售价」没填时，
+# 销售价 = 市场价（基准价）× 0.5 —— 与存量老商品口径一致，保证有毛利空间
+SUGGEST_FALLBACK_RATIO = 0.5
+
+
+def split_product_skus(session: Session, product: Product,
+                       items: list | None = None) -> int:
+    """把渔货号名下的多条码商品分拆成渔枢商品的规格行，返回规格数（0 = 没拆）。
+
+    · 渔集里 1 个条码商品 = 1 条规格：规格名取 规格 → 型号 → 显示编码 → 条码；
+    · 价格各带各的（渔货价 = 渔集渔货价、建议售价、市场价 = 基准价），库存 = 台数；
+    · 一台带 N 台（qty>1）**不拆台**，还是一条规格、库存 N；
+    · 幂等：先清掉该商品现有规格再重建，SKU 编码由 ``renumber_sku_codes``
+      按「商家编码-01 / -02」重排，总库存回算成各规格之和。
+    """
+    fish_code = str(product.code or "").strip().upper()
+    if not fish_code:
+        return 0
+    if fish_code in SKU_SPLIT_EXCLUDED:
+        return 0
+    if items is None:
+        from wms import intake as wms_intake
+
+        items = wms_intake.find_items_by_fish(session, fish_code)
+    if len(items or []) <= 1:
+        return 0
+    for sku in list_skus(session, int(product.id or 0)):
+        session.delete(sku)
+    session.flush()
+    for it in items:
+        selling = float(it.selling_price or 0.0)
+        spec = (str(it.spec or "").strip() or str(it.model or "").strip()
+                or str(it.display_code or "").strip() or str(it.barcode or ""))
+        session.add(ProductSku(
+            product_id=int(product.id or 0),
+            spec=spec[:255],
+            price=float(it.suggest_price or 0.0)
+            or round(float(it.base_price or 0.0) * SUGGEST_FALLBACK_RATIO, 2)
+            or selling,
+            cost_amount=selling,
+            fish_price=selling,
+            market_price=float(it.base_price or 0.0),
+            stock=max(0, int(it.qty or 1)),
+        ))
+    session.flush()
+    renumber_sku_codes(session, product)
+    sync_stock_from_skus(session, product)
+    return len(items)

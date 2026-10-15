@@ -35,42 +35,51 @@
   <div class="card">
     <h2>报修信息</h2>
     <p class="d">
-      C1 线上（京东 / 400）<b>必须填凭证号</b>；C2 线下（授权网点）<b>必须留网点电话</b> —— 送修前先电话确认受理。
+      通道固定三选：品牌官方寄回维修 / 品牌到家维修 / 自行维修；
+      <b>SN 序列号与故障描述必填</b>（故障描述是争议时的唯一凭证，写清楚现象）。
     </p>
     <form method="post" action="/wms/repairs">
       <input type="hidden" name="return_to" value="/wms/repairs/new?item_id={{ item.id if item else 0 }}">
-      {% if item %}
-        <input type="hidden" name="item_id" value="{{ item.id }}">
-      {% else %}
-      <div class="field"><label for="r-item">要报修的货品</label>
-        <select id="r-item" name="item_id" required>
-          {% for it in candidates %}<option value="{{ it.id }}">{{ it.display_code }} · {{ it.title }}</option>{% endfor %}
-        </select></div>
+      <input type="hidden" name="item_id" id="r-item-id" value="{{ item.id if item else '' }}">
+      {% if not item %}
+      {# 货品模糊搜索（2026-10-15 用户拍板）：渔货号 / 条码 / 商品名都能搜，点一下带入 #}
+      <div class="field" style="position:relative">
+        <label for="r-item-q">要报修的货品（渔货号 / 条码 / 商品名 模糊搜索）</label>
+        <input id="r-item-q" type="search" autocomplete="off"
+               placeholder="YS2026… / QC… / 对讲机，输 2 个字就搜">
+        <div id="r-item-list" style="display:none;position:absolute;z-index:30;left:0;right:0;top:100%;
+             background:var(--c-card,#fff);border:1px solid var(--c-border,#e5e7eb);border-radius:8px;
+             max-height:260px;overflow:auto;box-shadow:0 8px 24px rgba(0,0,0,.08)"></div>
+      </div>
+      <div class="field"><label>已选货品</label>
+        <div id="r-item-picked" class="mono" style="min-height:20px">（还没选）</div></div>
       {% endif %}
       <div class="field-row auto">
-        <div class="field"><label for="r-ch">报修渠道</label>
+        <div class="field"><label for="r-ch">维修通道</label>
           <select id="r-ch" name="channel">{% for v, t in channels %}<option value="{{ v }}">{{ t }}</option>{% endfor %}</select></div>
         <div class="field grow"><label for="r-v">渠道 / 网点</label>
-          <input id="r-v" type="text" name="vendor" placeholder="京东服务 / XX 授权网点" required></div>
-        <div class="field"><label for="r-t">凭证号（C1 必填）</label>
-          <input id="r-t" type="text" name="ticket_no" placeholder="工单号 / 寄修单号"></div>
+          <input id="r-v" type="text" name="vendor" placeholder="如：苹果官方售后 / 京东服务（选填）"></div>
+        <div class="field"><label for="r-t">凭证号</label>
+          <input id="r-t" type="text" name="ticket_no" placeholder="工单号 / 寄修单号（选填）"></div>
       </div>
       <div class="field-row auto">
-        <div class="field"><label for="r-sn">序列号 / IMEI</label>
+        <div class="field"><label for="r-sn">SN 序列号 / IMEI</label>
           <input id="r-sn" type="text" name="serial_no" value="{{ item.serial_no or '' }}" required></div>
-        <div class="field"><label for="r-cn">网点联系人</label>
+        <div class="field"><label for="r-cn">联系方式（联系人）</label>
           <input id="r-cn" type="text" name="contact_name" placeholder="张师傅"></div>
-        <div class="field"><label for="r-cp">网点电话（C2 必填）</label>
+        <div class="field"><label for="r-cp">联系电话</label>
           <input id="r-cp" type="text" name="contact_phone" placeholder="寄修前先电话确认受理"></div>
       </div>
       <div class="field-row auto">
         <div class="field"><label for="r-d">承诺时效（天）</label>
           <input id="r-d" type="number" name="promise_days" value="15" min="1"></div>
-        <div class="field"><label for="r-p">垫付金额</label>
-          <input id="r-p" type="number" step="0.01" name="paid_amount" value="0"></div>
-        <div class="field grow"><label for="r-a">网点地址</label>
-          <input id="r-a" type="text" name="contact_addr" placeholder="寄修地址（选填）"></div>
+        <div class="field"><label for="r-rf">维修费（¥）</label>
+          <input id="r-rf" type="number" step="0.01" name="repair_fee" value="0"></div>
+        <div class="field"><label for="r-ef">快递费（¥，含寄回）</label>
+          <input id="r-ef" type="number" step="0.01" name="express_fee" value="0"></div>
       </div>
+      <div class="field"><label for="r-a">寄修地址（选填）</label>
+        <input id="r-a" type="text" name="contact_addr" placeholder="寄修地址"></div>
       <div class="field"><label for="r-f">故障描述（争议时是唯一凭证）</label>
         <textarea id="r-f" name="fault_desc" rows="3" required placeholder="如：开机不充电，插充电器无反应，电池鼓包"></textarea></div>
       <button class="btn primary"><i class="bi bi-wrench-adjustable-circle"></i> 开单</button>
@@ -78,4 +87,75 @@
   </div>
 </div>
 {% endif %}
+{% endblock %}
+
+{% block head_extra %}
+<style>
+  #r-item-list .si{display:flex;flex-direction:column;gap:2px;padding:8px 12px;cursor:pointer;
+    border-bottom:1px solid var(--c-border,#f0f0f0)}
+  #r-item-list .si:hover{background:var(--c-primary-soft,rgba(13,127,116,.08))}
+  #r-item-list .si .t{font-size:13px;color:var(--c-ink,#111)}
+  #r-item-list .si .m{font-size:11.5px;color:var(--c-muted,#6b7280)}
+</style>
+<script>
+(function () {
+  var q = document.getElementById('r-item-q');
+  if (!q) return;
+  var box = document.getElementById('r-item-list');
+  var picked = document.getElementById('r-item-picked');
+  var hidden = document.getElementById('r-item-id');
+  var sn = document.getElementById('r-sn');
+  var timer = null, last = '';
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+    });
+  }
+  function pick(it) {
+    hidden.value = it.id;
+    picked.innerHTML = '<a href="/wms/items/' + it.id + '">' + esc(it.display_code || it.barcode) + '</a> · '
+      + esc(it.title) + (it.fish_code ? ' · ' + esc(it.fish_code) : '');
+    if (sn && it.serial_no && !sn.value) sn.value = it.serial_no;
+    box.style.display = 'none';
+    q.value = it.display_code || it.barcode;
+  }
+  function render(items) {
+    if (!items.length) {
+      box.innerHTML = '<div class="si"><span class="m">没搜到，换个词（渔货号 / 条码 / 商品名）再试</span></div>';
+      box.style.display = '';
+      return;
+    }
+    box.innerHTML = items.map(function (it) {
+      return '<div class="si" data-id="' + it.id + '"><span class="t">' + esc(it.title || '（未命名）')
+        + '</span><span class="m">' + esc(it.display_code || '') + ' · ' + esc(it.barcode)
+        + (it.fish_code ? ' · ' + esc(it.fish_code) : '')
+        + (it.serial_no ? ' · SN ' + esc(it.serial_no) : '') + '</span></div>';
+    }).join('');
+    box.style.display = '';
+    Array.prototype.forEach.call(box.querySelectorAll('.si'), function (el) {
+      el.addEventListener('mousedown', function (ev) {
+        ev.preventDefault();
+        var id = Number(el.getAttribute('data-id'));
+        var it = items.filter(function (x) { return x.id === id; })[0];
+        if (it) pick(it);
+      });
+    });
+  }
+  q.addEventListener('input', function () {
+    clearTimeout(timer);
+    var kw = q.value.trim();
+    if (kw === last) return;
+    timer = setTimeout(function () {
+      last = kw;
+      if (kw.length < 1) { box.style.display = 'none'; return; }
+      fetch('/wms/api/item/search?q=' + encodeURIComponent(kw))
+        .then(function (r) { return r.json(); })
+        .then(function (d) { render(d.items || []); })
+        .catch(function () { box.style.display = 'none'; });
+    }, 250);
+  });
+  q.addEventListener('blur', function () { setTimeout(function () { box.style.display = 'none'; }, 200); });
+})();
+</script>
 {% endblock %}

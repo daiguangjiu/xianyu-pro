@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Iterable
@@ -82,6 +83,32 @@ def next_item_code(db: Session, category_id: str | None) -> str:
         if digits:
             used = max(used, int(digits))
     return f"{prefix}{used + 1:04d}"
+
+
+# ================= 渔货号（2026-10-15）=================
+# 渔货号是渔集建档时给**商品款**编的号：``YS + 建档日期(8 位) + 当天 4 位流水``，共 14 位
+# （口径见渔集 wms/intake.py 的 next_fish_code()，那边改了这里要跟着改）。
+# 渔货栈的「商家编码」跟渔枢系统商品编码、渔集渔货号是同一个号 —— 渔枢「上架到渔货栈」
+# 回传时写进 supplier_items.item_code（见 app/services/sourcing_publish.py）。
+_FISH_CODE_RE = re.compile(r"^YS\d{12}$")
+
+
+def is_fish_code(code: object) -> bool:
+    """这串编码是不是渔集发的渔货号（``YS`` + 12 位数字）。"""
+    return bool(_FISH_CODE_RE.match(str(code or "").strip().upper()))
+
+
+def fish_code_of(item: SupplierItem | None) -> str:
+    """这款货在渔集的渔货号；**不是渔集建档的货一律返回空串**。
+
+    自录入 / 外部档口的货，商家编码是 ``YHZ-…`` 那一套（见 :func:`next_item_code`），
+    还有的是档口自己编的号（如 ``QCHA…`` 那种条码）—— 都不是渔货号。
+    宁可空着，也不能把条码 / 流水号当成渔货号显示出去。
+    """
+    if item is None:
+        return ""
+    code = str(getattr(item, "item_code", "") or "").strip().upper()
+    return code if is_fish_code(code) else ""
 
 
 def _normalize_images(images: Iterable[str] | None) -> list[str]:

@@ -9,13 +9,14 @@
 {% endif %}
 
 <div class="grid grid-4">
-  <div class="stat"><div class="label">通道</div><div class="value sm">{{ order.channel }}</div>
+  <div class="stat"><div class="label">通道</div><div class="value sm">{{ wms_repair_channel_label(order.channel) }}</div>
     <div class="hint">{{ order.vendor }}</div></div>
-  <div class="stat"><div class="label">状态</div><div class="value sm">{{ order.status }}</div></div>
-  <div class="stat {{ 'danger' if order.paid_amount else '' }}"><div class="label">垫付金额</div>
-    <div class="value">¥{{ money(order.paid_amount) }}</div><div class="hint">在途资产 + 垫付资金</div></div>
+  <div class="stat"><div class="label">状态</div><div class="value sm">{{ wms_repair_status_label(order.status) }}</div></div>
+  <div class="stat {{ 'danger' if order.paid_amount else '' }}"><div class="label">维修费 / 快递费</div>
+    <div class="value">¥{{ money(order.repair_fee) }} / ¥{{ money(order.express_fee) }}</div>
+    <div class="hint">垫付合计 ¥{{ money(order.paid_amount) }} · 在途资产</div></div>
   <div class="stat"><div class="label">承诺时效</div><div class="value">{{ order.promise_days }} 天</div>
-    <div class="hint">{{ order.promise_date | dt if order.promise_date else '未送修' }}</div></div>
+    <div class="hint">{{ order.promise_date | dt if order.promise_date else '未送出' }}</div></div>
 </div>
 
 <div class="grid grid-2">
@@ -23,9 +24,9 @@
     <h2>工单信息</h2>
     <div class="kv">
       <b>货品</b><span>{% if item %}<a href="/wms/items/{{ item.id }}">{{ item.display_code }}</a> · {{ item.title }}{% else %}—{% endif %}</span>
-      <b>序列号 / IMEI</b><span class="mono">{{ order.serial_no or '—' }}</span>
+      <b>SN 序列号 / IMEI</b><span class="mono">{{ order.serial_no or '—' }}</span>
       <b>凭证号</b><span class="mono">{{ order.ticket_no or '—' }}</span>
-      <b>网点联系人</b><span>{{ order.contact_name or '—' }} {{ order.contact_phone or '' }}</span>
+      <b>联系方式</b><span>{{ order.contact_name or '—' }} {{ order.contact_phone or '' }}</span>
       <b>运单号</b><span class="mono">{{ order.waybill_no or '—' }}</span>
     </div>
     <h3>故障描述</h3>
@@ -36,15 +37,29 @@
 
   <div class="card">
     <h2>流转动作</h2>
+    {% if order.status == 'open' %}
     <form method="post" action="/wms/repairs/{{ order.id }}/actions">
       <input type="hidden" name="action" value="send">
       <div class="field"><label for="w-no">送修运单号</label><input id="w-no" type="text" name="waybill_no" value="{{ order.waybill_no or '' }}"></div>
-      <button class="btn primary">登记送修（开始时效倒计时）</button>
+      <button class="btn primary">登记送出（开始时效倒计时）</button>
     </form>
+    {% endif %}
+    {% if order.status == 'sent' %}
+    {# 寄回（2026-10-15 用户拍板）：货还在在途回程，只记单号不搬账 #}
     <form method="post" action="/wms/repairs/{{ order.id }}/actions">
       <input type="hidden" name="action" value="return">
-      <button class="btn primary"><i class="bi bi-tools"></i> 登记修回（强制重新检测定级）</button>
+      <div class="field"><label for="b-no">回程运单号</label><input id="b-no" type="text" name="waybill_no" value="{{ order.waybill_no or '' }}"></div>
+      <button class="btn primary"><i class="bi bi-tools"></i> 登记寄回（在途回程，先记单号）</button>
     </form>
+    {% endif %}
+    {% if order.status == 'returned' %}
+    {# 确认再入库（2026-10-15 用户拍板）：货真回到仓里才搬账 + 强制重检 #}
+    <form method="post" action="/wms/repairs/{{ order.id }}/actions"
+          onsubmit="return confirm('确认这台货已经回到仓里？\n\n· 货品搬回待检仓（强制重新检测定级）\n· 确认后才能结案 / 转拆件\n\n确定？')">
+      <input type="hidden" name="action" value="restock">
+      <button class="btn primary"><i class="bi bi-box-seam"></i> 确认再入库（搬账 + 强制重检）</button>
+    </form>
+    {% endif %}
     <form method="post" action="/wms/repairs/{{ order.id }}/actions">
       <input type="hidden" name="action" value="close">
       <div class="field"><label for="c-n">结案说明</label><input id="c-n" type="text" name="note" placeholder="如：修好复检为 A 档"></div>
@@ -63,9 +78,10 @@
       <button class="btn danger"><i class="bi bi-cpu"></i> 结案并转拆机件残值</button>
     </form>
     <div class="note">
-      货<b>还在外面（在途）</b>时不能转 —— 手上有货才拆得成；转完去「拆机件残值」登记主板 / 屏 / 电池，
+      状态流：送出 → 寄回（在途回程，只记单号）→ <b>确认再入库</b>（货真回仓才搬账）→ 结案 / 转拆件。<br>
+      货<b>还没确认回仓</b>时不能转拆件 —— 手上有货才拆得成；转完去「拆机件残值」登记主板 / 屏 / 电池，
       没有残值明细这台货关不了工时。<br>
-      修回 / 撤单回仓<b>必须重新检测定级</b>，不得沿用送修前等级（维修过程可能引入新伤）。
+      确认再入库 / 撤单回仓<b>必须重新检测定级</b>，不得沿用送修前等级（维修过程可能引入新伤）。
     </div>
   </div>
 </div>

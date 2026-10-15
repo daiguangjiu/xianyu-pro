@@ -599,6 +599,9 @@ def publish(db, product: Product, actor: str = "") -> tuple[bool, str]:
     images = [img for img in (product.image_list or []) if img]
     item.images = images or None
     item.brand = (product.brand or "").strip() or None
+    # 型号 / 规格（2026-10-15）：渔集建档带过来的商品档案字段，一并同步给渔货栈详情页
+    item.model = (product.model or "").strip() or None
+    item.spec = (product.spec or "").strip() or None
     item.selling_points = (product.selling_points or "").strip() or None
     item.detail_html = (product.detail_html or "").strip() or None
     item.supplier_tip = (product.supplier_tip or "").strip() or None

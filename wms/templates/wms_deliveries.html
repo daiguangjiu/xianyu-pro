@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% import "wms_bits.html" as bits %}
+{% from "_pager.html" import pager %}
+{% block title %}发货管理{% endblock %}
+{% block actions %}
+  <a class="btn" href="/wms/outbound">出库管理</a>
+{% endblock %}
+
+{% block content %}
+{# 渔货栈自营商品的发货单（渔枢中台 → 渔集，2026-10-15 定稿字段）：
+   渔枢推单不走外部供应商，发货单同步过来，仓库按单拣货出库；
+   出库核销后物流单号自动回传渔枢发货页 #}
+
+<section class="grid grid-3">
+  <div class="stat"><div class="label">待拣货</div><div class="value">{{ pending_n }} <span class="hint">单</span></div></div>
+  <div class="stat"><div class="label">已发货</div><div class="value">{{ shipped_n }} <span class="hint">单</span></div></div>
+  <div class="stat"><div class="label">全部发货单</div><div class="value">{{ total }} <span class="hint">单</span></div></div>
+</section>
+
+<div class="card">
+  <form class="filters" method="get" action="/wms/deliveries">
+    <div class="field grow"><label>关键词</label>
+      <input type="search" name="q" value="{{ filters.q }}" placeholder="发货单号 / 渔枢订单号 / 平台单号 / 收货人 / 手机号 / 运单号"></div>
+    <div class="field"><label>状态</label>
+      <select name="status">
+        <option value="">全部</option>
+        {% for v, t in statuses %}<option value="{{ v }}" {{ 'selected' if filters.status == v }}>{{ t }}</option>{% endfor %}
+      </select></div>
+    <button class="btn">筛选</button>
+  </form>
+</div>
+
+<div class="card flush">
+  <h2>发货单（{{ total }}）</h2>
+  {% if rows %}
+  <div class="table-wrap"><table>
+    <thead><tr>
+      <th>发货单号</th><th>平台 / 平台单号</th><th>店铺</th><th>收货人</th>
+      <th>地址（省 / 市 / 区县 / 详细）</th><th>要求发货时限</th>
+      <th class="num">售价</th><th class="num">成交金额</th><th class="num">运费</th>
+      <th>类型</th><th>备注</th><th>状态</th><th>出库 / 物流</th><th class="num">版本</th>
+    </tr></thead>
+    <tbody>
+    {% for d in rows %}
+      {% set overdue = d.status == 'pending' and d.ship_deadline and d.ship_deadline < now_dt %}
+      <tr>
+        <td class="nowrap mono">{{ d.delivery_no }}</td>
+        <td class="nowrap">
+          <span class="badge">{{ d.platform_code }}</span>
+          <a class="mono" href="/orders/{{ d.order_no }}" title="渔枢订单（平台原始单号，回传发货要用）">{{ d.platform_order_no }}</a>
+        </td>
+        <td class="nowrap">{{ d.shop_code or '—' }}</td>
+        <td class="nowrap">{{ d.receiver_name or '—' }}<br><span class="muted mono">{{ d.receiver_phone or '—' }}</span></td>
+        <td class="wrap2"><span class="clamp2">{{ d.receiver_province }} {{ d.receiver_city }} {{ d.receiver_district }} {{ d.receiver_town }}{{ ' ' if d.receiver_town }}{{ d.receiver_address or '' }}</span></td>
+        <td class="nowrap">
+          {{ d.ship_deadline | dt('%m-%d %H:%M') if d.ship_deadline else '—' }}
+          {% if overdue %}<span class="badge failed" title="超过要求发货时限">已超时</span>{% endif %}
+        </td>
+        <td class="num">{{ bits.money_cell(d.order_sales_price) }}</td>
+        <td class="num">{{ bits.money_cell(d.order_cj_amount) }}</td>
+        <td class="num">{{ bits.money_cell(d.order_yunfei) }}</td>
+        <td class="nowrap">
+          {{ d.delivery_type }} · {{ d.order_type }}
+          {% if d.urgent_flag %}<span class="badge failed">加急</span>{% endif %}
+        </td>
+        <td class="wrap2"><span class="clamp2 muted">{{ d.remark or '—' }}</span></td>
+        <td class="nowrap">
+          <span class="badge {{ 'done' if d.status == 'shipped' else ('failed' if d.status == 'cancelled' else 'pending') }}">{{ status_label.get(d.status, d.status) }}</span>
+        </td>
+        <td class="nowrap">
+          {% if d.outbound_id %}
+            <a href="/wms/outbound/{{ d.outbound_id }}">出库单</a>
+            {% if d.tracking_no %}<br><span class="mono muted">{{ d.express_company or '' }} {{ d.tracking_no }}</span>
+            {% else %}<br><span class="muted">还没填运单号</span>{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="num muted">v{{ d.version }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}{{ bits.empty('还没有发货单：渔枢那边推单（渔货栈自营商品）后会同步到这里') }}{% endif %}
+</div>
+
+{# 全站统一分页组件（templates/_pager.html），翻页时筛选条件原样带着走 #}
+{{ pager(page, pages, '/wms/deliveries', {'q': filters.q, 'status': filters.status}, total, size=page_size) }}
+{% endblock %}

@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1271,12 +1272,59 @@ def order_detail(request: Request, order_id: int, db: Session = Depends(get_db))
     nature_map = shop_service.nature_of_accounts(db)
     shop_nature = shop_service.account_nature(nature_map, order.xianyu_account)
     shop_coach = (nature_map.get((order.xianyu_account or "").strip()) or {}).get("coach", "")
+    # 关联渔货号（2026-10-15）：飞书订单模板里「YS + 日期 + 流水」那串 —— 报单的人
+    # 把渔集的渔货号抄进模板，这里直接抠出来，点进去就是渔集的货品台账。
+    # 可能写多个（一个订单发几款），去重保序。
+    fish_codes: list[str] = []
+    if msg and getattr(msg, "raw_text", ""):
+        seen: set[str] = set()
+        for code in re.findall(r"\bYS\d{8,12}\b", str(msg.raw_text)):
+            if code not in seen:
+                seen.add(code)
+                fish_codes.append(code)
+    # 渔集发货单 / 出库单（渔货栈自营商品同步发货，2026-10-15）：有没有同步过
+    # 口径：origin=self 的渔货栈自营单，或供应链是渔货栈（YS001 / 名称带「渔货栈」）
+    is_self_supply = push_service.is_self_supply_chain(db, order)
+    wms_outbound: dict | None = None
+    if is_self_supply:
+        try:
+            from wms.db import SessionLocal as _WmsSession
+            from wms.models import (
+                OUT_SALE as _WMS_OUT_SALE,
+                OUTBOUND_STATUS_CANCELLED as _WMS_OUT_CANCELLED,
+                WmsOutboundOrder as _WmsOutboundOrder,
+            )
+
+            with _WmsSession() as _ws:
+                _wrow = _ws.scalar(
+                    select(_WmsOutboundOrder)
+                    .where(
+                        _WmsOutboundOrder.type == _WMS_OUT_SALE,
+                        _WmsOutboundOrder.target_no == order.order_no,
+                        _WmsOutboundOrder.status != _WMS_OUT_CANCELLED,
+                    )
+                    .order_by(_WmsOutboundOrder.id.desc())
+                )
+            if _wrow:
+                wms_outbound = {
+                    "id": _wrow.id,
+                    "order_no": _wrow.order_no,
+                    "status": _wrow.status,
+                }
+        except Exception:
+            logger.debug("读取渔集出库单失败（order=%s）", order.order_no, exc_info=True)
+            wms_outbound = None
     return render(
         "order_detail.html",
         request,
         heading=f"订单 {order.order_no}",
         sub=f"{order.platform} · 置信度 {order.parse_confidence}",
         order=order,
+        fish_codes=fish_codes,
+        # 渔货栈自营商品（供应链 = 渔货栈YS001 / 自营单）：推单按钮换「同步到渔集发货」
+        is_self_supply=is_self_supply,
+        # 渔集发货单 / 出库单：同步过就显示出库单号与入口
+        wms_outbound=wms_outbound,
         images=images,
         batches=batches,
         msg=msg,
@@ -2796,6 +2844,127 @@ def shipping_stats(
     )
 
 
+@router.post("/orders/{order_id}/sync-wms")
+async def order_sync_wms(order_id: int, request: Request, db: Session = Depends(get_db)):
+    """渔货栈自营商品 → 渔集「发货管理」（2026-10-15 定稿）。
+
+    口径：origin=self 的渔货栈自营单，**或供应链是渔货栈（YS001 / 名称带
+    「渔货栈」）的订单**，视为渔货栈自营商品 —— 推单不走外部供应商：
+    ① 渔集建一张**发货单**（主表字段按用户定稿：平台 / 平台单号 / 店铺 /
+       收货四级地址 / 发货时限 / 金额参考 / 备注 / 版本号）；
+    ② 再建一张销售出库单挂到发货单上，仓库按单拣货发货；
+    ③ 出库核销填了运单号会自动回填到发货页（已推单记录）。
+    幂等：发货单按平台原始单号幂等，重推字段有变 version 递增。
+    """
+    order = db.get(Order, order_id)
+    if not order:
+        raise HTTPException(404, "订单不存在")
+    if not push_service.is_self_supply_chain(db, order):
+        return _redirect(
+            f"/orders/{order_id}",
+            "只有渔货栈自营商品（自营单 / 供应链是渔货栈YS001）才同步到渔集发货，"
+            "其它订单走推单流程",
+            "warn",
+        )
+    if order.is_refund or order.is_recalled:
+        return _redirect(f"/orders/{order_id}", "退单 / 撤回的订单不同步发货", "warn")
+    try:
+        from wms.db import SessionLocal as _WmsSession
+        from wms.models import WmsOutboundOrder as _WmsOutboundOrder
+        from wms import delivery as wms_delivery_service
+        from wms import outbound as wms_outbound_service
+    except Exception:
+        logger.exception("渔集子系统不可用")
+        return _redirect(
+            f"/orders/{order_id}", "渔集子系统不可用，暂时无法同步发货", "danger"
+        )
+
+    codes: list[str] = []
+    if order.product_id:
+        _p = db.get(Product, order.product_id)
+        if _p and (_p.code or "").strip():
+            codes.append(str(_p.code).strip())
+    _shop = shop_service.find_by_name(db, order.xianyu_account)
+
+    with _WmsSession() as ws:
+        # 发货单：按平台原始单号幂等，重推字段有变 version 递增
+        delivery_row, changed = wms_delivery_service.upsert_from_hub(
+            ws,
+            wms_delivery_service.build_payload(order, shop_code=_shop.code if _shop else ""),
+            operator=_username(request) or "渔枢同步",
+        )
+        if delivery_row.outbound_id and not changed:
+            _ob = ws.get(_WmsOutboundOrder, delivery_row.outbound_id)
+            return _redirect(
+                f"/orders/{order_id}",
+                f"这张订单已经同步过：发货单 {delivery_row.delivery_no}"
+                + (f" / 出库单 {_ob.order_no}" if _ob else "")
+                + "（不会重复建单）",
+                "warn",
+            )
+        outbound_row = None
+        if delivery_row.outbound_id:
+            # 重推只更新发货单字段（version 递增），出库单照旧不重建
+            _ob = ws.get(_WmsOutboundOrder, delivery_row.outbound_id)
+            order_log_service.log(
+                db,
+                order,
+                order_log_service.ACTION_STATE,
+                detail=(
+                    f"渔集发货单已更新：{delivery_row.delivery_no} v{delivery_row.version}"
+                    + (f"（出库单 {_ob.order_no} 照旧）" if _ob else "")
+                ),
+                operator=_username(request),
+                commit=True,
+            )
+            return _redirect(
+                f"/orders/{order_id}",
+                f"重推生效：发货单 {delivery_row.delivery_no} 已更新到 v{delivery_row.version}"
+                "（出库单照旧，不重复建）",
+            )
+        remark_parts = [
+            f"产品：{order.product_name or '-'}",
+            f"规格：{order.spec or '-'}",
+            f"数量：{order.quantity or 1} 台",
+        ]
+        if order.buyer_nick:
+            remark_parts.append(f"买家：{order.buyer_nick}")
+        if codes:
+            remark_parts.append("渔货号：" + "、".join(codes))
+        remark_parts.append(f"发货单 {delivery_row.delivery_no}")
+        outbound_row = wms_outbound_service.create(
+            ws,
+            {
+                "type": "SALE",
+                "target_no": order.order_no,
+                "warehouse_code": "SALE",
+                "receiver_name": order.receiver_name or "",
+                "receiver_phone": order.receiver_phone or "",
+                "receiver_addr": order.receiver_address or "",
+                "remark": "；".join(remark_parts),
+            },
+            operator=_username(request) or "渔枢同步",
+        )
+        wms_delivery_service.attach_outbound(ws, delivery_row, outbound_row)
+    order_log_service.log(
+        db,
+        order,
+        order_log_service.ACTION_STATE,
+        detail=(
+            f"已同步渔集发货：发货单 {delivery_row.delivery_no}"
+            f" / 出库单 {outbound_row.order_no}"
+        ),
+        operator=_username(request),
+        commit=True,
+    )
+    return _redirect(
+        f"/orders/{order_id}",
+        f"已同步到渔集发货管理：发货单 {delivery_row.delivery_no}"
+        f" / 出库单 {outbound_row.order_no}，仓库按单拣货发货"
+        "（出库后物流单号自动回填到发货页）",
+    )
+
+
 @router.post("/batches/tracking/{order_id}")
 async def order_tracking_update(order_id: int, request: Request, db: Session = Depends(get_db)):
     """维护已推单记录的物流单号；填写后自动在群里同步给订单发送人。"""
@@ -3360,6 +3529,63 @@ async def product_upload_image(request: Request):
     return JSONResponse(
         {"ok": True, "url": f"/media/products/{filename}", "size": len(data)}
     )
+
+
+@router.post("/products/import-yushangzai")
+async def product_import_yushangzai(request: Request, db: Session = Depends(get_db)):
+    """渔货栈图包导入（2026-10-15 数据需求）。
+
+    multipart：``fish_code``（渔货号，如 YS202610080003）+ ``g1``~``g4``
+    多文件字段 —— 一组 = 商品图片，二三四组 = 图文详情图片。
+    资料按渔货号从渔集带，详见 ``product_service.import_from_yushangzai``。
+    """
+    user = current_user(request)
+    try:
+        form = await request.form()
+    except Exception as exc:  # noqa: BLE001 上传中断给一句人话
+        log_id = error_log_service.record_request(request, exc, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": f"表单没传完整（{type(exc).__name__}）",
+             "log_id": log_id},
+            status_code=400,
+        )
+    fish_code = str(form.get("fish_code") or "").strip()
+    if not fish_code:
+        return JSONResponse({"ok": False, "error": "缺渔货号（fish_code）"},
+                            status_code=400)
+    groups: dict[str, list[tuple[str, bytes]]] = {}
+    for key, upload in form.multi_items():
+        if key not in ("g1", "g2", "g3", "g4") or not hasattr(upload, "read"):
+            continue
+        data = await upload.read()
+        if data:
+            if len(data) > product_service.IMPORT_IMAGE_MAX_BYTES:
+                return JSONResponse(
+                    {"ok": False,
+                     "error": f"{getattr(upload, 'filename', '') or key} 超过单张 15MB 上限"},
+                    status_code=413,
+                )
+            groups.setdefault(key[1], []).append(
+                (str(getattr(upload, "filename", "") or ""), data)
+            )
+    if not groups.get("1"):
+        return JSONResponse(
+            {"ok": False, "error": "没有收到一组图（商品图片至少要一张）"},
+            status_code=400,
+        )
+    try:
+        report = product_service.import_from_yushangzai(
+            db, fish_code, groups, operator=str(getattr(user, "username", "") or "")
+        )
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    except Exception as exc:  # noqa: BLE001 落库异常不能甩 HTML
+        log_id = error_log_service.record_request(request, exc, status_code=500)
+        return JSONResponse(
+            {"ok": False, "error": f"导入失败：{exc}", "log_id": log_id},
+            status_code=500,
+        )
+    return JSONResponse(report)
 
 
 @router.get("/products/new", response_class=HTMLResponse)
@@ -4427,6 +4653,10 @@ def product_detail(request: Request, key: str, db: Session = Depends(get_db)):
         audit_label=product_service.audit_label,
         condition_label=product_service.condition_label,
         shipping_label=product_service.shipping_label,
+        # 渔集（检测仓）那台货的商品资料（2026-10-15）：渔枢这边还没填型号 / 规格时，
+        # 按「商家编码 == 渔货号」去渔集那边取一份（桥断 / 查不到就是 None，页面显「—」）
+        wms_profile=(wms_bridge.lookup_item((row.code or "").strip())
+                     if (row.code or "").strip().upper().startswith("YS") else None),
     )
 
 

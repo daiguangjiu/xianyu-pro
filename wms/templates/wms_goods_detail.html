@@ -5,6 +5,10 @@
   合计 {{ total_qty }} 台 · 可售 {{ sellable_qty }} 台{% endblock %}
 {% block actions %}
   <a class="btn primary" href="/wms/inspect?code={{ items[0].barcode }}">去检测这一款</a>
+  {# 编辑商品信息（2026-10-15 用户要求）：补型号 / 规格 / 品牌 / 商品名称 ——
+     改一次，这一款下面每一台条码商品一起生效（条码不变）。
+     检测台发现四项全空时，就是让人来这一页补的。 #}
+  <a class="btn" href="/wms/goods/{{ fish_code }}/edit">编辑商品信息</a>
   <a class="btn" href="/wms/items?q={{ fish_code }}">在库存台账里筛</a>
   <a class="btn" href="/wms/goods">返回台账</a>
 {% endblock %}

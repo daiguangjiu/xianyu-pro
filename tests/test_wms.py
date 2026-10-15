@@ -460,7 +460,7 @@ class WmsTest(unittest.TestCase):
 
     # ------------------------------------------------------------ 报修
     def test_95_repair_flow(self):
-        """报修：必填校验 → 送修 → 超时标记 → 修回必须重新检测定级。"""
+        """报修：必填校验 → 送出 → 超时标记 → 寄回 → 确认再入库强制重新检测定级。"""
         batch = self._batch(1)
         with SessionLocal() as s:
             item = intake.list_items(s, batch_id=batch.id)[0]
@@ -468,16 +468,18 @@ class WmsTest(unittest.TestCase):
             inspection.submit(s, item, tester="t", results=dict(_PHONE_RESULTS),
                               battery_health=60, final_grade="C",
                               override_reason="主板故障需官方修")
-            # 官方维修（原 C1 线上）必须填凭证号
+            # 通道固定三选（2026-10-15）：乱通道直接拒
             with self.assertRaises(ValueError) as ctx:
-                repairs.create(s, item, {"repair_type": "official", "official_mode": "ship",
-                                         "vendor": "京东服务", "fault_desc": "不开机"})
-            self.assertIn("凭证号", str(ctx.exception))
-            row = repairs.create(s, item, {"repair_type": "official", "official_mode": "ship",
+                repairs.create(s, item, {"channel": "XX", "vendor": "京东服务",
+                                         "fault_desc": "不开机"})
+            self.assertIn("通道", str(ctx.exception))
+            row = repairs.create(s, item, {"channel": "BS",
                                            "vendor": "京东服务",
                                            "ticket_no": "JD-1", "fault_desc": "不开机",
-                                           "promise_days": 15, "paid_amount": 800},
+                                           "promise_days": 15,
+                                           "repair_fee": 600, "express_fee": 200},
                                  operator="t")
+            self.assertEqual(row.paid_amount, 800, "垫付合计 = 维修费 + 快递费")
             repairs.send(s, row.id, waybill_no="SF-1", operator="t")
             self.assertEqual(item.status, "OUT_REPAIR")
             # 超时：把承诺日期改到过去再扫
@@ -486,8 +488,13 @@ class WmsTest(unittest.TestCase):
             s.commit()
             self.assertGreaterEqual(repairs.mark_timeouts(s), 1)
             self.assertTrue(repairs.timeouts(s))
-            repairs.return_back(s, row.id, operator="t")
-            self.assertEqual(item.status, "REWORK", "修回必须重新检测定级")
+            # 寄回：只记单号，不搬账（货还在在途回程）
+            repairs.return_back(s, row.id, operator="t", waybill_no="SF-2")
+            self.assertEqual(row.status, "returned")
+            self.assertEqual(item.status, "OUT_REPAIR", "寄回在途不搬账")
+            # 确认再入库：货真回仓才搬账 + 强制重检
+            repairs.restock(s, row.id, operator="t")
+            self.assertEqual(item.status, "REWORK", "确认再入库必须重新检测定级")
             self.assertTrue(item.need_recheck)
 
     def test_100_repair_cancel_needs_reason(self):
@@ -1125,7 +1132,8 @@ class WmsTest(unittest.TestCase):
             "level": "3", "parent_code": "SALE-QB", "code": "SALE-QB-01", "name": "01 号货架",
             "enabled": "1"})
 
-        outbound = self.client.get("/wms/outbound").text
+        # 建单表单（含仓库下拉）在 /wms/outbound/new 子页面（2026-10-16 拆出去）
+        outbound = self.client.get("/wms/outbound/new").text
         self.assertIn("目标仓", outbound)
         self.assertNotIn("SALE-QB", outbound, "区 / 货架不该混进出库单的仓库下拉")
         self.assertIn("SALE-QB-01", self.client.get(f"/wms/items/{item_id}").text,
@@ -1696,7 +1704,8 @@ class WmsTest(unittest.TestCase):
             "base_price": "100", "purchase_cost": "60", "selling_price": "88.88"},
             follow_redirects=False)
         with SessionLocal() as s:
-            self.assertAlmostEqual(float(s.get(WmsItem, item_id).selling_price or 0), 88.88, 2)
+            # 人工填价也按整数口径向下取整（价格一律不带小数）
+            self.assertAlmostEqual(float(s.get(WmsItem, item_id).selling_price or 0), 88.0, 2)
             self.assertTrue(
                 any("人工定价" in (l.note or "") for l in wms_audit.of_entity(s, "item", item_id))
             )
@@ -2046,7 +2055,9 @@ class WmsTest(unittest.TestCase):
         self.assertEqual(page1.count('class="num muted"'), 50, "第一页 50 行")
         self.assertIn("下一页", page1)
         self.assertIn("page=2", page1, "翻页链接要指到第 2 页")
-        self.assertIn("status=", page1, "翻页要把筛选条件带着走（别把筛掉的货翻回来）")
+        # 统一分页组件（2026-10-16 换 _pager.html）：非空筛选条件要带着走
+        graded = self.client.get("/wms/items", params={"grade": "W"}).text
+        self.assertIn("grade=W", graded, "翻页要把筛选条件带着走（别把筛掉的货翻回来）")
 
         page2 = self.client.get("/wms/items?page=2").text
         self.assertEqual(page2.count('class="num muted"'), total - 50, "第二页剩 10 行")

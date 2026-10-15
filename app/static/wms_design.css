@@ -4,6 +4,14 @@
        3px 焦点光环、同一套色阶与栅格断点，页面元素一套停顿。
        区别只有一处：主色取检测仓自己的品牌色（青），把两个系统区分开。
        ============================================================ */
+    /* 数字字体（2026-10-15 用户拍板全局统一）：与渔枢首页「数据总览」同一套 ——
+       JetBrains Mono（本地 woff2，随渔枢 /static 下发）+ 等宽 tabular 数字。
+       独立部署取不到 /static 时自动回落系统等宽字体，不炸。 */
+    @font-face{
+      font-family:'JetBrains Mono';
+      src:url('/static/fonts/jetbrains-mono.woff2') format('woff2');
+      font-weight:100 800;font-style:normal;font-display:swap;
+    }
     :root{
       /* 品牌与语义色 */
       --c-primary:#0d7f74; --c-primary-hover:#0a635b; --c-primary-soft:#e3f4f1; --c-primary-border:#a7ded4;
@@ -279,6 +287,8 @@
     .stat .value.sm{font-size:15px;font-weight:600;overflow-wrap:anywhere}
     /* 组之间的间距统一由 CSS 给（页面里不再写 margin-top） */
     .grid + .grid{margin-top:var(--s-4)}
+    /* 统计卡（.grid）下面跟筛选/列表卡片时也要留一截呼吸（.card 的 margin-bottom 只管它自己下面） */
+    .grid + .card{margin-top:var(--s-4)}
     .card > .note{margin-top:var(--s-2)}
     /* 滚动区：打印队列 / 待检池这类可能很长的列表，给个上限别把页面拖老长 */
     .scroll-y{max-height:280px;overflow-y:auto;-webkit-overflow-scrolling:touch}
@@ -308,12 +318,20 @@
     .kv{display:grid;grid-template-columns:110px minmax(0,1fr);gap:6px 12px;font-size:13px}
     .kv .k{color:var(--c-text-muted)}
     .kv .v{min-width:0;overflow-wrap:anywhere}
-    /* 分页（与渔枢同一套按钮 + 页码形态） */
-    .pager{display:flex;gap:6px;align-items:center;justify-content:flex-end;margin-top:var(--s-4);flex-wrap:wrap}
+    /* 分页（2026-10-16 起统一用根 templates/_pager.html 组件，外壳 class 与 HUB / 渔货栈同名）：
+       .pager-wrap 是组件外壳（信息条 / 每页条数 / 页码一行排开），.pager 是页码区 */
+    .pager-wrap{display:flex;gap:var(--s-3);align-items:center;flex-wrap:wrap;margin-top:var(--s-4)}
+    .pager-size{display:flex;gap:6px;align-items:center}
+    .pager-size select{width:auto;min-width:0}
+    .pager-wrap > .pager-info{margin-left:auto;font-size:12px;color:var(--c-text-muted)}
+    .pager-ellipsis{color:var(--c-text-muted)}
+    .pager{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
     .pager .pager-info{font-size:12px;color:var(--c-text-muted);margin-right:6px}
     .pager .btn.sm{min-width:32px}
     .pager .btn.sm.disabled{opacity:.45;cursor:not-allowed}
     .pager .btn.sm.primary{cursor:default}
+    .pager-jump{display:flex;gap:6px;align-items:center}
+    .pager-jump input[type=number]{width:76px;height:32px}
     .foot{color:var(--c-text-subtle);font-size:12px;text-align:center;padding:var(--s-4) 0 0}
     /* ---------------------------------------------------------------- 响应式 */
     @media (max-width:1100px){
@@ -450,3 +468,14 @@
       font-variant-numeric:tabular-nums}
     .lp-legend-list .lp-li i{margin-left:4px;font-style:normal;font-size:11px;color:var(--c-text-subtle)}
     .lp-legend-foot{display:block;color:var(--c-text-muted)}
+
+    /* ---------- 数字字体全局统一（2026-10-15 用户拍板） ----------
+       与渔枢首页「数据总览」同一套：JetBrains Mono + 等宽 tabular 数字。
+       以后新增页面 / 新增字段，凡是数字（金额 / 台数 / 计数 / 编号 / 百分比）
+       都套 .num（表格里 td.num / th.num），不用再各写各的字体。 */
+    th.num,td.num,.num,.money,.count,.qty-pill,.pc-num,.vs-n,
+    .stat .value,.pager .pager-info,.chip .n,.badge{
+      font-family:var(--font-mono);
+      font-variant-numeric:tabular-nums;
+      font-feature-settings:'tnum','lnum';
+    }

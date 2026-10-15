@@ -1,31 +1,64 @@
 {% extends "base.html" %}
 {% import "wms_bits.html" as bits %}
+{% from "_pager.html" import pager %}
 {% block title %}货品台账{% endblock %}
 {% block sub %}共 {{ total }} 款（一款货一个渔货号，点进去看它下面挂着哪几个条码商品）{% endblock %}
 
-{# 翻页链接：筛选条件一路带着走，翻到第 2 页不能把筛掉的款又倒回来 #}
-{% macro plink(p) -%}
-/wms/goods?q={{ filters.q | urlencode }}&category={{ filters.category | urlencode }}&page={{ p }}
-{%- endmacro %}
 {% block actions %}<a class="btn primary" href="/wms/inspect">扫码检测</a>{% endblock %}
 
+{% block head_extra %}
+<style>
+  /* 字段名旁的「?」说明（2026-10-15 用户：占一行的 hint 影响布局，挪进悬停提示） */
+  .f-q-tip{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;
+    margin-left:5px;border-radius:50%;background:var(--c-line,#e5e7eb);color:var(--c-muted,#6b7280);
+    font-size:10.5px;font-weight:700;cursor:help;vertical-align:1px}
+  /* 多条码子行：缩进、浅底、小一号，跟主行一眼区分开 */
+  tr.sub-row > td{background:var(--c-bg,#f8fafc);font-size:12.5px;color:var(--c-muted,#6b7280)}
+  tr.sub-row > td .mono{font-weight:600}
+</style>
+{% endblock %}
+
 {% block content %}
+{# 筛选区（2026-10-15 用户：视觉 / 布局 / 逻辑优化 + 常用字段筛选 + 合计台数区间）：
+   第一行找货（关键字 / 品类 / 品牌），第二行管状态与数量（定价 / 建议售价 / 台数区间）。
+   「已定价 + 建议售价没设」一把就能筛出「有渔货价但没销售价」的款 #}
 <div class="card">
   <form class="filters" method="get" action="/wms/goods">
-    <div class="field grow"><label for="f-q">渔货号 / 产品名称 / 品牌 / 型号 / 进货货号</label>
-      <input id="f-q" type="search" name="q" value="{{ filters.q }}" placeholder="YS202610140001 或 对讲机">
-      <div class="hint">扫码枪对着这页扫一下就直接搜（渔货号、进货货号都能认）</div></div>
+    <div class="field grow"><label for="f-q">渔货号 / 产品名称 / 品牌 / 型号 / 进货货号<span class="f-q-tip"
+        title="扫码枪对着这页扫一下就直接搜（渔货号、进货货号都能认）">?</span></label>
+      <input id="f-q" type="search" name="q" value="{{ filters.q }}" placeholder="YS202610140001 或 对讲机"></div>
     <div class="field"><label for="f-c">品类</label>
       <select id="f-c" name="category"><option value="">全部</option>
         {% for v, t in categories %}<option value="{{ v }}" {{ 'selected' if filters.category == v }}>{{ t }}</option>{% endfor %}</select></div>
-    <div class="field"><label>&nbsp;</label><button class="btn primary">筛选</button></div>
+    <div class="field"><label for="f-b">品牌</label>
+      <select id="f-b" name="brand"><option value="">全部</option>
+        {% for b, n in brands %}<option value="{{ b }}" {{ 'selected' if filters.brand == b }}>{{ b }}（{{ n }} 台）</option>{% endfor %}</select></div>
+    <div class="field"><label for="f-priced">渔货价</label>
+      <select id="f-priced" name="priced">
+        <option value="">不限</option>
+        <option value="yes" {{ 'selected' if filters.priced == 'yes' }}>已定价</option>
+        <option value="no" {{ 'selected' if filters.priced == 'no' }}>未定价</option>
+      </select></div>
+    <div class="field"><label for="f-sug">建议售价</label>
+      <select id="f-sug" name="suggested">
+        <option value="">不限</option>
+        <option value="yes" {{ 'selected' if filters.suggested == 'yes' }}>已设</option>
+        <option value="no" {{ 'selected' if filters.suggested == 'no' }}>没设（显示=渔货价）</option>
+      </select></div>
+    <div class="field"><label for="f-qmin">合计台数 ≥</label>
+      <input id="f-qmin" type="number" min="0" name="qty_min" value="{{ filters.qty_min }}" placeholder="不限"></div>
+    <div class="field"><label for="f-qmax">合计台数 ≤</label>
+      <input id="f-qmax" type="number" min="0" name="qty_max" value="{{ filters.qty_max }}" placeholder="不限"></div>
+    <div class="field"><label>&nbsp;</label>
+      <div class="btn-row"><button class="btn primary">筛选</button>
+        <a class="btn" href="/wms/goods" title="清掉全部筛选条件">重置</a></div></div>
   </form>
 </div>
 
 <div class="card flush">
   {% if cards %}
   <div class="table-wrap"><table>
-    <thead><tr><th class="num">#</th><th>渔货号</th><th>产品名称</th><th>品类</th>
+    <thead><tr><th class="num">#</th><th>渔货号</th><th>产品名称</th>
       {# 条码商品数（2026-10-14）：这一款下面挂着几台物理的货 —— 台账的核心数字 #}
       <th class="num">条码商品</th><th class="num">合计台数</th><th class="num">可售台数</th>
       <th class="num">进货价</th><th class="num">渔货价</th><th class="num">建议售价</th><th>操作</th></tr></thead>
@@ -37,41 +70,63 @@
         <td class="wrap2" title="{{ (c.head.product_name or c.head.title) if c.head else '' }}">
           <span class="clamp2">{{ (c.head.product_name or c.head.title) if c.head else '—' }}</span>
           {% if c.head and c.head.brand %}<div class="loc-sub">{{ c.head.brand }}</div>{% endif %}</td>
-        <td>{{ wms_category_label(c.head.category) if c.head else '—' }}</td>
-        <td class="num"><a href="/wms/goods/{{ c.fish_code }}"
-              title="这一款下面挂着 {{ c.items }} 个条码商品">{{ c.items }}</a></td>
+        {# 条码商品（2026-10-15 显示优化）：台数胶囊 + 悬停列出这一款名下的显示编码，
+            「N 条码 / M 台」一眼看清一款货的构成 #}
+        <td class="num" title="{{ c.barcode_tip or '这一款名下还没有条码商品' }}">
+          <a href="/wms/goods/{{ c.fish_code }}" class="qty-pill {{ 'many' if c.barcode_cnt > 1 }}">{{ c.barcode_cnt }}</a>
+          <span class="muted" style="font-size:11.5px">条码</span></td>
         <td class="num"><span class="qty-pill {{ 'many' if c.qty > 1 }}">{{ c.qty }}</span></td>
-        <td class="num">{{ c.sellable }}</td>
+        <td class="num" {% if c.sellable == 0 %}style="color:var(--c-error-fg,#b91c1c);font-weight:600"
+            title="这一款目前没有可售台数（还没检测定级 / 都出掉了）"{% endif %}>{{ c.sellable }}
+          {% if c.sellable == 0 %}<span class="badge failed" title="可售台数为 0：还没检测定级，或都已出库 / 报修 —— 尽快跟进">可售预警</span>{% endif %}</td>
         <td class="num">{{ bits.money_cell(c.head.purchase_cost) if c.head else '—' }}</td>
         {# 渔货价（2026-10-14）：卖给渔货栈的口径价，全系统统一用 selling_price 表达 #}
         <td class="num">{{ bits.money_cell(c.head.selling_price) if c.head else '—' }}</td>
-        <td class="num">{{ bits.money_cell(c.head.suggest_price or c.head.selling_price) if c.head else '—' }}</td>
-        <td class="nowrap"><a class="btn sm" href="/wms/goods/{{ c.fish_code }}">明细</a></td>
+        {# 建议售价（2026-10-15 显示优化）：渔集没设的不再假装是自己的价 ——
+            显示渔货价但打「未设」标，导入渔枢时会按市场价×0.5 兜底 #}
+        <td class="num" nowrap>{% if c.head and c.head.suggest_price %}
+          {{ bits.money_cell(c.head.suggest_price) }}
+        {% elif c.head %}<span class="num">¥{{ money(c.head.selling_price) }}</span>
+          <span class="badge pending" title="渔集没填建议售价 —— 台账先按渔货价显示；导入渔枢时按市场价 × 0.5 兜底出销售价">未设</span>
+        {% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="nowrap">
+          <a class="btn sm" href="/wms/goods/{{ c.fish_code }}">明细</a>
+          {# 多条码拆分（2026-10-15 用户拍板）：一个渔货号只对应一个条码商品 ——
+              多条的把多余的拆出去各发新渔货号（最早那台留原号）；点名款不拆 #}
+          {% if c.can_split %}
+          <form method="post" action="/wms/goods/{{ c.fish_code }}/split" class="inline-form"
+                onsubmit="return confirm('把 {{ c.fish_code }} 名下 {{ c.barcode_cnt }} 个条码商品拆开？\n\n· 最早建档那台留在原号（渔枢商家编码不动）\n· 其余每台各发一个新渔货号\n\n确定？')">
+            <button class="btn sm">拆分</button></form>
+          {% endif %}
+        </td>
       </tr>
+      {# 多条码拆行（2026-10-15 用户）：一款挂多个条码时，下面每条码各摆一行明细；
+          行数太多的款（YS202610120001）暂不拆，只留汇总行 #}
+      {% for it in c.split_rows %}
+      <tr class="sub-row">
+        <td></td>
+        <td colspan="3">└ <a class="mono" href="/wms/items/{{ it.id }}">{{ it.display_code }}</a>
+          {% if it.spec %}<span class="muted">· {{ it.spec }}</span>{% endif %}
+          {% if it.model %}<span class="muted">· {{ it.model }}</span>{% endif %}</td>
+        <td class="num">{{ it.qty }}</td>
+        <td class="num">{{ it.sellable }}</td>
+        <td class="num">{{ bits.money_cell(it.purchase_cost) }}</td>
+        <td class="num">{{ bits.money_cell(it.selling_price) }}</td>
+        <td class="num">{% if it.suggest_price %}{{ bits.money_cell(it.suggest_price) }}
+          {% else %}¥{{ money(it.selling_price) }} <span class="badge pending">未设</span>{% endif %}</td>
+        <td class="nowrap"><a class="btn sm" href="/wms/items/{{ it.id }}">明细</a></td>
+      </tr>
+      {% endfor %}
     {% endfor %}
     </tbody>
   </table></div>
-  {% else %}{{ bits.empty('还没有任何款（先去「批次与建档」把货导进来）') }}{% endif %}
-  {% if pages > 1 %}
-  <div class="pager foot">
-    <span class="pager-info">第 {{ row_base + 1 }}–{{ row_base + cards | length }} 款 ·
-      共 {{ total }} 款 · 第 {{ page }} / {{ pages }} 页（每页 {{ page_size }} 条）</span>
-    {% if page > 1 %}<a class="btn sm" href="{{ plink(page - 1) }}">上一页</a>
-    {% else %}<span class="btn sm disabled">上一页</span>{% endif %}
-    {% for p in range(1, pages + 1) %}
-      {% if p == 1 or p == pages or (p >= page - 2 and p <= page + 2) %}
-        {% if p == page %}<span class="btn sm primary">{{ p }}</span>
-        {% else %}<a class="btn sm" href="{{ plink(p) }}">{{ p }}</a>{% endif %}
-      {% elif p == page - 3 or p == page + 3 %}
-        <span class="muted">…</span>
-      {% endif %}
-    {% endfor %}
-    {% if page < pages %}<a class="btn sm" href="{{ plink(page + 1) }}">下一页</a>
-    {% else %}<span class="btn sm disabled">下一页</span>{% endif %}
-  </div>
-  {% elif total and cards %}
-  <div class="pager foot"><span class="pager-info">共 {{ total }} 款（每页 {{ page_size }} 条，一页放得下）</span></div>
-  {% endif %}
+  {% else %}{{ bits.empty('没有符合条件的款（换个筛选条件，或先去「批次与建档」把货导进来）') }}{% endif %}
+  {# 全站统一分页组件（2026-10-16 换 _pager.html，筛选条件照旧一路带着）#}
+  {{ pager(page, pages, '/wms/goods',
+           {'q': filters.q, 'category': filters.category, 'brand': filters.brand,
+            'priced': filters.priced, 'suggested': filters.suggested,
+            'qty_min': filters.qty_min, 'qty_max': filters.qty_max},
+           total, size=page_size) }}
 </div>
 {% endblock %}
 

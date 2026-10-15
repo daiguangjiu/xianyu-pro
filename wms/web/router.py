@@ -27,7 +27,8 @@ from fastapi.responses import (
     Response,
 )
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from jinja2 import ChoiceLoader, Environment, FileSystemLoader, select_autoescape
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from .. import __version__ as WMS_VERSION
@@ -36,6 +37,7 @@ from .. import auth as wms_auth
 from .. import bridge as wms_bridge
 from .. import changelog as wms_changelog
 from .. import cloud_callback
+from .. import delivery as wms_delivery_service
 from .. import grading
 from .. import importer
 from .. import inspection
@@ -74,11 +76,14 @@ from ..models import (
     OUTBOUND_LABELS,
     OUTBOUND_STATUS_CHOICES,
     OUTBOUND_STATUS_LABELS,
+    OUT_SALE,
     PART_CHOICES,
     PART_LABELS,
+    REPAIR_CHANNELS,
     REPAIR_CHANNEL_LABELS,
     REPAIR_STATUS_CHOICES,
     REPAIR_STATUS_LABELS,
+    repair_channel_label,
     repair_status_label,
     STATUS_CHOICES,
     STATUS_GRADED,
@@ -125,7 +130,21 @@ from ..timeutil import fmt as _fmt
 from ..timeutil import now as _now
 
 Templates_Dir = Path(__file__).resolve().parent.parent / "templates"
-templates = Jinja2Templates(directory=str(Templates_Dir))
+# 全站统一分页组件在仓库根 templates/_pager.html（HUB 与渔货栈共用同一份）：
+# wms 的 loader 在自己目录之外补挂根 templates（wms 自己的 base.html 同名优先，
+# 分页宏等 wms 没有的文件回落到根目录那一份）。
+Root_Templates_Dir = Templates_Dir.parent.parent / "templates"
+templates = Jinja2Templates(
+    env=Environment(
+        loader=ChoiceLoader(
+            [
+                FileSystemLoader(str(Templates_Dir)),
+                FileSystemLoader(str(Root_Templates_Dir)),
+            ]
+        ),
+        autoescape=select_autoescape(),
+    )
+)
 
 PAGE_SIZE = 50
 # 一次性提示：短命 cookie（读一次即删），中文不进地址栏
@@ -160,10 +179,14 @@ templates.env.globals.update(
         "wms_ledger_label": ledger_label,
         "wms_part_label": part_label,
         "wms_repair_status_label": repair_status_label,
+        "wms_repair_channel_label": repair_channel_label,
         "wms_audit_action": wms_audit.action_label,
         "wms_perm_label": wms_permissions.perm_label,
         "wms_conditions_text": grading.conditions_text,
-        "wms_version": WMS_VERSION,
+        # 静态资源版本参数（2026-10-15）：以前用包 __version__（1.1.0 从不变），
+        # CSS 改了浏览器还吃缓存的旧文件 —— 数字字体统一就是这么「不生效」的。
+        # 改成跟 changelog 顶部版本走：渔集每发一版，?v= 必变
+        "wms_version": wms_changelog.current_version() or WMS_VERSION,
     }
 )
 templates.env.filters["dt"] = _dtype
@@ -594,8 +617,8 @@ async def wms_batch_register(request: Request, batch_id: int, db: Session = Depe
         "qty": form.get("qty"),
         "extra": extra,
     }
-    if not common["sku_code"]:
-        return _redirect(form_url, "货号必填 —— 扫码检测认货靠它", "warn")
+    # 进货货号（供应商清单上的外部编号）**不再必填**，也不跟着渔货号自动同步 ——
+    # 2026-10-15 用户拍板：散货没有外部编号就该能直接交上去，不该卡在这一格
     specs: list[dict] = []
     try:
         # 放 try 里：清单坏了也是「一句人话 + 回表单」，不能变成 500
@@ -733,11 +756,17 @@ def _attach_qty(db: Session, lines: list) -> list:
     ids = [int(getattr(x, "item_id", 0) or 0) for x in lines]
     ids = [i for i in ids if i]
     qty_by_item: dict[int, int] = {}
+    sku_by_item: dict[int, str] = {}
     if ids:
-        for row in db.execute(select(WmsItem.id, WmsItem.qty).where(WmsItem.id.in_(ids))):
+        for row in db.execute(
+            select(WmsItem.id, WmsItem.qty, WmsItem.sku_code).where(WmsItem.id.in_(ids))
+        ):
             qty_by_item[int(row[0])] = int(row[1] or 0) or 1
+            sku_by_item[int(row[0])] = str(row[2] or "")
     for x in lines:
         x.qty = qty_by_item.get(int(getattr(x, "item_id", 0) or 0), 1)
+        # 货号是供应商清单上的编号，明细表没存 —— 页面要对着渔枢订单核对就得带出来
+        x.sku_code = sku_by_item.get(int(getattr(x, "item_id", 0) or 0), "")
     return lines
 
 
@@ -1152,12 +1181,26 @@ def wms_field_delete(field_id: int, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 
-def _goods_groups(db: Session, q: str = "", category: str = "") -> list:
-    """按渔货号分组的统计 ``[(渔货号, 条码商品数, 合计台数, 组内最新 id)]``。"""
+# 这些渔货号台账**暂不拆**多条码子行（2026-10-15 用户点名：YS202610120001 行数太多，先不拆）
+_GOODS_NO_SPLIT = {"YS202610120001"}
+
+
+def _goods_groups(db: Session, q: str = "", category: str = "", brand: str = "",
+                  priced: str = "", suggested: str = "",
+                  qty_min: int | None = None, qty_max: int | None = None) -> list:
+    """按渔货号分组的统计 ``[(渔货号, 条码商品数, 合计台数, 组内最新 id)]``。
+
+    筛选（2026-10-15 用户）：关键字 / 品类 / 品牌 / 定价状态 / 建议售价状态 /
+    合计台数区间 —— 后面几个都是**分组级**条件（HAVING 聚合后过滤），
+    组合「定价=已定价 + 建议售价=没设」就能筛出「有渔货价但没销售价」的款。
+    """
+    qty_sum = func.sum(WmsItem.qty)
+    priced_cnt = func.sum(case((WmsItem.selling_price > 0, 1), else_=0))
+    suggested_cnt = func.sum(case((WmsItem.suggest_price > 0, 1), else_=0))
     stmt = select(
         WmsItem.fish_code,
         func.count(WmsItem.id),
-        func.sum(WmsItem.qty),
+        qty_sum,
         func.max(WmsItem.id),
     ).where(WmsItem.fish_code != "")
     like = f"%{str(q or '').strip()}%" if str(q or "").strip() else ""
@@ -1173,10 +1216,95 @@ def _goods_groups(db: Session, q: str = "", category: str = "") -> list:
         )
     if category:
         stmt = stmt.where(WmsItem.category == category)
+    if brand:
+        stmt = stmt.where(WmsItem.brand == brand)
+    having = []
+    if priced == "yes":
+        having.append(priced_cnt > 0)
+    elif priced == "no":
+        having.append(priced_cnt == 0)
+    if suggested == "yes":
+        having.append(suggested_cnt > 0)
+    elif suggested == "no":
+        having.append(suggested_cnt == 0)
+    if qty_min is not None:
+        having.append(qty_sum >= qty_min)
+    if qty_max is not None:
+        having.append(qty_sum <= qty_max)
+    if having:
+        stmt = stmt.having(*having)
     rows = [tuple(r) for r in db.execute(stmt.group_by(WmsItem.fish_code)).all()]
     # 最近建档的款排前面（拿组里最新那台的 id 当时间先后用）
     rows.sort(key=lambda r: int(r[3] or 0), reverse=True)
     return rows
+
+
+def _brand_options(db: Session, limit: int = 200) -> list:
+    """台账筛选用的品牌下拉（有货的品牌按台数多→少，只列前 200 个）。"""
+    rows = db.execute(
+        select(WmsItem.brand, func.sum(WmsItem.qty))
+        .where(WmsItem.brand != "")
+        .group_by(WmsItem.brand)
+        .order_by(func.sum(WmsItem.qty).desc())
+        .limit(limit)
+    ).all()
+    return [(str(b), int(n or 0)) for b, n in rows]
+
+
+def _goods_barcodes(db: Session, codes: list[str]) -> dict:
+    """这几个渔货号名下各挂着哪些条码商品（显示编码），悬停看得见。"""
+    if not codes:
+        return {}
+    rows = db.execute(
+        select(WmsItem.fish_code, WmsItem.display_code, WmsItem.barcode, WmsItem.qty)
+        .where(WmsItem.fish_code.in_(codes))
+        .order_by(WmsItem.id)
+    ).all()
+    out: dict[str, list[str]] = {}
+    for fish, disp, bar, _qty in rows:
+        out.setdefault(str(fish or ""), []).append(str(disp or bar or ""))
+    return out
+
+
+def _opt_int(v: str) -> int | None:
+    """台账台数区间入参：空串/非正整数都当「不限」。"""
+    try:
+        n = int(str(v or "").strip())
+    except ValueError:
+        return None
+    return n if n >= 0 else None
+
+
+def _goods_item_rows(db: Session, codes: list[str]) -> dict:
+    """这几个渔货号名下**每条码一行**的明细（2026-10-15 用户：多条码产品拆出来显示）。
+
+    台账主行是「款」级汇总，一个渔货号挂多个条码时下面再各摆一行子行，
+    每行能直接看到这台的条码 / 台数 / 三个价，点显示编码进货品详情。
+    个别款行数太多（``_GOODS_NO_SPLIT`` 名单）暂不拆，只留汇总行。
+    """
+    codes = [str(c or "") for c in (codes or []) if str(c or "") not in _GOODS_NO_SPLIT]
+    if not codes:
+        return {}
+    out: dict[str, list[dict]] = {}
+    for it in db.scalars(
+        select(WmsItem).where(WmsItem.fish_code.in_(codes)).order_by(WmsItem.id)
+    ).all():
+        out.setdefault(str(it.fish_code or ""), []).append(
+            {
+                "id": int(it.id),
+                "display_code": str(it.display_code or it.barcode or ""),
+                "spec": str(it.spec or ""),
+                "model": str(it.model or ""),
+                "qty": int(it.qty or 0),
+                "sellable": int(it.qty or 0)
+                if str(it.status or "").upper() == STATUS_SELLABLE
+                else 0,
+                "purchase_cost": float(it.purchase_cost or 0.0),
+                "selling_price": float(it.selling_price or 0.0),
+                "suggest_price": float(it.suggest_price or 0.0),
+            }
+        )
+    return out
 
 
 def _goods_heads(db: Session, codes: list[str]) -> dict[str, WmsItem]:
@@ -1204,9 +1332,14 @@ def _goods_sellable(db: Session, codes: list[str]) -> dict[str, int]:
 
 
 @router.get("/wms/goods", response_class=HTMLResponse)
-def wms_goods(request: Request, q: str = "", category: str = "", page: int = 1,
+def wms_goods(request: Request, q: str = "", category: str = "", brand: str = "",
+              priced: str = "", suggested: str = "",
+              qty_min: str = "", qty_max: str = "", page: int = 1,
               db: Session = Depends(get_db)):
-    groups = _goods_groups(db, q=q, category=category)
+    lo, hi = _opt_int(qty_min), _opt_int(qty_max)
+    groups = _goods_groups(db, q=q, category=category, brand=brand,
+                           priced=priced, suggested=suggested,
+                           qty_min=lo, qty_max=hi)
     total = len(groups)
     pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(1, min(int(page or 1), pages))
@@ -1214,13 +1347,23 @@ def wms_goods(request: Request, q: str = "", category: str = "", page: int = 1,
     codes = [str(r[0] or "") for r in page_rows]
     heads = _goods_heads(db, codes)
     sellable = _goods_sellable(db, codes)
+    barcodes = _goods_barcodes(db, codes)
+    item_rows = _goods_item_rows(db, codes)
     cards = [
         {
             "fish_code": code,
-            "items": int(int(r[1] or 0)),
+            # 别叫 items：Jinja 里 dict.items 是方法，{{ c.items }} 会渲染成方法对象
+            "barcode_cnt": int(int(r[1] or 0)),
             "qty": int(r[2] or 0),
             "sellable": sellable.get(code, 0),
             "head": heads.get(code),
+            "barcode_tip": "、".join(barcodes.get(code, [])[:8])
+            + ("…" if len(barcodes.get(code, [])) > 8 else ""),
+            # 多条码拆行（2026-10-15）：一个渔货号下面每条码一行明细
+            "split_rows": item_rows.get(code, []),
+            # 多条码拆分（2026-10-15 用户拍板）：一个渔货号只对应一个条码商品，
+            # 多条的给「拆分」按钮（点名暂不拆的款不给）
+            "can_split": int(r[1] or 0) > 1 and code not in _GOODS_NO_SPLIT,
         }
         for code, r in zip(codes, page_rows)
     ]
@@ -1230,8 +1373,11 @@ def wms_goods(request: Request, q: str = "", category: str = "", page: int = 1,
         sub="以渔货号为维度：一款货一个号，点进去看这一款下面挂着哪几个条码商品",
         cards=cards, total=total,
         page=page, pages=pages, page_size=PAGE_SIZE, row_base=(page - 1) * PAGE_SIZE,
-        filters={"q": q, "category": category},
+        filters={"q": q, "category": category, "brand": brand,
+                 "priced": priced, "suggested": suggested,
+                 "qty_min": qty_min, "qty_max": qty_max},
         categories=category_options(),
+        brands=_brand_options(db),
     )
 
 
@@ -1295,6 +1441,80 @@ def wms_goods_detail(request: Request, fish_code: str, db: Session = Depends(get
     )
 
 
+@router.get("/wms/goods/{fish_code}/edit", response_class=HTMLResponse)
+def wms_goods_edit_form(request: Request, fish_code: str, db: Session = Depends(get_db)):
+    """**整款编辑商品信息**（2026-10-15 用户要求）：商品名称 / 品牌 / 品类 / 型号 / 规格。
+
+    型号规格这些是**一款货**的公共资料，同款多台各存一份 —— 只在某一台上改会
+    出现「同一款货两台型号不一样」，所以货品台账详情页给的是**整款一起改**的入口
+    （改完这一款下面每一台条码商品都跟着变，**条码终身不变**）。
+
+    要改某一台自己的字段（进货货号 / 序列号 / 价格 / 数量），去那个条码商品自己的
+    编辑页 /wms/items/{id}/edit。
+    """
+    code = str(fish_code or "").strip().upper()
+    rows = intake.find_items_by_fish(db, code)
+    if not rows:
+        raise HTTPException(404, f"没有这个渔货号：{code or '（空）'}")
+    head = rows[0]
+    return render(
+        "wms_goods_edit.html", request,
+        heading=f"编辑商品信息 · {code}",
+        sub=(f"{head.title} · 这一款下面挂着 {len(rows)} 个条码商品"
+             f" · 保存后一起生效"),
+        crumb_path=f"/wms/goods/{code}",
+        crumb_leaf="编辑商品信息",
+        fish_code=code, head=head, items=rows,
+        values=_values_of(head),
+        missing=intake.profile_missing(head),
+        total_qty=sum(int(i.qty or 0) or 1 for i in rows),
+        categories=category_options(),
+    )
+
+
+@router.post("/wms/goods/{fish_code}/edit")
+async def wms_goods_edit(request: Request, fish_code: str,
+                         db: Session = Depends(get_db)):
+    """保存**一款货**的商品资料（整款同步，条码不动，改了什么写审计）。"""
+    code = str(fish_code or "").strip().upper()
+    back = f"/wms/goods/{code}/edit"
+    rows = intake.find_items_by_fish(db, code)
+    if not rows:
+        return _redirect("/wms/goods", f"没有这个渔货号：{code or '（空）'}", "warn")
+    form = await request.form()
+    raw_cat, category = _category_from_form(form)
+    if raw_cat and not category:
+        return _redirect(
+            back,
+            f"分类「{raw_cat}」认不出来 —— 写中文（如 破壁机 / 电饭煲）"
+            f"或三级码（如 HA.KC.DFB）",
+            "warn",
+        )
+    fields = {
+        "product_name": str(form.get("product_name") or "").strip(),
+        "brand": str(form.get("brand") or "").strip(),
+        "model": str(form.get("model") or "").strip(),
+        "spec": str(form.get("spec") or "").strip(),
+    }
+    # 品类留空 = 不动（它是条码里的依据，清掉表单不等于清掉品类）
+    if category:
+        fields["category"] = category
+    try:
+        moved, changed = intake.update_goods_profile(
+            db, code, fields=fields, operator=_user(request),
+        )
+    except ValueError as exc:
+        return _redirect(back, str(exc), "warn")
+    if not changed:
+        return _redirect(f"/wms/goods/{code}", "没有改动")
+    head = "；".join(changed[:3])
+    more = f"（还有 {len(changed) - 3} 处）" if len(changed) > 3 else ""
+    return _redirect(
+        f"/wms/goods/{code}",
+        f"已保存：{head}{more} —— 同步了 {moved} 个条码商品",
+    )
+
+
 @router.post("/wms/items/{item_id}/fish-code")
 async def wms_item_fish_code(request: Request, item_id: int,
                              db: Session = Depends(get_db)):
@@ -1334,6 +1554,25 @@ async def wms_goods_merge(request: Request, fish_code: str,
         moved += 1
     back = f"/wms/goods/{target}" if target else "/wms/goods"
     return _redirect(back, f"已把 {moved} 个条码商品合并过去")
+
+
+@router.post("/wms/goods/{fish_code}/split")
+def wms_goods_split(request: Request, fish_code: str, db: Session = Depends(get_db)):
+    """多条码拆分（2026-10-15 用户拍板）：一个渔货号只对应一个条码商品 ——
+    最早建档那台留在原号，其余每台各自拆出去发新渔货号。
+    个别款（_GOODS_NO_SPLIT）用户点名暂不拆。"""
+    code = str(fish_code or "").strip().upper()
+    if code in _GOODS_NO_SPLIT:
+        return _redirect(f"/wms/goods/{code}", "这一款暂不拆（按当前安排保持整款）", "warn")
+    try:
+        new_codes = intake.split_fish(db, code, operator=_user(request))
+    except ValueError as exc:
+        return _redirect("/wms/goods", str(exc), "warn")
+    return _redirect(
+        f"/wms/goods/{code}",
+        f"已拆分：原号保留最早那台，拆出 {len(new_codes)} 个新渔货号"
+        + ("：" + "、".join(new_codes[:5]) + ("…" if len(new_codes) > 5 else "") if new_codes else ""),
+    )
 
 
 @router.get("/wms/items", response_class=HTMLResponse)
@@ -1625,6 +1864,9 @@ async def wms_item_price(request: Request, item_id: int, db: Session = Depends(g
     price = _form_money(form.get("selling_price"))
     base = _form_money(form.get("base_price")) or float(item.base_price or 0.0)
     cost = _form_money(form.get("purchase_cost")) or float(item.purchase_cost or 0.0)
+    # 价格同步要跟「改之前」比，先抄下来（提交成功后推给渔枢 / 渔货栈，2026-10-15）
+    old_selling = round(float(item.selling_price or 0.0), 2)
+    old_suggest = round(float(item.suggest_price or 0.0), 2)
     check = grading.price_of(db, item.grade, base, cost, manual_price=price or None,
                              manual_suggest=float(item.suggest_price or 0.0) or None)
     if check.get("manual_below_floor"):
@@ -1647,6 +1889,23 @@ async def wms_item_price(request: Request, item_id: int, db: Session = Depends(g
                   note=("人工定价" if manual else "按等级系数自动算")
                   + ("；低于底价需主管审批" if check.get("need_approval") else ""))
     db.commit()
+    # 价格同步（2026-10-15 用户拍板）：改价就推给渔枢商品档案 + 渔货栈货源，
+    # 真变了在渔货栈「通知」里落一条「商品价格变动」。桥断只降级，不影响改价。
+    price_note = ""
+    if item.fish_code and (
+        round(float(item.selling_price or 0.0), 2) != old_selling
+        or round(float(item.suggest_price or 0.0), 2) != old_suggest
+    ):
+        try:
+            price_note = wms_bridge.price_sync_note(wms_bridge.push_price_change(
+                item.fish_code,
+                name=str(item.product_name or item.title or ""),
+                selling_price=float(item.selling_price or 0.0),
+                suggest_price=float(item.suggest_price or 0.0),
+                base_price=float(item.base_price or 0.0),
+            ))
+        except Exception:  # noqa: BLE001
+            pass
     msg = f"渔货价已更新为 ¥{item.selling_price:.2f}"
     # 渔货价不能高于建议售价（2026-10-10）：压下来了就得说清楚，别让人以为填的值存进去了
     if check.get("clamped_by_suggest"):
@@ -1657,6 +1916,8 @@ async def wms_item_price(request: Request, item_id: int, db: Session = Depends(g
         msg += f"（低于底价 ¥{check.get('floor'):.2f}，需主管审批）"
     if check.get("low_margin"):
         msg += "（毛利率低于下限，已记录）"
+    if price_note:
+        msg += f"；{price_note}"
     return _redirect(f"/wms/items/{item_id}", msg, "warn" if check.get("need_approval") else "")
 
 
@@ -1704,6 +1965,43 @@ def wms_inspect(request: Request, code: str = "", db: Session = Depends(get_db))
         # 标签预览的那套样式（检测台里直接把预览画出来，不用跳去预览页）
         label_preview_css=label_preview.preview_css(),
     )
+
+
+@router.get("/wms/api/item/search")
+def wms_api_item_search(q: str = "", db: Session = Depends(get_db)):
+    """报修开单的货品**模糊搜索**（2026-10-15 用户拍板）：
+    渔货号 / 条码 / 显示编码 / 检修后码 / 进货货号 / 序列号 / 商品名 命中即返回，
+    前端下拉带入商品并自动填 SN。只读，货品查看权限。"""
+    kw = str(q or "").strip()
+    if len(kw) < 1:
+        return {"items": []}
+    like = f"%{kw}%"
+    rows = list(db.scalars(
+        select(WmsItem).where(or_(
+            WmsItem.fish_code.ilike(like),
+            WmsItem.barcode.ilike(like),
+            WmsItem.display_code.ilike(like),
+            WmsItem.own_barcode.ilike(like),
+            WmsItem.sku_code.ilike(like),
+            WmsItem.serial_no.ilike(like),
+            WmsItem.product_name.ilike(like),
+        )).order_by(WmsItem.id.desc()).limit(12)
+    ).all())
+    return {
+        "items": [
+            {
+                "id": int(it.id),
+                "barcode": str(it.barcode or ""),
+                "display_code": str(it.display_code or ""),
+                "fish_code": str(it.fish_code or ""),
+                "title": str(it.product_name or it.title or ""),
+                "serial_no": str(it.serial_no or ""),
+                "grade": str(it.grade or ""),
+                "status": str(it.status or ""),
+            }
+            for it in rows
+        ]
+    }
 
 
 @router.get("/wms/api/item.json")
@@ -1782,6 +2080,11 @@ def wms_api_item(code: str = "", db: Session = Depends(get_db)):
                 # 免得把本来就独占一个号的货又发一次新号
                 "fish_items": len(fish_rows),
                 "fish_qty": sum(int(r.qty or 0) or 1 for r in fish_rows),
+                # 商品资料齐不齐（2026-10-15 用户拍板）：型号 / 规格这些建档时就该填的
+                # 字段一个都没填的话，检测台要在「② 商品入库信息」卡上顶一条提醒，
+                # 让检测员先去「货品台账 → 编辑商品信息」补全 —— 不然详情页上全是「—」
+                "profile_missing": intake.profile_missing(item),
+                "need_profile": intake.need_profile(item),
                 # 数量（2026-10-10）：这一条货有几台（同一个条码，整台流转）
                 "qty": int(item.qty or 0) or 1,
                 "own_barcode": item.own_barcode,
@@ -1950,6 +2253,8 @@ async def wms_api_submit(request: Request, db: Session = Depends(get_db)):
             note=str(payload.get("note") or ""),
             # 检测台的渔货价：留空 = 用系统按分级规则算的默认价（2026-10-08）
             manual_price=_form_money(payload.get("manual_price")) or None,
+            # 复检（第 2 轮起）必填：为什么覆盖上一轮结论（2026-10-15）
+            recheck_reason=str(payload.get("recheck_reason") or ""),
         )
     except ValueError as exc:
         return _fail(str(exc))
@@ -2643,22 +2948,85 @@ def wms_cloudprint_callback_probe():
 
 
 # ---------------------------------------------------------------- 出库
+@router.get("/wms/deliveries", response_class=HTMLResponse)
+def wms_deliveries(request: Request, q: str = "", status: str = "", page: int = 1,
+                   db: Session = Depends(get_db)):
+    """发货管理：渔货栈自营商品的发货单（渔枢中台 → 渔集，2026-10-15 定稿字段）。"""
+    from ..timeutil import now as _wms_now
+
+    # 统计卡按当前筛选（不含翻页）算全量，数字不跟着翻页跳
+    total = wms_delivery_service.count_orders(db, q=q, status=status)
+    pending_n = wms_delivery_service.count_orders(db, q=q, status="pending")
+    shipped_n = wms_delivery_service.count_orders(db, q=q, status="shipped")
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(1, min(int(page or 1), pages))
+    rows = wms_delivery_service.list_orders(
+        db, q=q, status=status, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE,
+    )
+    return render(
+        "wms_deliveries.html",
+        request,
+        heading="发货管理",
+        sub="渔货栈自营商品的发货单（渔枢中台 → 渔集）· 出库核销后物流单号自动回传渔枢",
+        crumb_path="/wms/deliveries",
+        crumb_leaf="",
+        rows=rows,
+        total=total,
+        pending_n=pending_n,
+        shipped_n=shipped_n,
+        page=page,
+        pages=pages,
+        page_size=PAGE_SIZE,
+        statuses=[[k, v] for k, v in wms_delivery_service.STATUS_LABELS.items()],
+        filters={"q": q, "status": status},
+        status_label=wms_delivery_service.STATUS_LABELS,
+        now_dt=_wms_now(),
+    )
+
+
 @router.get("/wms/outbound", response_class=HTMLResponse)
 def wms_outbound(request: Request, q: str = "", type: str = "", status: str = "",
-                 db: Session = Depends(get_db)):
-    rows = outbound_service.list_orders(db, q=q, type=type, status=status)
+                 page: int = 1, db: Session = Depends(get_db)):
+    total = outbound_service.count_orders(db, q=q, type=type, status=status)
+    pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(1, min(int(page or 1), pages))
+    rows = outbound_service.list_orders(
+        db, q=q, type=type, status=status, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE,
+    )
     return render(
         "wms_outbound.html",
         request,
         heading="出库管理",
         sub="销售 / 报修 / 调拨 / 拆机件四类出库，拣货扫码校验错货错等级当场拦",
         orders=rows,
-        total=len(rows),
+        total=total,
+        page=page,
+        pages=pages,
+        page_size=PAGE_SIZE,
+        # 每张单挂了哪些货（货号 / 条码 × 数量）：列表里一眼看清发的是什么
+        lines_map=outbound_service.lines_of_orders(db, [o.id for o in rows]),
         types=[[t, OUTBOUND_LABELS[t]] for t in OUTBOUND_CHOICES],
         statuses=[[s, OUTBOUND_STATUS_LABELS[s]] for s in OUTBOUND_STATUS_CHOICES],
+        # 列表里类型 / 状态直接显示中文（模板拿不到模块常量）
+        type_labels=OUTBOUND_LABELS,
+        status_labels=OUTBOUND_STATUS_LABELS,
+        filters={"q": q, "type": type, "status": status},
+    )
+
+
+@router.get("/wms/outbound/new", response_class=HTMLResponse)
+def wms_outbound_new(request: Request, db: Session = Depends(get_db)):
+    """新建出库单独立成页（2026-10-16 用户拍板）：列表页只留「新建出库单」入口。"""
+    return render(
+        "wms_outbound_new.html",
+        request,
+        heading="新建出库单",
+        sub="① 单据 → ② 挂货 → ③ 物流与收货，一页建完；渔货号认一款、条码认一台最准",
+        crumb_path="/wms/outbound",
+        crumb_leaf="新建出库单",
+        types=[[t, OUTBOUND_LABELS[t]] for t in OUTBOUND_CHOICES],
         warehouses=_warehouses(db),
         grades=[[g, GRADE_LABELS[g]] for g in GRADE_CHOICES if g in SELLABLE_GRADES],
-        filters={"q": q, "type": type, "status": status},
     )
 
 
@@ -2668,8 +3036,23 @@ async def wms_outbound_create(request: Request, db: Session = Depends(get_db)):
     try:
         row = outbound_service.create(db, form, operator=_user(request))
     except ValueError as exc:
-        return _redirect("/wms/outbound", str(exc), "warn")
-    return _redirect(f"/wms/outbound/{row.id}", f"出库单 {row.order_no} 已创建")
+        return _redirect("/wms/outbound/new", str(exc), "warn")
+    # 建单时顺手把货挂上（2026-10-15）：订单信息 / 渔货号 / 货号 / 条码 / 数量一页填完
+    added, notes = outbound_service.add_lines_from_code(
+        db, row,
+        barcode=form.get("barcode") or "",
+        fish_code=form.get("fish_code") or "",
+        sku_code=form.get("sku_code") or "",
+        qty=form.get("qty"),
+        require_grade=form.get("require_grade") or "",
+        operator=_user(request),
+    )
+    msg = f"出库单 {row.order_no} 已创建"
+    if added:
+        msg += f"，已挂货 {added} 台"
+    if notes:
+        return _redirect(f"/wms/outbound/{row.id}", msg + "；" + "；".join(notes), "warn")
+    return _redirect(f"/wms/outbound/{row.id}", msg)
 
 
 def _outbound_trace(db: Session, order, *, force: bool = False) -> dict:
@@ -2703,6 +3086,45 @@ def _outbound_trace(db: Session, order, *, force: bool = False) -> dict:
         return dict(empty, msg=f"物流轨迹查询失败：{exc}")
 
 
+def _order_goods_panel(db: Session, order) -> tuple[dict, list[dict]]:
+    """出库单详情页的「订单信息 / 订单商品」面板数据（2026-10-15）。
+
+    渔货栈的订单同步过来后（target_no = 渔枢订单号），这里把该订单对应的
+    **渔货号商品**列出来：条码 / 等级 / 状态 / 所在仓 / 库位，一台一行，
+    已挂上本单的打勾，可售的直接给「出库」按钮 —— 点了就走与扫码同一套校验。
+    """
+    hub_order = wms_bridge.hub_order_facts(order.target_no) if (
+        order.type == OUT_SALE and order.target_no
+    ) else {}
+    if not hub_order:
+        return {}, []
+    picked_ids = {
+        int(x.item_id) for x in outbound_service.lines_of(db, order.id) if x.item_id
+    }
+    goods: list[dict] = []
+    seen: set[int] = set()
+    for code in hub_order.get("fish_codes") or []:
+        for it in intake.find_items_by_fish(db, code):
+            if it.id in seen:
+                continue
+            seen.add(it.id)
+            goods.append({
+                "id": it.id,
+                "fish_code": it.fish_code or code,
+                "barcode": it.barcode,
+                "display_code": it.display_code,
+                "title": it.title,
+                "grade": grade_label(it.grade),
+                "status": STATUS_LABELS.get(str(it.status or "").upper(), it.status),
+                "warehouse": warehouse_label(it.warehouse_code),
+                "location": it.location_code or "",
+                "locked_by_me": it.locked_by == order.order_no,
+                "picked": it.id in picked_ids,
+                "can_pick": it.id not in picked_ids,
+            })
+    return hub_order, goods
+
+
 @router.get("/wms/outbound/{order_id}", response_class=HTMLResponse)
 def wms_outbound_detail(
     request: Request, order_id: int, force: str = "", db: Session = Depends(get_db)
@@ -2712,6 +3134,7 @@ def wms_outbound_detail(
     order = db.get(WmsOutboundOrder, order_id)
     if not order:
         raise HTTPException(404, "出库单不存在")
+    hub_order, order_goods = _order_goods_panel(db, order)
     return render(
         "wms_outbound_detail.html",
         request,
@@ -2728,6 +3151,12 @@ def wms_outbound_detail(
             db, status="SELLABLE", warehouse=order.warehouse_code, limit=100
         ),
         warehouses=_warehouses(db),
+        # 渔货栈订单同步过来的：订单事实 + 该订单名下的渔货号商品（状态 / 库位）
+        hub_order=hub_order,
+        order_goods=order_goods,
+        # 顶部信息卡用中文显示类型 / 状态（模板拿不到模块常量，这里传进去）
+        OUTBOUND_LABELS=OUTBOUND_LABELS,
+        OUTBOUND_STATUS_LABELS=OUTBOUND_STATUS_LABELS,
     )
 
 
@@ -2764,7 +3193,29 @@ async def wms_outbound_pick(request: Request, order_id: int, db: Session = Depen
             raise ValueError("未知动作")
     except ValueError as exc:
         return _redirect(f"/wms/outbound/{order_id}", str(exc), "warn")
+    wms_delivery_service.sync_outbound_status(db, order)
     return _redirect(f"/wms/outbound/{order_id}", msg)
+
+
+@router.post("/wms/outbound/{order_id}/pick-item")
+async def wms_outbound_pick_item(
+    request: Request, order_id: int, db: Session = Depends(get_db)
+):
+    """「订单商品」面板点选一台出库（2026-10-15）：可售自动锁货，校验与扫码同一套。"""
+    from ..models import WmsOutboundOrder
+
+    order = db.get(WmsOutboundOrder, order_id)
+    if not order:
+        raise HTTPException(404, "出库单不存在")
+    form = await request.form()
+    try:
+        line = outbound_service.pick_item(
+            db, order, int(form.get("item_id") or 0), operator=_user(request)
+        )
+    except (ValueError, TypeError) as exc:
+        return _redirect(f"/wms/outbound/{order_id}", str(exc), "warn")
+    wms_delivery_service.sync_outbound_status(db, order)
+    return _redirect(f"/wms/outbound/{order_id}", f"拣货通过：{line.barcode}（可售自动锁货）")
 
 
 @router.post("/wms/outbound/{order_id}/ship")
@@ -2779,6 +3230,8 @@ async def wms_outbound_ship(request: Request, order_id: int, db: Session = Depen
         )
     except ValueError as exc:
         return _redirect(f"/wms/outbound/{order_id}", str(exc), "warn")
+    # 发货单状态与运单号跟着走（运单号会自动回传渔枢发货页）
+    wms_delivery_service.sync_outbound_status(db, order)
     # 卖掉的货同时把渔枢商品库存与渔货栈平台库存减掉了（2026-10-10），同步结果说清楚
     note = wms_bridge.hub_sync_note(getattr(order, "hub_sync", None))
     return _redirect(f"/wms/outbound/{order_id}",
@@ -2788,9 +3241,10 @@ async def wms_outbound_ship(request: Request, order_id: int, db: Session = Depen
 @router.post("/wms/outbound/{order_id}/cancel")
 def wms_outbound_cancel(order_id: int, db: Session = Depends(get_db)):
     try:
-        outbound_service.cancel(db, order_id, operator="")
+        order = outbound_service.cancel(db, order_id, operator="")
     except ValueError as exc:
         return _redirect(f"/wms/outbound/{order_id}", str(exc), "warn")
+    wms_delivery_service.sync_outbound_status(db, order)
     return _redirect(f"/wms/outbound/{order_id}", "出库单已取消，锁定的货已释放", "warn")
 
 
@@ -2811,7 +3265,7 @@ def wms_repairs(request: Request, q: str = "", status: str = "", timeout: str = 
         "wms_repairs.html",
         request,
         heading="报修工单",
-        sub="C1 线上（京东 / 400）/ C2 线下（授权网点）双通道，超时未回自动预警",
+        sub="品牌官方寄回 / 品牌到家 / 自行维修三通道，超时未回自动预警",
         orders=rows,
         total=len(rows),
         status_counts=status_counts,
@@ -2829,7 +3283,7 @@ def wms_repair_new(request: Request, item_id: int = 0, db: Session = Depends(get
     """C 档货一键开报修单（2026-10-14）：从检测台 / 货品详情页带 `?item_id=` 直接落到这里。
 
     货已经选好了，序列号从货品档案带出来 —— 现场不用再在一长串下拉里找货。
-    同一台货已经有单在走的（待送修 / 在途 / 已修回），页面顶部给提示并给「看这张单」。
+    同一台货已经有单在走的（待送出 / 送出 / 寄回 / 确认再入库），页面顶部给提示并给「看这张单」。
     """
     item = db.get(WmsItem, _form_int(item_id))
     existing = repairs_service.open_order_of(db, item.id) if item else None
@@ -2842,9 +3296,10 @@ def wms_repair_new(request: Request, item_id: int = 0, db: Session = Depends(get
         crumb_leaf="开单",
         item=item,
         existing=existing,
-        # 没带 item_id 时才需要挑货（列表页那张卡仍可就地开单）
+        # 没带 item_id 时才需要挑货（页面顶部改成模糊搜索带入，2026-10-15）
         candidates=[] if item else intake.list_items(db, grade="C", limit=200),
-        channels=list(REPAIR_CHANNEL_LABELS.items()),
+        # 通道固定三选（老数据里的 C1/C2 只在列表里照旧显示，不给新单选）
+        channels=[(c, REPAIR_CHANNEL_LABELS[c]) for c in REPAIR_CHANNELS],
     )
 
 
@@ -2895,8 +3350,12 @@ async def wms_repair_action(request: Request, repair_id: int, db: Session = Depe
                                  operator=operator)
             msg = "已登记送修，开始时效倒计时"
         elif action == "return":
-            repairs_service.return_back(db, repair_id, operator=operator)
-            msg = "已登记修回：货品进复检池，必须重新检测定级"
+            repairs_service.return_back(db, repair_id, operator=operator,
+                                        waybill_no=str(form.get("waybill_no") or ""))
+            msg = "已登记寄回（在途回程）—— 货到了点「确认再入库」搬账"
+        elif action == "restock":
+            repairs_service.restock(db, repair_id, operator=operator)
+            msg = "已确认再入库：货品进复检池，必须重新检测定级"
         elif action == "cancel":
             repairs_service.cancel(db, repair_id, reason=str(form.get("reason") or ""),
                                    operator=operator)
