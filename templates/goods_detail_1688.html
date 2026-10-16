@@ -291,6 +291,17 @@
   .pdp-params td.mono-sm, .pdp-params td .mono-sm {
     font-family: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
   }
+  /* 「闲鱼发布铺货信息」页签（2026-10-16 用户要求）：**所有字段一个字号一个字体** ——
+     以前 销售价 / 库存 / 图片 三行套了 mono（JetBrains Mono 的 x-height 比正文高，
+     同一列看着大一号），描述行又单独给了 12px 灰色，一页里三四个字号。
+     数字保留 tabular 等宽特性，列不会跳。 */
+  #pdpTabHandoff .prefill-row { font-size: 13px; }
+  #pdpTabHandoff .prefill-row .k, #pdpTabHandoff .prefill-row .v { font-size: 13px; }
+  #pdpTabHandoff .prefill-row .v, #pdpTabHandoff .prefill-row .v.mono {
+    font-family: inherit; color: var(--c-text); font-variant-numeric: tabular-nums;
+  }
+  /* 描述按块分行（保留换行），一眼看清 标题 / 卖点 / 规格 / 发货 / 售后 */
+  #pdpTabHandoff .prefill-row .v.desc { white-space: pre-wrap; line-height: 1.7; }
 
   /* ======== 左列底部：上架与库存情况 ======== */
   .pdp-statcard { margin-top: var(--s-3); padding: var(--s-4); }
@@ -1152,15 +1163,15 @@
             <div class="prefill-row"><span class="k">标题</span>
               <span class="v">{{ package.title }}</span></div>
             <div class="prefill-row"><span class="k">销售价</span>
-              <span class="v mono">¥{{ '%.2f' % suggested_price }}{% if package.original_price %} ／ 市场价 ¥{{ package.original_price }}{% endif %}</span></div>
-            <div class="prefill-row"><span class="k">库存</span><span class="v mono">{{ package.stock }} 件</span></div>
-            <div class="prefill-row"><span class="k">图片</span><span class="v mono">{{ (images | length) + (detail_images | length) }} 张（主图 {{ images | length }} + 详情图 {{ detail_images | length }}）</span></div>
+              <span class="v">¥{{ '%.2f' % suggested_price }}{% if package.original_price %} ／ 市场价 ¥{{ package.original_price }}{% endif %}</span></div>
+            <div class="prefill-row"><span class="k">库存</span><span class="v">{{ package.stock }} 件</span></div>
+            <div class="prefill-row"><span class="k">图片</span><span class="v">{{ (images | length) + (detail_images | length) }} 张（主图 {{ images | length }} + 详情图 {{ detail_images | length }}）</span></div>
             <div class="prefill-row"><span class="k">建议类目</span><span class="v">{{ package.category_text }}</span></div>
             <div class="prefill-row"><span class="k">成色</span><span class="v">{{ package.condition }}</span></div>
             <div class="prefill-row"><span class="k">发货 / 售后</span>
               <span class="v">{{ package.delivery }} · {{ package.after_sale }} · {{ package.freight }}</span></div>
             <div class="prefill-row"><span class="k">描述</span>
-              <span class="v" style="font-size: 12px; color: var(--c-text-muted);">{{ package.description }}</span></div>
+              <span class="v desc">{{ package.description }}</span></div>
           </div>
 
           {% if package.skus %}

@@ -1778,6 +1778,16 @@
     sel.appendChild(new Option(value + '（原类目）', value));
   }
 
+  // 下拉里没有这个值时补一个 —— 老数据的写法（比如售后政策「7天无理由退换」没空格）
+  // 与现在的候选项对不上时，直接 el.value = 会让浏览器选中空值，一保存就把这列清掉。
+  function ensureSelectOption(sel, value) {
+    if (!sel || value === '' || value === null || value === undefined) { return; }
+    for (var i = 0; i < sel.options.length; i++) {
+      if (sel.options[i].value === String(value)) { return; }
+    }
+    sel.appendChild(new Option(String(value) + '（原值）', String(value)));
+  }
+
   // ---------------- 编辑模式：把商品现有资料回填到表单 ----------------
   function applyEditFields() {
     if (!IS_EDIT) { return; }
@@ -1786,6 +1796,9 @@
       if (!el) { return; }
       if (el.type === 'radio' || el.type === 'checkbox') {
         el.checked = String(el.value) === String(EDIT_FIELDS[name]);
+      } else if (el.tagName === 'SELECT') {
+        ensureSelectOption(el, EDIT_FIELDS[name]);
+        el.value = EDIT_FIELDS[name];
       } else {
         el.value = EDIT_FIELDS[name];
       }

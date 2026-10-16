@@ -252,7 +252,7 @@ def preview(session: Session, item: WmsItem, payload: dict) -> dict:
         float(item.purchase_cost or 0.0),
         # 建档 / 编辑时人工填过建议售价的（2026-10-12）以人填的为准：屏幕上的建议售价
         # 与封顶口径必须和提交时一致
-        manual_suggest=float(item.suggest_price or 0.0) or None,
+        manual_suggest=grading.manual_suggest_of(item),
     )
     # 与 submit 的落价口径对齐：只有 N / S / A 会写渔货价（B 修完重判、C/D 按故障估值）。
     # 页面靠这个标记决定「直接提交就按这个价」还是「该档不写价」——别让人以为
@@ -434,11 +434,14 @@ def submit(
     # 2026-10-11（用户：「价格支持修改」）：B/C/D 也放开改价 —— 系统默认还是不出价
     # （要修完重判 / 逐件估值），但检测员填了就按人工定价落库（同一套底价 / 建议售价上限校验）。
     manual = float(manual_price) if manual_price and float(manual_price) > 0 else 0.0
+    # 建议售价（2026-10-16）：人填过的是一个「人工值」（尊重它，不重算）；
+    # 系统按系数自动算的那台每次定级都跟着新档重算（见 grading.manual_suggest_of）。
+    manual_suggest = grading.manual_suggest_of(item)
     if final in grading.PRICED_GRADES:
         price = grading.price_of(
             session, final, float(item.base_price or 0.0), float(item.purchase_cost or 0.0),
             manual_price=manual_price,
-            manual_suggest=float(item.suggest_price or 0.0) or None,
+            manual_suggest=grading.manual_suggest_of(item),
         )
         # 2026-10-10：改价只许往上调 —— 低于「低于基准价此比例需审批」那条线直接拒绝，
         # 不是提醒一句就放行（真要低价卖就去找主管审，不能在检测台随手改）
@@ -452,6 +455,12 @@ def submit(
                 f"要更低就得走审批"
             )
         item.selling_price = float(price.get("price") or 0.0)
+        # 建议售价（2026-10-16 用户要求）：定级时按该档「建议售价系数」一起算出来写回，
+        # 以前只写渔货价、这一列永远空着，渔枢只能拿「市场价 × 0.5」兜底，
+        # 兜出来的价有时比渔货价还低。人手工填过的不动（price_of 里以人工值为准）。
+        if manual_suggest is None:
+            item.suggest_price = float(price.get("suggest_price") or 0.0)
+            item.suggest_auto = True
         if manual:
             default = round(float(item.base_price or 0.0) * float(price.get("factor") or 1.0), 2)
             clamped = bool(price.get("clamped_by_suggest"))
@@ -467,7 +476,7 @@ def submit(
         price = grading.price_of(
             session, final, float(item.base_price or 0.0), float(item.purchase_cost or 0.0),
             manual_price=manual,
-            manual_suggest=float(item.suggest_price or 0.0) or None,
+            manual_suggest=grading.manual_suggest_of(item),
         )
         if price.get("manual_below_floor"):
             raise ValueError(
@@ -478,6 +487,9 @@ def submit(
                 f"要更低就得走审批"
             )
         item.selling_price = float(price.get("price") or 0.0)
+        if manual_suggest is None:
+            item.suggest_price = float(price.get("suggest_price") or 0.0)
+            item.suggest_auto = True
         clamped = bool(price.get("clamped_by_suggest"))
         audit.log(
             session, "item", item.id, "price",
@@ -593,6 +605,9 @@ def reset_to_inbound(
     # ② 清掉定级与定价的痕迹（照片 / 检项明细在 WmsTestRecord 里，一条没丢）
     item.grade = GRADE_W
     item.selling_price = 0.0
+    # 建议售价是跟着定级算出来的 —— 退回原始状态一并清掉（留着会把下一次出价封顶）
+    item.suggest_price = 0.0
+    item.suggest_auto = False
     item.residual_value = 0.0
     item.grade_reason = ""
     item.graded_at = None

@@ -17,6 +17,7 @@ import html
 import itertools
 import json
 import logging
+import math
 import re
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -252,8 +253,12 @@ def category_suggestions(session: Session) -> list[str]:
             values.append(existing)
     return values
 FREIGHT_TEMPLATES: list[str] = ["全国包邮", "按件运费", "偏远地区加收", "自提 / 到付"]
+# 售后政策（2026-10-16 口径）：新增商品一律默认「非质量问题不退不换」——
+# 我们卖的是尾货 / 二手检测机，只保质量问题，7 天无理由会把退货率抬上去。
+# 放在列表第一位 = 新建表单默认选中的那一项（模板按 loop.first 选中）。
+DEFAULT_AFTER_SALE = "非质量问题不退不换"
 AFTER_SALE_OPTIONS: list[str] = [
-    "7 天无理由退换", "非质量问题不退不换", "质量问题包退换", "不支持退换",
+    DEFAULT_AFTER_SALE, "7 天无理由退换", "质量问题包退换", "不支持退换",
 ]
 
 TEXT_FIELDS = (
@@ -1250,6 +1255,9 @@ def create_product(session: Session, form, created_by: str = "") -> Product:
             f"商品编码「{product.code}」已被商品「{clash_code.name}」占用，请换一个"
         )
     _apply_form(session, product, form)
+    # 售后政策没选（接口建档 / 表单没带这一项）就按默认口径：非质量问题不退不换
+    if not (product.after_sale or "").strip():
+        product.after_sale = DEFAULT_AFTER_SALE
     apply_shipping_defaults(session, product)
     if is_supply_chain(product) and not (product.supplier_name or "").strip():
         raise ValueError("供应链商品必须选择具体对应的供应链")
@@ -2291,7 +2299,8 @@ def import_from_yushangzai(
     # 销售价（建议售价）= 渔集建议售价，没填（渔集 864/866 都没填）→
     # **市场价 × 0.5 兜底**（与存量老商品「销售价 = 市场价一半」口径一致），
     # 市场价也没有才回落渔货价 —— 保证导入出来的商品有毛利空间，不再销售价=渔货价
-    fallback_price = round(base_price * SUGGEST_FALLBACK_RATIO, 2)
+    # 向下取整到元（2026-10-16 用户拍板）：兜底价也算「系统给出的价」，一视同仁
+    fallback_price = math.floor(round(base_price * SUGGEST_FALLBACK_RATIO, 6))
     product.fish_price = selling
     product.price = suggest or fallback_price or selling
     product.original_price = base_price
@@ -2395,7 +2404,7 @@ def split_product_skus(session: Session, product: Product,
             product_id=int(product.id or 0),
             spec=spec[:255],
             price=float(it.suggest_price or 0.0)
-            or round(float(it.base_price or 0.0) * SUGGEST_FALLBACK_RATIO, 2)
+            or math.floor(round(float(it.base_price or 0.0) * SUGGEST_FALLBACK_RATIO, 6))
             or selling,
             cost_amount=selling,
             fish_price=selling,

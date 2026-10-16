@@ -1038,6 +1038,10 @@ class WmsItem(Base):
     # 留空（0）就按「市场价 × 建议售价系数」算出来（见 WmsPriceRule.suggest_factor）；
     # 渔枢「扫渔集货品」带出资料时优先用它 —— 人工填过的数不该被系数盖掉。
     suggest_price: Mapped[float] = mapped_column(Float, default=0.0)
+    # 2026-10-16：上面那个建议售价是「检测定级时按该档系数自动算的」还是「人填的」。
+    # 自动算的那台下一次定级要跟着新档重算（不然老档算出来的建议售价会把新档的渔货价
+    # 压住 —— 渔货价不得高于建议售价）；**人填的一个字不动**（人工值优先于系数）。
+    suggest_auto: Mapped[bool] = mapped_column(Boolean, default=False)
     residual_value: Mapped[float] = mapped_column(Float, default=0.0)
     battery_health: Mapped[int | None] = mapped_column(Integer, nullable=True)
     grade_reason: Mapped[str] = mapped_column(Text, default="")

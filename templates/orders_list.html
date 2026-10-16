@@ -19,11 +19,11 @@
 {% macro flow_of(dso) -%}
   {% set s = dso.status %}
   {% if s == 'pending' %}待你确认接单
-  {% elif s == 'confirmed' %}已确认，待推给渔枢系统采购
-  {% elif s == 'pushed' %}已推单，渔枢系统采购中
+  {% elif s == 'confirmed' %}已确认，待发货
+  {% elif s == 'pushed' %}已推给渔枢系统采购，等它发货
   {% elif s == 'shipped' %}已发货{% if dso.shipping_no %} · {{ dso.shipping_company or '' }} {{ dso.shipping_no }}{% endif %}
   {% elif s == 'completed' %}交易完成
-  {% elif s == 'refunding' %}退款中，等平台处理
+  {% elif s == 'refunding' %}退款处理中，等平台确认
   {% elif s == 'refunded' %}已退款
   {% elif s == 'exception' %}异常单，需要人工处理
   {% elif s == 'cancelled' %}已关闭
@@ -72,12 +72,12 @@
      class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-outline-secondary{% endif %}">
     全部 <span class="ms-1" style="font-family: var(--font-mono);">{{ total }}</span>
   </a>
-  {# 状态机里定义过的状态都列出来（含新增的已发货 / 退款中 / 已取消），顺序也按正向流程 #}
-  {% for st in status_order %}
-    {% set cnt = status_counts.get(st, 0) %}
-    <a href="{{ self_url('/orders?status=' ~ st ~ acc_qs) }}"
-       class="btn btn-sm {% if status_filter == st %}btn-primary{% else %}btn-outline-secondary{% endif %}">
-      {{ status_badge(st) }}
+  {# 2026-10-16 用户拍板：状态收敛成七个（待确认 / 待发货 / 已发货 / 已完成 /
+     已退款 / 已关闭 / 异常单）—— 已推单并入待发货、退款中并入已退款。#}
+  {% for key, label, cnt in status_groups %}
+    <a href="{{ self_url('/orders?status=' ~ key ~ acc_qs) }}"
+       class="btn btn-sm {% if status_filter == key %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+      {{ label }}
       <span class="ms-1" style="font-family: var(--font-mono);">{{ cnt }}</span>
     </a>
   {% endfor %}

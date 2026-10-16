@@ -77,13 +77,13 @@
     </tbody>
   </table></div>
   {% else %}{{ bits.empty('没有符合条件的货品') }}{% endif %}
-  {# 分页（2026-10-11 起真分页；2026-10-16 换全站统一组件 _pager.html，
-     与 HUB / 渔货栈同一份：窗口页码 + 跳页 + 「共 N 条」，筛选条件照旧一路带着）#}
-  {{ pager(page, pages, '/wms/items',
-           {'q': filters.q, 'status': filters.status, 'grade': filters.grade,
-            'warehouse': filters.warehouse, 'category': filters.category},
-           total, size=page_size) }}
 </div>
+
+{# 分页：2026-10-16 换全站统一组件 _pager.html（窗口页码 + 跳页 + 「共 N 条」），位置与渔枢一致 —— 列表卡片下面靠右下角 #}
+{{ pager(page, pages, '/wms/items',
+         {'q': filters.q, 'status': filters.status, 'grade': filters.grade,
+          'warehouse': filters.warehouse, 'category': filters.category},
+         total, size=page_size) }}
 {% endblock %}
 
 {% block head_extra %}

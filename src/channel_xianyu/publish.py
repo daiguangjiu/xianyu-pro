@@ -202,26 +202,38 @@ def _collect_images(item: SupplierItem) -> list[str]:
 
 
 def _build_description(item: SupplierItem, hint: str) -> str:
-    """发布描述：卖点 → 参数 → 发货 / 售后承诺（人工可再改）。"""
-    lines: list[str] = []
+    """发布描述（2026-10-16 规整）：标题 → 卖点 → 规格 → 发货 / 售后，一行一块。
+
+    以前末尾还挂着「类目：1688-653。进价 ¥45.50。建议描述点：…」—— 这是要贴进
+    闲鱼商品描述的：类目 id 买家看不懂、进货价是底价不能往外说。现在只留**买家
+    读得懂、又不漏底价**的几块（``hint`` 见 ``prepare._build_description_hint``）。
+    """
+    lines: list[str] = [str(item.title or "").strip()]
     if item.selling_points:
-        lines.append(item.selling_points.strip())
-    lines.append(f"{item.title}（全新正品）")
-    if item.spec_defs:
-        for spec in item.spec_defs:
-            if not isinstance(spec, dict):
-                continue
-            name, values = spec.get("name"), spec.get("values")
-            if name and values:
-                lines.append(f"{name}：{' / '.join(str(v) for v in values)}")
-    lines.append(f"发货时效：{int(item.delivery_days or 2)} 天内发出")
-    lines.append(f"售后：{item.after_sale or '7天无理由退换'}")
-    lines.append(hint)
+        lines.append("【卖点】" + str(item.selling_points).strip())
+    specs: list[str] = []
+    for spec in item.spec_defs or []:
+        if not isinstance(spec, dict):
+            continue
+        name, values = spec.get("name"), spec.get("values")
+        if name and values:
+            specs.append(f"{name}：{' / '.join(str(v) for v in values)}")
+    if specs:
+        lines.append("【规格】" + "；".join(specs))
+    lines.append(f"【发货】{int(item.delivery_days or 2)} 天内发出")
+    lines.append(f"【售后】{item.after_sale or '7天无理由退换'}")
+    if hint:
+        lines.append(hint)
     return "\n".join(line for line in lines if line).strip()
 
 
 def _category_text(item: SupplierItem) -> str:
-    """建议挂载的闲鱼类目：优先用本站前台类目路径，否则回落 1688 类目 id。"""
+    """建议挂载的闲鱼类目：**必须给人看得懂的中文路径**。
+
+    2026-10-16：以前认不到就回落 ``item.category_id``，页面上就成了
+    「类目：1688-653」「类目：ht_decor」这种机器码（用户当场指出来的）。
+    认不出中文路径一律写「其他」—— 宁可让人手填，也不把机器码贴到闲鱼上。
+    """
     try:
         from src.goods.catalog import category_path
 
@@ -230,7 +242,11 @@ def _category_text(item: SupplierItem) -> str:
             return paths[item.category_id]
     except Exception:  # noqa: BLE001 - 类目表缺失不影响预填包
         pass
-    return item.category_id or "其他"
+    raw = str(item.category_id or "")
+    # 带中文才说明是条能读的类目路径（如「家用电器 › 电饭煲」）
+    if raw and any("一" <= ch <= "鿿" for ch in raw):
+        return raw
+    return "其他"
 
 
 # =====================================================================

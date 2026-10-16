@@ -1043,8 +1043,11 @@
     .me-quick a:hover { background: var(--c-b2b-soft); color: var(--c-b2b-deep); }
 
     /* —— 统一分页条：与渔枢同一套 templates/_pager.html（页数超过 10 页自动多一个跳页框）—— */
+    /* 分页条位置（2026-10-16 与渔枢对齐）：一律挂在列表卡片**下面**、靠**右下角**，
+       与列表右边缘同一条线 —— 三端（渔枢 / 渔货栈 / 渔集）同一份组件、同一个位置。 */
     .pager-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 14px; }
-    .pager { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .pager-wrap .pager { margin-top: 0; margin-left: auto; justify-content: flex-end; }
+    .pager { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
     .pager .btn.sm, .btn.sm {
       display: inline-flex; align-items: center; justify-content: center;
       min-height: 30px; min-width: 32px; padding: 5px 10px;
@@ -2724,14 +2727,16 @@
         <div class="nav-sub">
           {# 渔货栈自己的订单管理：链接必须走 self_url 补 /self 前缀 ——
              裸的 /orders 是渔枢系统的订单页（两端同一个端口），点进去就跑到那端去了 #}
+          {# 2026-10-16 用户拍板：状态收敛成七个（已推单并入待发货、退款中并入已退款） #}
           {% set order_subs = [
-            ('orders:all',       self_url('/orders'),                  '全部订单', 'dso_total'),
-            ('orders:pending',   self_url('/orders?status=pending'),   '待确认',   'pending'),
-            ('orders:confirmed', self_url('/orders?status=confirmed'), '待发货',   'confirmed'),
-            ('orders:pushed',    self_url('/orders?status=pushed'),    '已推单',   'pushed'),
-            ('orders:completed', self_url('/orders?status=completed'), '已完成',   'completed'),
-            ('orders:exception', self_url('/orders?status=exception'), '异常单',   'exception'),
-            ('orders:refunded',  self_url('/orders?status=refunded'),  '退款单',   'refunded'),
+            ('orders:all',        self_url('/orders'),                   '全部订单', 'dso_total'),
+            ('orders:pending',    self_url('/orders?status=pending'),    '待确认',   'pending'),
+            ('orders:to_ship',    self_url('/orders?status=to_ship'),    '待发货',   'to_ship'),
+            ('orders:shipped',    self_url('/orders?status=shipped'),    '已发货',   'shipped'),
+            ('orders:completed',  self_url('/orders?status=completed'),  '已完成',   'completed'),
+            ('orders:refunded',   self_url('/orders?status=refunded'),   '已退款',   'refunded'),
+            ('orders:closed',     self_url('/orders?status=closed'),     '已关闭',   'closed'),
+            ('orders:exception',  self_url('/orders?status=exception'),  '异常单',   'exception'),
           ] %}
           {% for key, href, label, cnt_key in order_subs %}
             <a href="{{ href }}" class="nav-sub-item {% if active_sub == key %}active{% endif %}">
@@ -2827,11 +2832,12 @@
         ('orders', '我要录单', self_url('/orders/new'), 'bi-pencil-square', '', 'orders:new'),
         ('orders', '全部订单', self_url('/orders'), 'bi-receipt', 'dso_total', 'orders:all'),
         ('orders', '待确认', self_url('/orders?status=pending'), 'bi-hourglass-split', 'pending', 'orders:pending'),
-        ('orders', '待发货', self_url('/orders?status=confirmed'), 'bi-send', 'confirmed', 'orders:confirmed'),
-        ('orders', '已推单', self_url('/orders?status=pushed'), 'bi-truck', 'pushed', 'orders:pushed'),
+        ('orders', '待发货', self_url('/orders?status=to_ship'), 'bi-send', 'to_ship', 'orders:to_ship'),
+        ('orders', '已发货', self_url('/orders?status=shipped'), 'bi-truck', 'shipped', 'orders:shipped'),
         ('orders', '已完成', self_url('/orders?status=completed'), 'bi-check2-circle', 'completed', 'orders:completed'),
+        ('orders', '已退款', self_url('/orders?status=refunded'), 'bi-arrow-counterclockwise', 'refunded', 'orders:refunded'),
+        ('orders', '已关闭', self_url('/orders?status=closed'), 'bi-x-circle', 'closed', 'orders:closed'),
         ('orders', '异常单', self_url('/orders?status=exception'), 'bi-exclamation-octagon', 'exception', 'orders:exception'),
-        ('orders', '退款单', self_url('/orders?status=refunded'), 'bi-arrow-counterclockwise', 'refunded', 'orders:refunded'),
       ]),
       ('交易 · 采购', [
         ('cart', '采购车', self_url('/cart'), 'bi-cart3', 'cart', 'purchase:cart'),

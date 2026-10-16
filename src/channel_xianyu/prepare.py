@@ -547,14 +547,33 @@ def export_json(drafts: list[XianyuListingDraft], file_path: str | Path) -> Path
 # =====================================================================
 # 工具函数
 # =====================================================================
+def _category_label(item: SupplierItem) -> str:
+    """类目的**中文路径**（预填给闲鱼时用），认不到就空串 —— 别把类目 id 往外给。
+
+    2026-10-16：以前直接写 ``item.category_id``，页面上就成了「类目：1688-653」
+    这种机器码，买家看不懂、运营也没法核对。
+    """
+    try:
+        from src.goods.catalog import category_path
+
+        paths = category_path()
+        if item.category_id and item.category_id in paths:
+            return str(paths[item.category_id] or "")
+    except Exception:  # noqa: BLE001 - 类目表缺失不影响预填包
+        pass
+    return ""
+
+
 def _build_description_hint(item: SupplierItem) -> str:
-    """生成推荐描述文案（人工可参考修改）。"""
-    cost = float(item.cost_price or 0)
-    cat = item.category_id or "日用百货"
-    return (
-        f"【工厂一手货源】类目：{cat}。"
-        f"进价 ¥{cost:.2f}。建议描述点：质量、发货时效、售后政策。"
-    )
+    """生成推荐描述文案（人工可参考修改）。
+
+    2026-10-16 重写：这段文案是要**贴进闲鱼商品描述**的，以前写的
+    「【工厂一手货源】类目：1688-653。进价 ¥45.50。建议描述点：…」两句都留不得 ——
+    类目 id 买家看不懂，**进货价是底价更不能往外说**，「建议描述点」是给运营看的
+    内部提示，也不该出现在商品描述里。现在只留一句人读得懂、又不漏底价的话。
+    """
+    cat = _category_label(item)
+    return f"【{cat or '精选好货'} · 一手货源】全新正品，现货速发。"
 
 
 def _count_images(item: SupplierItem) -> int:

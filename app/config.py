@@ -99,6 +99,10 @@ class Settings:
     ocr_lang: str = "chi_sim+eng"
     # OCR 前把图片灰度并放大的倍数（截图小字必需，1 表示只灰度不放大）
     ocr_upscale: int = 2
+    # 单次 tesseract 调用的超时秒数（手机长截图放大后很吃 CPU，超时就当这张版本失败）
+    ocr_timeout: int = 180
+    # 同时最多跑几个 tesseract 进程（小机器上并发 OCR 互相拖慢，全都撞超时）
+    ocr_max_concurrent: int = 2
     # 从订单截图里裁出商品缩略图（依赖 tesseract 词框定位，裁剪不出就跳过）
     product_image_crop: bool = True
     # 订单截图按区域裁剪再识别（金额为主）：整图那些小字召回很差，裁出来放大
@@ -384,6 +388,8 @@ settings = Settings(
     ocr_http_text_key=_env("OCR_HTTP_TEXT_KEY", "text"),
     ocr_lang=_env("OCR_LANG", "chi_sim+eng"),
     ocr_upscale=_env_int("OCR_UPSCALE", 2),
+    ocr_timeout=max(30, _env_int("OCR_TIMEOUT", 180)),
+    ocr_max_concurrent=max(1, _env_int("OCR_MAX_CONCURRENCY", 2)),
     product_image_crop=_env("PRODUCT_IMAGE_CROP", "1").lower() in ("1", "true", "yes", "on"),
     ocr_roi=_env("OCR_ROI", "1").lower() in ("1", "true", "yes", "on"),
     ocr_roi_name=_env("OCR_ROI_NAME", "0").lower() in ("1", "true", "yes", "on"),

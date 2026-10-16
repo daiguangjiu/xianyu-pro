@@ -24,6 +24,10 @@
     padding:var(--s-3)}
   .field.key input{border-color:var(--c-primary-border);background:#fff;font-weight:600}
   .prof-tip{font-size:12.5px;color:var(--c-text-muted);margin:6px 0 0}
+  /* —— 提交按钮行（2026-10-16）：**别用 .bar** ——
+     wms_design.css 里 .bar 是报表那根「占比条」（height:8px + overflow:hidden），
+     套在按钮行上会把保存按钮裁成一条 8px 的灰条，看上去就是「没有保存按钮」。 */
+  .btn-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:var(--s-4)}
 </style>
 {% endblock %}
 
@@ -102,7 +106,7 @@
         </div>
       </div>
 
-      <div class="bar" style="margin-top:var(--s-4)">
+      <div class="btn-row">
         <button class="btn primary"><i class="bi bi-check2"></i> 保存（同步 {{ items | length }} 个条码商品）</button>
         <a class="btn" href="/wms/goods/{{ fish_code }}">取消</a>
       </div>

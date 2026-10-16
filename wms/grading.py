@@ -35,6 +35,34 @@ from .models import (
     grade_label,
 )
 
+def floor_price(value) -> float:
+    """价格向下取整到元（2026-10-16 用户拍板）：¥184.06 → ¥184.00。
+
+    全渔集统一走这一个函数（分级定价、人工改价、建档 / 编辑填价、历史数据批处理），
+    免得各处各写一份取整、价格对不上。小数是浮点算出来的（基准价 × 系数），
+    先按 6 位小数抹掉浮点误差再取整，避免 184.00000001 这种被判成 185。
+    """
+    try:
+        amount = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return float(math.floor(round(amount, 6)))
+
+
+def manual_suggest_of(item) -> float | None:
+    """这台货的「建议售价」算不算**人工值**（2026-10-16）。
+
+    系统按该档系数自动算出来的（``suggest_auto=True``）下次定级要跟着新档重算 ——
+    不然老档算出来的建议售价会把新档的渔货价压住（渔货价不得高于建议售价）；
+    **人填的一律尊重**（人工值优先于系数），返回它本身。
+    """
+    if item is None:
+        return None
+    if getattr(item, "suggest_auto", False):
+        return None
+    return float(item.suggest_price or 0.0) or None
+
+
 # 检测定级时**会写渔货价**的档位（其余档位屏幕上的数字只是参考）：
 # N 全新 / S 完美 / A 微瑕直接上架；B 修完重判、C/D 走报修与拆机件估值。
 # 检测台与货品详情页改价都按这套口径，别各写一份。
@@ -676,15 +704,13 @@ def price_of(
     cost = float(purchase_cost or 0.0)
     # 价格一律**向下取整到元**（2026-10-15 用户拍板）：¥218.99 这种小数没人会用，
     # 报价、打印、渔枢渔货栈三边对不上的祸根就是它。人工填的也照取整收。
-    manual_suggest_value = (
-        math.floor(float(manual_suggest)) if manual_suggest else 0.0
-    )
+    manual_suggest_value = floor_price(manual_suggest) if manual_suggest else 0.0
     suggest_price = manual_suggest_value or (
-        math.floor(base * suggest_factor) if base > 0 else 0.0
+        floor_price(base * suggest_factor) if base > 0 else 0.0
     )
-    price = math.floor(float(manual_price)) if manual_price else math.floor(base * factor)
+    price = floor_price(manual_price) if manual_price else floor_price(base * factor)
     if price <= 0:
-        price = math.floor(base * factor)
+        price = floor_price(base * factor)
     # 封顶：渔货价不能高过建议售价（人工改价改超了也一样压回来）
     clamped_by_suggest = bool(suggest_price > 0 and price > suggest_price)
     if clamped_by_suggest:

@@ -20,9 +20,19 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from sqlalchemy import select
+
+
+def _floor(value) -> float:
+    """价格向下取整到元（2026-10-16 用户拍板）：¥184.06 → ¥184.00。"""
+    try:
+        amount = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return float(math.floor(round(amount, 6)))
 
 logger = logging.getLogger(__name__)
 
@@ -163,9 +173,11 @@ def sync_price_from_wms(
     if not code:
         return empty
 
-    fish = round(float(selling_price or 0.0), 2)
+    # 价格一律向下取整到元（2026-10-16 用户拍板）：渔集那边已经取整，这里的
+    # 「市场价 × 0.5」兜底价也要取整 —— 不然渔货价是整数、建议售价却带小数。
+    fish = _floor(float(selling_price or 0.0))
     base = round(float(base_price or 0.0), 2)
-    suggest = round(float(suggest_price or 0.0), 2) or round(base * 0.5, 2) or fish
+    suggest = _floor(float(suggest_price or 0.0)) or _floor(base * 0.5) or fish
 
     from ..db import SessionLocal
     from ..models import Product
@@ -231,6 +243,77 @@ def sync_price_from_wms(
                 f"{product.name}：渔货价 ¥{old_fish:g} → ¥{fish:g}，销售价 ¥{old_price:g} → ¥{suggest:g}"
                 + ("（价格变动通知已发出）" if notice else "")
             ],
+        }
+
+
+def sync_profile_from_wms(
+    fish_code: str,
+    *,
+    brand: str = "",
+    model: str = "",
+    spec: str = "",
+) -> dict[str, Any]:
+    """渔集商品资料（品牌 / 型号 / 规格）→ 渔枢商品档案 + 渔货栈货源（2026-10-16）。
+
+    渔集把型号规格补出来（或人在「编辑商品信息」页改了）之后，这两边的商品详情页
+    要跟着显示 —— 渔枢 ``/products/{code}`` 与渔货栈「规格参数」页签本来就有这两行。
+
+    口径与 :func:`sync_price_from_wms` 一致：**渔集是源头**，改了就跟着改；
+    **传进来为空的那一项不动**（渔集那边也没填 → 别把渔枢已有的清掉）。
+    渔枢里认不到这款商品（商家编码 ≠ 渔货号）不报错，返回摘要让调用方自己决定说不说。
+    """
+    empty: dict[str, Any] = {"updated": False, "notes": []}
+    code = str(fish_code or "").strip().upper()
+    if not code:
+        return empty
+    picked = {
+        "brand": str(brand or "").strip(),
+        "model": str(model or "").strip(),
+        "spec": str(spec or "").strip(),
+    }
+    if not any(picked.values()):
+        return empty
+
+    from ..db import SessionLocal
+    from ..models import Product
+    from ..timeutil import now
+
+    with SessionLocal() as db:
+        product = db.scalar(select(Product).where(Product.code == code))
+        if product is None:
+            return {**empty, "notes": [f"渔枢里没有商家编码为 {code} 的商品，资料没同步"]}
+
+        changed: list[str] = []
+        for col, value in picked.items():
+            if not value:
+                continue
+            if str(getattr(product, col) or "").strip() == value:
+                continue
+            setattr(product, col, value)
+            changed.append(col)
+        if not changed:
+            return {**empty, "notes": ["渔枢这边已经是这个值了"]}
+        product.updated_at = now()
+
+        # 渔货栈那条货源（hub-prd-<商品id>）一起改
+        try:
+            from src.models import SupplierItem
+
+            src_item = db.scalar(
+                select(SupplierItem).where(SupplierItem.item_id == f"hub-prd-{product.id}")
+            )
+            if src_item is not None:
+                for col, value in picked.items():
+                    if value:
+                        setattr(src_item, col, value)
+        except Exception:  # noqa: BLE001  渔货栈表不在（分端部署）→ 只改渔枢
+            logger.info("渔货栈货源资料同步跳过（表不可读）", exc_info=True)
+
+        db.commit()
+        label = {"brand": "品牌", "model": "型号", "spec": "规格"}
+        return {
+            "updated": True,
+            "notes": [f"{product.name}：" + "、".join(f"{label[c]}→{picked[c]}" for c in changed)],
         }
 
 

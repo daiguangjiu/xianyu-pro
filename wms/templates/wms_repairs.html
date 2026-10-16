@@ -55,8 +55,9 @@
     <a class="rchip {{ 'on' if filters.status == v }}" href="/wms/repairs?status={{ v }}">{{ t }} {{ status_counts.get(v, 0) }}</a>
     {% endfor %}
   </div>
-  <div class="filters padded">
-    <form method="get" action="/wms/repairs">
+  {# 2026-10-16 用户要求：筛选条件一行摆开 —— .filters 必须直接挂在 form 上，
+     挂在外层 div 上（form 是块级）会让每个 .field 各占一行 #}
+  <form method="get" action="/wms/repairs" class="filters padded">
       <div class="field grow"><label for="f-q">单号 / 条码 / 网点 / 凭证号</label>
         <input id="f-q" type="search" name="q" value="{{ filters.q }}"></div>
       <div class="field"><label for="f-s">状态</label>
@@ -65,9 +66,8 @@
       <div class="field"><label for="f-to">只看超时</label>
         <select id="f-to" name="timeout"><option value="">不限</option>
           <option value="1" {{ 'selected' if filters.timeout == '1' }}>只看超时</option></select></div>
-      <div class="field"><label>&nbsp;</label><button class="btn">筛选</button></div>
-    </form>
-  </div>
+      <div class="field submit"><label>&nbsp;</label><button class="btn">筛选</button></div>
+  </form>
   {% if orders %}
   <div class="table-wrap"><table>
     <thead><tr><th>工单号</th><th>条码</th><th>通道</th><th>渠道 / 网点</th><th>凭证号</th>

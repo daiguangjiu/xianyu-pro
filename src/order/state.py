@@ -53,6 +53,80 @@ STATUS_ORDER: tuple[str, ...] = (
     S_REFUNDING, S_REFUNDED, S_CANCELLED, S_EXCEPTION,
 )
 
+# --------------------------------------------------------------------- 对外七态
+# 2026-10-16 用户拍板：页面 / 筛选只认这七个状态，内部九个状态收敛过来 ——
+#   · 已推单（已推给渔枢系统采购）本质上还是「等着发货」→ 合并进 待发货
+#   · 退款中是 已退款 的过程态 → 合并进 已退款
+#   · 已取消 → 改叫 已关闭
+# 状态机本身不改（推单 / 退款中这些动作还要流转），只收敛「给人看、给人筛」的口径。
+G_PENDING = "pending"        # 待确认
+G_TO_SHIP = "to_ship"        # 待发货（= 待发货 + 已推单）
+G_SHIPPED = "shipped"        # 已发货
+G_COMPLETED = "completed"    # 已完成
+G_REFUNDED = "refunded"      # 已退款（= 退款中 + 已退款）
+G_CLOSED = "closed"          # 已关闭（= 已取消）
+G_EXCEPTION = "exception"    # 异常单
+
+GROUP_LABELS: dict[str, str] = {
+    G_PENDING: "待确认",
+    G_TO_SHIP: "待发货",
+    G_SHIPPED: "已发货",
+    G_COMPLETED: "已完成",
+    G_REFUNDED: "已退款",
+    G_CLOSED: "已关闭",
+    G_EXCEPTION: "异常单",
+}
+
+# 筛选 chips 的顺序：正向在前，逆向与终态在后
+GROUP_ORDER: tuple[str, ...] = (
+    G_PENDING, G_TO_SHIP, G_SHIPPED, G_COMPLETED, G_REFUNDED, G_CLOSED, G_EXCEPTION,
+)
+
+# 一个对外状态 = 哪几个内部状态
+GROUP_STATUSES: dict[str, tuple[str, ...]] = {
+    G_PENDING: (S_PENDING,),
+    G_TO_SHIP: (S_CONFIRMED, S_PUSHED),
+    G_SHIPPED: (S_SHIPPED,),
+    G_COMPLETED: (S_COMPLETED,),
+    G_REFUNDED: (S_REFUNDING, S_REFUNDED),
+    G_CLOSED: (S_CANCELLED,),
+    G_EXCEPTION: (S_EXCEPTION,),
+}
+
+# 内部状态 → 对外状态（反查表，页面徽标用）
+_GROUP_OF: dict[str, str] = {
+    st: grp for grp, sts in GROUP_STATUSES.items() for st in sts
+}
+
+
+def group_of(status: str | None) -> str:
+    """内部状态属于哪个对外状态（认不出就原样返回）。"""
+    return _GROUP_OF.get(status or "", status or G_PENDING)
+
+
+def group_label(status: str | None) -> str:
+    """内部状态在页面上显示的中文名（走七态口径）。"""
+    return GROUP_LABELS.get(group_of(status), status_label(status))
+
+
+def display_labels() -> dict[str, str]:
+    """内部状态 → 展示用中文名（给模板的 status_labels，徽标一律落到七态）。"""
+    return {st: group_label(st) for st in STATUS_LABELS}
+
+
+def statuses_of_group(group: str) -> tuple[str, ...]:
+    """筛选某个对外状态时，实际要查哪几个内部状态（认不出就按原值精确查）。"""
+    return GROUP_STATUSES.get(group or "", (group,)) if group else ()
+
+
+def group_counts(counts: dict[str, int]) -> dict[str, int]:
+    """把「内部状态 → 条数」汇总成「对外状态 → 条数」。"""
+    out = {g: 0 for g in GROUP_ORDER}
+    for st, n in (counts or {}).items():
+        g = group_of(st)
+        out[g] = out.get(g, 0) + int(n or 0)
+    return out
+
 # 终态：不再往下流转（撤单退款完成也算走完）
 TERMINAL_STATUSES: frozenset[str] = frozenset({S_COMPLETED, S_REFUNDED, S_CANCELLED})
 

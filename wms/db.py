@@ -132,6 +132,8 @@ _NEW_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("suggest_price", "FLOAT DEFAULT 0", "FLOAT DEFAULT 0"),
         # 2026-10-14：渔货号 —— 商品款编码（YS + 日期 + 当天流水），一个渔货号挂多个条码商品
         ("fish_code", "VARCHAR(32) DEFAULT ''", "VARCHAR(32) DEFAULT ''"),
+        # 2026-10-16：建议售价是不是系统按系数自动算的（True = 下次定级跟着重算）
+        ("suggest_auto", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
     ),
     # 注意：这张表以前在同一个 dict 里写了两次（后一次把前一次覆盖，mixed 补不上），
     # 现在合并成一个键，两列都会补。

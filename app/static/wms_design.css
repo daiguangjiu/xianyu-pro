@@ -319,8 +319,12 @@
     .kv .k{color:var(--c-text-muted)}
     .kv .v{min-width:0;overflow-wrap:anywhere}
     /* 分页（2026-10-16 起统一用根 templates/_pager.html 组件，外壳 class 与 HUB / 渔货栈同名）：
-       .pager-wrap 是组件外壳（信息条 / 每页条数 / 页码一行排开），.pager 是页码区 */
+       .pager-wrap 是组件外壳（信息条 / 每页条数 / 页码一行排开），.pager 是页码区。
+       位置与渔枢一致：挂在列表卡片**下面**、靠**右下角**（.pager margin-left:auto）。 */
     .pager-wrap{display:flex;gap:var(--s-3);align-items:center;flex-wrap:wrap;margin-top:var(--s-4)}
+    .pager-wrap .pager{margin-top:0;margin-left:auto;justify-content:flex-end}
+    /* 万一分页条留在 .card.flush（padding:0）里，补回左右下内边距，别贴着卡片边 */
+    .card.flush > .pager-wrap{padding:0 var(--s-5) var(--s-4)}
     .pager-size{display:flex;gap:6px;align-items:center}
     .pager-size select{width:auto;min-width:0}
     .pager-wrap > .pager-info{margin-left:auto;font-size:12px;color:var(--c-text-muted)}

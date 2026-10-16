@@ -68,13 +68,28 @@ def order_no_from_text(text: str) -> tuple[str, str]:
     return "", ""
 
 
+# 「已复制收货信息」弹窗会把「手机号-8893」连成一串（18448261335-8893 → 15 位），
+# 长度恰好够到疑似订单号的门槛 —— 实测（2026-10-16）被当成疑似单号提示给运营。
+# 数字串的主体是手机号、前后只挂了零星几位的，不是订单号。
+_PHONE_IN_DIGITS = re.compile(r"1[3-9]\d{9}")
+
+
+def _is_phone_with_tail(digits: str) -> bool:
+    match = _PHONE_IN_DIGITS.search(digits or "")
+    if not match:
+        return False
+    rest = digits[: match.start()] + digits[match.end() :]
+    return len(rest) <= 4
+
+
 def order_no_hints_from_text(text: str) -> list[str]:
     """没有标签时的疑似订单号：文本里像订单号的长数字串（不直接采信）。"""
     out: list[str] = []
     for raw in re.findall(r"[0-9][0-9 \t\-]{14,40}", text or ""):
         value = _tidy(raw, HINT_MIN_LEN)
-        if value and value not in out:
-            out.append(value)
+        if not value or value in out or _is_phone_with_tail(value):
+            continue
+        out.append(value)
     return out
 
 

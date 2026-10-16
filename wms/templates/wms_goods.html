@@ -121,13 +121,14 @@
     </tbody>
   </table></div>
   {% else %}{{ bits.empty('没有符合条件的款（换个筛选条件，或先去「批次与建档」把货导进来）') }}{% endif %}
-  {# 全站统一分页组件（2026-10-16 换 _pager.html，筛选条件照旧一路带着）#}
-  {{ pager(page, pages, '/wms/goods',
-           {'q': filters.q, 'category': filters.category, 'brand': filters.brand,
-            'priced': filters.priced, 'suggested': filters.suggested,
-            'qty_min': filters.qty_min, 'qty_max': filters.qty_max},
-           total, size=page_size) }}
 </div>
+
+{# 全站统一分页组件（2026-10-16 换 _pager.html），位置与渔枢一致 —— 列表卡片下面靠右下角 #}
+{{ pager(page, pages, '/wms/goods',
+         {'q': filters.q, 'category': filters.category, 'brand': filters.brand,
+          'priced': filters.priced, 'suggested': filters.suggested,
+          'qty_min': filters.qty_min, 'qty_max': filters.qty_max},
+         total, size=page_size) }}
 {% endblock %}
 
 {% block scripts %}

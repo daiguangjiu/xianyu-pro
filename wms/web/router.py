@@ -1650,12 +1650,12 @@ def wms_item_detail(request: Request, item_id: int, db: Session = Depends(get_db
         # 建档 / 编辑时人工填过建议售价的（2026-10-12）以人填的为准 —— 与封顶口径一致
         quote=grading.price_of(
             db, item.grade, float(item.base_price or 0.0), float(item.purchase_cost or 0.0),
-            manual_suggest=float(item.suggest_price or 0.0) or None,
+            manual_suggest=grading.manual_suggest_of(item),
         ),
         default_price=float(item.selling_price or 0.0)
         or float(grading.price_of(db, item.grade, float(item.base_price or 0.0),
                                   float(item.purchase_cost or 0.0),
-                                  manual_suggest=float(item.suggest_price or 0.0) or None,
+                                  manual_suggest=grading.manual_suggest_of(item),
                                   ).get("price") or 0.0),
     )
 
@@ -1868,7 +1868,7 @@ async def wms_item_price(request: Request, item_id: int, db: Session = Depends(g
     old_selling = round(float(item.selling_price or 0.0), 2)
     old_suggest = round(float(item.suggest_price or 0.0), 2)
     check = grading.price_of(db, item.grade, base, cost, manual_price=price or None,
-                             manual_suggest=float(item.suggest_price or 0.0) or None)
+                             manual_suggest=grading.manual_suggest_of(item))
     if check.get("manual_below_floor"):
         return _redirect(
             f"/wms/items/{item_id}",

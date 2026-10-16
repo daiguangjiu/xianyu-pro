@@ -1,8 +1,10 @@
 """2026-10-16 用户拍板：渔货栈订单**按账号匹配显示所属订单**。
 
-· 管理员与「自营账号组」看全量（可按账号筛选）；
-· 其余账号（学员等）只看自己店铺账号（店铺档案 name = 闲鱼账号）的单，
-  不能把所有人的单都塞给部分权限的账号 —— 详情页也拦（敲 URL 按「不在你名下」处理）；
+· **只有管理员看全量**（可按账号筛选）；
+· 其余账号**一律**只看自己店铺账号（店铺档案 name = 闲鱼账号）的单 ——
+  连「自营账号组」也一样隔离（用户第二次追加的口径：不能把部分权限的单全塞给
+  自营账号组），不能把所有人的单都塞给部分权限的账号；
+· 详情页也拦（敲 URL 按「不在你名下」打回列表）；
 · 列表加「账号」列 + 账号筛选下拉 + 统一分页组件。
 """
 from __future__ import annotations
@@ -27,6 +29,7 @@ from app.models import (  # noqa: E402
     ORDER_ORIGIN_SELF,
     ORDER_STATE_NEW,
     Order,
+    Role,
     Shop,
     User,
 )
@@ -37,7 +40,9 @@ from src.models import DownstreamOrder  # noqa: E402
 
 ACC_A = "学员鱼号A"
 ACC_B = "别人鱼号B"
-_STU_USERS = ("stu_acc_a", "stu_acc_none")
+SELF_RUN_ROLE = "自营账号组"
+_ROLE_KEY = "test_self_run_scope"
+_STU_USERS = ("stu_acc_a", "stu_acc_none", "self_run_b")
 
 
 def _wipe() -> None:
@@ -46,6 +51,9 @@ def _wipe() -> None:
         s.query(DownstreamOrder).delete(synchronize_session=False)
         s.query(Shop).delete(synchronize_session=False)
         s.query(User).filter(User.username.in_(_STU_USERS)).delete(synchronize_session=False)
+        role = s.scalar(select(Role).where(Role.key == _ROLE_KEY))
+        if role is not None:
+            s.delete(role)
         s.commit()
 
 
@@ -58,6 +66,27 @@ def _user(username: str) -> int:
             s, username, "stu-pass-2026", role="user", portals="self",
             display_name=username,
         )
+        return row.id
+
+
+def _self_run_user(username: str) -> int:
+    """自营账号组的人：挂一个 Role(name=自营账号组)，用来验证**它也被按账号隔离**。"""
+    with SessionLocal() as s:
+        role = s.scalar(select(Role).where(Role.key == _ROLE_KEY))
+        if role is None:
+            role = Role(key=_ROLE_KEY, name=SELF_RUN_ROLE, menus=["orders"],
+                        description="测试用：自营账号组")
+            s.add(role)
+            s.flush()
+        role.name = SELF_RUN_ROLE
+        row = s.scalar(select(User).where(User.username == username))
+        if row is None:
+            row = users_service.create_user(
+                s, username, "self-run-pass-2026", role="user", portals="self",
+                display_name=username,
+            )
+        row.role_id = role.id
+        s.commit()
         return row.id
 
 
@@ -181,6 +210,30 @@ class OrderAccountScopeTest(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         self.assertIn("先去「店铺管理」", page.text)
         self.assertNotIn("TXYA0001", page.text, "没挂店铺的账号一单都看不到")
+
+    # ------------------------------------------------- 自营账号组同样隔离
+    def test_30_self_run_group_is_scoped_too(self):
+        """2026-10-16 追加口径：自营账号组也不再看全量，只认自己店铺账号的单。"""
+        uid = _self_run_user("self_run_b")
+        _shop(ACC_B, uid)
+        page = self._get("/self/orders", uid)
+        self.assertEqual(page.status_code, 200)
+        html = page.text
+        self.assertIn("TXYB0001", html, "自己账号的单看得到")
+        self.assertNotIn("TXYA0001", html, "别人的账号的单不给看（含自营账号组）")
+        self.assertNotIn("TXYA0002", html)
+        self.assertIn("只显示你名下店铺账号的单", html)
+
+    def test_31_self_run_detail_of_other_account_is_blocked(self):
+        uid = _self_run_user("self_run_b")
+        _shop(ACC_B, uid)
+        resp = self.client.get(
+            "/self/orders/TXYA0001",
+            cookies={COOKIE_NAME: make_session(uid)[0]},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+        self.assertIn("不在你名下的店铺账号", unquote(resp.headers["location"]))
 
 
 if __name__ == "__main__":

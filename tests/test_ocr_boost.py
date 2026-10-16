@@ -29,6 +29,7 @@ from app.config import settings  # noqa: E402
 from app.db import SessionLocal, init_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Order, OrderImage, RawMessage  # noqa: E402
+from app.parser import ocr as ocr_mod  # noqa: E402
 from app.parser.ocr import OcrText  # noqa: E402
 from app.parser.order_no import order_no_from_text, order_no_hints_from_text  # noqa: E402
 from app.services import ingest as ingest_service  # noqa: E402
@@ -281,3 +282,79 @@ class OcrBoostTest(unittest.TestCase):
             s.commit()
             fields = {"receiver_name": "李四", "receiver_phone": "13739259130"}
             self.assertIsNone(ingest_service.find_order_for_late_screenshot(s, fields, CHAT))
+
+    # ------------------------------------------------------------ 8 OCR 超时不连坐（2026-10-16 线上故障）
+    def _variants(self) -> list[Path]:
+        vdir = Path(self._tmp.name) / "variants"
+        vdir.mkdir(exist_ok=True)
+        out = []
+        for name in ("x_gray.png", "x_sharp.png"):
+            p = vdir / name
+            p.write_bytes(b"png")
+            out.append(p)
+        return out
+
+    def test_20_variant_timeout_does_not_kill_rest(self):
+        """单个预处理版本超时不再连坐：剩下的版本结果照常合并返回。
+
+        线上故障（2026-10-16）：手机长截图 + 并发 OCR，tesseract 180 秒超时 →
+        整次 OCR 判 failed、文本一个字不留 → 订单号读不出 → 临时单号一直配不上。
+        """
+        variants = self._variants()
+
+        def fake_run(target, lang, extra):
+            if target.name.endswith("_sharp.png"):
+                raise ocr_mod.OcrError("Command timed out after 180 seconds")
+            return f"订单编号   {REAL_NO}"
+
+        with mock.patch.object(ocr_mod, "_prepare_variants", return_value=variants), \
+                mock.patch.object(ocr_mod, "_run_tesseract", side_effect=fake_run):
+            text = ocr_mod._ocr_tesseract(Path("fake.png"))
+        self.assertIn(REAL_NO, text, "没超时的版本结果要留下来")
+
+    def test_21_all_variants_failed_raises(self):
+        """所有版本都失败才报错（保持 failed 状态语义不变）。"""
+        variants = self._variants()
+        with mock.patch.object(ocr_mod, "_prepare_variants", return_value=variants), \
+                mock.patch.object(
+                    ocr_mod, "_run_tesseract", side_effect=ocr_mod.OcrError("timed out")
+                ):
+            with self.assertRaises(ocr_mod.OcrError):
+                ocr_mod._ocr_tesseract(Path("fake.png"))
+
+    def test_22_variants_capped_for_long_screenshots(self):
+        """手机长截图：放大倍数压到像素上限内，且跳过更高倍的锐化版。"""
+        from PIL import Image
+
+        big = Path(self._tmp.name) / "big.png"
+        Image.new("L", (1080, 2400)).save(big)  # 线上超时的那类 1080×2400 截图
+        variants = ocr_mod._prepare_variants(big)
+        names = [v.stem.rsplit("_", 1)[-1] for v in variants]
+        self.assertNotIn("sharp", names, "大图不再跑更高倍的锐化版")
+        limit = ocr_mod._VARIANT_MAX_PIXELS * 1.01
+        for v in variants:
+            with Image.open(v) as im:
+                self.assertLessEqual(im.width * im.height, limit, f"{v.name} 放大后超像素上限")
+
+    def test_23_small_image_keeps_all_variants(self):
+        """小图不受影响：三个预处理版本照旧。"""
+        from PIL import Image
+
+        small = Path(self._tmp.name) / "small.png"
+        Image.new("L", (480, 800)).save(small)
+        variants = ocr_mod._prepare_variants(small)
+        names = [v.stem.rsplit("_", 1)[-1] for v in variants]
+        self.assertEqual(names, ["gray", "sharp", "binary"])
+
+    # ------------------------------------------------------------ 9 假疑似单号过滤
+    def test_24_hint_ignores_phone_with_tail(self):
+        """「已复制收货信息」弹窗的「手机号-8893」连成一串不再是疑似订单号。
+
+        线上案例（订单 #303）：hint=184482613358893（手机号 18448261335 + 弹窗尾巴 8893）。
+        """
+        self.assertEqual(
+            order_no_hints_from_text("已复制收货信息\n韦丽宝[8893]\n18448261335-8893"),
+            [],
+            "手机号 + 尾巴不是订单号",
+        )
+        self.assertIn(REAL_NO, order_no_hints_from_text(f"订单编号 {REAL_NO} 复制"), "真订单号照常给出")

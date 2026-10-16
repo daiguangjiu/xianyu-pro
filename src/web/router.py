@@ -252,13 +252,16 @@ templates.env.globals["harbor_url"] = harbor_url
 # ---------------------------------------------------------------------
 STATUS_TEXT: dict[str, str] = {
     # 下游订单（DSO）
+    # 2026-10-16 用户拍板：对外只认七态 —— 已推单并入待发货、退款中并入已退款、已取消叫已关闭
     "pending": "待确认",
-    "confirmed": "待推单",
-    "pushed": "已推单",
+    "confirmed": "待发货",
+    "pushed": "待发货",
     "shipped": "已发货",
     "completed": "已完成",
     "exception": "异常单",
+    "refunding": "已退款",
     "refunded": "已退款",
+    "cancelled": "已关闭",
     # 采购单（PO）
     "init": "待推单",
     "paid": "已付款",
@@ -301,6 +304,8 @@ def _nav_counts(db: Session, request: Request | None = None) -> dict[str, int]:
         ).all()
     )
     total_orders = sum(dso.values())
+    # 对外七态计数（菜单角标与订单页 chips 同一口径：已推单并入待发货、退款中并入已退款）
+    grouped_orders = order_state.group_counts(dso)
 
     # 商品：按来源 / 审核状态聚合（一次扫表，供侧边栏与商品管理页共用）
     by_source = dict(
@@ -321,12 +326,16 @@ def _nav_counts(db: Session, request: Request | None = None) -> dict[str, int]:
     return {
         "orders": total_orders,
         "dso_total": total_orders,
-        "pending": dso.get("pending", 0),
+        "pending": grouped_orders.get("pending", 0),
+        "to_ship": grouped_orders.get("to_ship", 0),
+        "shipped": grouped_orders.get("shipped", 0),
+        "completed": grouped_orders.get("completed", 0),
+        "refunded": grouped_orders.get("refunded", 0),
+        "closed": grouped_orders.get("closed", 0),
+        "exception": grouped_orders.get("exception", 0),
+        # 老键名保留（别的页面还在用）
         "confirmed": dso.get("confirmed", 0),
         "pushed": dso.get("pushed", 0) + dso.get("shipped", 0),
-        "completed": dso.get("completed", 0),
-        "exception": dso.get("exception", 0),
-        "refunded": dso.get("refunded", 0),
         "items": sum(by_source.values()),
         "items_pending": by_audit.get("pending", 0),
         "items_self": by_source.get("self_operated", 0),
@@ -1672,8 +1681,9 @@ def _order_account_of(row: dict) -> str:
     return ""
 
 
-# 订单可见范围（2026-10-16 用户拍板）：管理员与「自营账号组」看全量；
-# 其余账号（学员等）**只看自己店铺账号**的单 —— 不能把所有人的单都塞给部分权限的账号。
+# 订单可见范围（2026-10-16 用户拍板）：**所有人的订单都按账号隔离**，
+# 连「自营账号组」也一样 —— 只给平台管理员（渔枢 admin）留全量视图做兜底，
+# 其余账号只看自己店铺账号（店铺档案 name = 闲鱼账号）的单。
 ORDERS_FETCH_CAP = 2000
 ORDERS_PER_PAGE = 50
 
@@ -1681,12 +1691,7 @@ ORDERS_PER_PAGE = 50
 def _orders_view_scope(request: Request) -> tuple[bool, list[str], list[str]]:
     """返回 (是否看全量, 我的账号名列表, 账号筛选下拉选项)。"""
     hub = hub_shops.viewer(request)
-    role_name = hub_shops.viewer_role_name(hub)
-    full_view = (
-        hub is None  # 未接渔枢系统（单独部署）：无从对账号，维持全量
-        or str(getattr(hub, "role", "") or "") == "admin"
-        or role_name.strip() == hub_shops.SELF_RUN_ROLE_NAME
-    )
+    full_view = hub is None or str(getattr(hub, "role", "") or "") == "admin"
     uid = getattr(hub, "id", None)
     my_accounts = hub_shops.my_account_names(int(uid)) if uid else []
     if full_view:
@@ -1721,8 +1726,11 @@ def orders_list(
     full_view, my_accounts, account_options = _orders_view_scope(request)
 
     stmt = select(DownstreamOrder).order_by(DownstreamOrder.created_at.desc())
-    if status:
-        stmt = stmt.where(DownstreamOrder.status == status)
+    # 筛选按「对外七态」：一个状态可能对应多个内部状态（如 待发货 = 待发货 + 已推单）
+    group_want = str(status or "").strip()
+    group_statuses = order_state.statuses_of_group(group_want)
+    if group_statuses:
+        stmt = stmt.where(DownstreamOrder.status.in_(group_statuses))
     dsos = db.execute(stmt.limit(ORDERS_FETCH_CAP)).scalars().all()
 
     dso_ids = [d.downstream_order_id for d in dsos]
@@ -1758,9 +1766,11 @@ def orders_list(
         rows.append(row)
         visible.append(d)
 
+    # 状态计数：内部九个状态汇总成对外七个（chips 与列表徽标同一个口径）
     status_counts: dict[str, int] = {}
     for d in visible:
-        status_counts[d.status] = status_counts.get(d.status, 0) + 1
+        g = order_state.group_of(d.status)
+        status_counts[g] = status_counts.get(g, 0) + 1
 
     # 统一分页（2026-10-16 用户拍板「所有列表都按分页逻辑走」）
     total = len(rows)
@@ -1770,11 +1780,16 @@ def orders_list(
 
     ctx = _common_ctx(
         request, "orders", db=db,
-        active_sub=f"orders:{status}" if status else "orders:all",
-        nav_crumb=["交易", "订单"] + ([status] if status else ["全部订单"]),
+        active_sub=f"orders:{group_want}" if group_want else "orders:all",
+        nav_crumb=["交易", "订单"]
+        + ([order_state.GROUP_LABELS.get(group_want, group_want)] if group_want else ["全部订单"]),
         rows=rows,
-        status_filter=status,
+        status_filter=group_want,
         status_counts=status_counts,
+        status_groups=[
+            (g, order_state.GROUP_LABELS[g], status_counts.get(g, 0))
+            for g in order_state.GROUP_ORDER
+        ],
         total=total,
         # 账号匹配（2026-10-16）：全部 / 我的账号集合 / 筛选下拉选项 / 当前选中
         full_view=full_view,
@@ -1786,9 +1801,9 @@ def orders_list(
         per_page=ORDERS_PER_PAGE,
         hub_available=hub_orders.available(),
         hub_count=sum(1 for r in rows if r["hub"]),
-        # 状态机：列表页的筛选 chips 与状态列都按这套状态来（含新增的已发货 / 退款中 / 已取消）
-        status_labels=order_state.STATUS_LABELS,
-        status_order=order_state.STATUS_ORDER,
+        # 状态展示一律走对外七态（待确认 / 待发货 / 已发货 / 已完成 / 已退款 / 已关闭 / 异常单）
+        status_labels=order_state.display_labels(),
+        status_order=order_state.GROUP_ORDER,
         msg=msg,
         kind=kind,
     )
@@ -1926,7 +1941,8 @@ def order_detail(
         # 渔货栈自己的毛利（定稿公式，成本用渔货价而不是渔枢系统的飞书群成本价）
         self_profit=order_flow.self_profit(dsos, hub),
         events=events,
-        status_labels=order_state.STATUS_LABELS,
+        # 状态展示走对外七态（与列表页同一个口径）；进度条内部节点仍用 fsum
+        status_labels=order_state.display_labels(),
         action_labels={k: v.label for k, v in order_state.ACTIONS.items()},
         synced=synced,
         msg=msg, kind=kind,

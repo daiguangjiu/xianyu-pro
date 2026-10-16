@@ -38,7 +38,9 @@ from .models import (
     l1_code_of,
 )
 from . import audit
+from . import grading
 from . import ledger
+from . import profile_guess
 
 logger = logging.getLogger(__name__)
 
@@ -556,6 +558,15 @@ def register(
             raise ValueError(f"条码重复（{barcode}），请重试")
         # 渔货号：行里显式带了就认它（历史数据迁移 / 手工指定），否则按商品名认亲
         product_name = str(raw.get("product_name") or "").strip()
+        # 型号 / 规格（2026-10-16 用户要求）：清单里没写就按商品名认一次 ——
+        # 认不出来的留空（绝不猜一个凑数），人填过的原样保留。
+        guess = profile_guess.guess_of(
+            product_name,
+            str(raw.get("brand") or "").strip(),
+            extra=dict(raw.get("extra") or {}),
+            model=str(raw.get("model") or "").strip(),
+            spec=str(raw.get("spec") or "").strip(),
+        )
         item = WmsItem(
             barcode=barcode,
             display_code=display_code_of(barcode),
@@ -567,8 +578,8 @@ def register(
             product_name=product_name,
             fish_code=str(raw.get("fish_code") or "").strip().upper()
             or resolve_fish_code(session, product_name, index=fish_pool),
-            model=str(raw.get("model") or "").strip(),
-            spec=str(raw.get("spec") or "").strip(),
+            model=guess["model"],
+            spec=guess["spec"],
             serial_no=str(raw.get("serial_no") or "").strip(),
             # 数量（2026-10-10）：这一条货有几台，同一条码、整台流转
             qty=norm_qty(raw.get("qty")),
@@ -583,8 +594,9 @@ def register(
             purchase_cost=float(raw.get("purchase_cost") or 0.0),
             # 渔货价 / 建议售价（2026-10-12）：建档时人工填的初始值（照渔枢的价格口径）。
             # 留空（0）就等检测定级时按「市场价 × 该档系数 / 建议售价系数」算出来。
-            selling_price=float(raw.get("selling_price") or 0.0),
-            suggest_price=float(raw.get("suggest_price") or 0.0),
+            # 一律向下取整到元（2026-10-16 用户拍板）：¥184.06 → ¥184.00。
+            selling_price=grading.floor_price(raw.get("selling_price")),
+            suggest_price=grading.floor_price(raw.get("suggest_price")),
             base_price=float(raw.get("base_price") or 0.0),
             photos=list(raw.get("photos") or []),
             created_at=_now(),
@@ -809,7 +821,13 @@ def update_item(
     ):
         if key not in fields:
             continue
+        # 建议售价是人在表单里填的 → 打回「人工值」（系统算的那台会跟着定级重算）
+        if key == "suggest_price":
+            item.suggest_auto = False
         new_cost = round(float(fields.get(key) or 0.0), 2)
+        # 渔货价 / 建议售价向下取整到元（2026-10-16 用户拍板），成本价与市场价保留原值
+        if key in ("selling_price", "suggest_price"):
+            new_cost = grading.floor_price(new_cost)
         old_cost = round(float(getattr(item, key) or 0.0), 2)
         if new_cost != old_cost:
             setattr(item, key, new_cost)
@@ -902,6 +920,20 @@ def update_goods_profile(
             total += 1
             if not summary:
                 summary = changed
+    # 商品资料同步（2026-10-16 用户要求）：型号 / 规格在渔集改了（含系统补出来的），
+    # 渔枢商品档案与渔货栈货源的「型号 / 规格」两行要跟着显示 —— 桥断只降级。
+    head = rows[0]
+    try:
+        from . import bridge
+
+        bridge.push_profile_change(
+            code,
+            brand=str(head.brand or ""),
+            model=str(head.model or ""),
+            spec=str(head.spec or ""),
+        )
+    except Exception:  # noqa: BLE001  同步是账，保存是现场 —— 失败不拖整款保存
+        logger.warning("商品资料同步渔枢 / 渔货栈失败", exc_info=True)
     return total, summary
 
 

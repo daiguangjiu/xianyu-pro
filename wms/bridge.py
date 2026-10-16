@@ -358,6 +358,36 @@ def push_price_change(
         return empty
 
 
+def push_profile_change(
+    fish_code: str,
+    *,
+    brand: str = "",
+    model: str = "",
+    spec: str = "",
+) -> dict:
+    """渔集商品资料（品牌 / 型号 / 规格）→ 渔枢商品档案 + 渔货栈货源（2026-10-16）。
+
+    边界照 ``push_price_change``：独立部署直接不推；桥断 / 同步失败只打日志，
+    **绝不让渔集这边的保存动作失败**。
+    """
+    empty: dict = {"updated": False, "notes": []}
+    code = str(fish_code or "").strip().upper()
+    if standalone() or not code:
+        return empty
+    try:
+        from app.services.wms_bridge import sync_profile_from_wms
+    except Exception:  # noqa: BLE001  平台侧没这个模块（独立部署 / 老版本）
+        logger.info("渔枢商品资料同步不可用（跳过）", exc_info=True)
+        return empty
+    try:
+        return sync_profile_from_wms(
+            code, brand=str(brand or ""), model=str(model or ""), spec=str(spec or "")
+        )
+    except Exception:  # noqa: BLE001  同步失败不影响渔集保存
+        logger.warning("渔枢 / 渔货栈商品资料同步失败（不影响渔集保存）", exc_info=True)
+        return empty
+
+
 def price_sync_note(report: dict | None) -> str:
     """把 ``push_price_change()`` 的摘要翻成一句人话（页面提示用）。没同步到就空串。"""
     if not report:

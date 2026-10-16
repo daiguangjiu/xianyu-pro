@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,6 +32,26 @@ from .order_no import (
 )
 
 logger = logging.getLogger(__name__)
+
+# 单个预处理版本放大后的像素上限：手机长截图（1080×2400 左右）在 3 倍放大下
+# 有 23MP，chi_sim+eng 在小机器上一次跑不完超时（2026-10-16 线上：整单 OCR
+# 全部 180s 超时、临时单号一直配不上真号）。超过上限的版本把放大倍数压回来。
+_VARIANT_MAX_PIXELS = 9_000_000
+# tesseract 全局并发闸：几单同时进来时并发 OCR 互相抢 CPU，会集体变慢到集体
+# 超时（越超时越重试、越重试越慢的死亡螺旋）。排队跑反而更快更稳。
+_TESS_SEMAPHORE = threading.Semaphore(max(1, int(getattr(settings, "ocr_max_concurrent", 2) or 2)))
+
+
+def _timeout_of() -> int:
+    return max(30, int(getattr(settings, "ocr_timeout", 180) or 180))
+
+
+def _clamp_factor(width: int, height: int, factor: float) -> float:
+    """放大倍数按「放大后像素量不超过 _VARIANT_MAX_PIXELS」压一压。"""
+    if width <= 0 or height <= 0:
+        return 1.0
+    cap = (_VARIANT_MAX_PIXELS / (width * height)) ** 0.5
+    return max(min(float(factor), cap), 1.0)
 
 
 class OcrError(RuntimeError):
@@ -141,8 +162,12 @@ def _prepare_image(path: Path) -> Path:
     try:
         with Image.open(path) as im:
             im = im.convert("L")
-            if scale > 1:
-                im = im.resize((im.width * scale, im.height * scale), Image.LANCZOS)
+            factor = _clamp_factor(im.width, im.height, scale)
+            if factor > 1:
+                im = im.resize(
+                    (max(int(round(im.width * factor)), 1), max(int(round(im.height * factor)), 1)),
+                    Image.LANCZOS,
+                )
             out_dir = Path(tempfile.mkdtemp(prefix="ocr_"))
             out = out_dir / f"{path.stem[:40]}.png"
             im.save(out)
@@ -168,15 +193,26 @@ def _prepare_variants(path: Path) -> list[Path]:
         variants: list[Path] = []
         with Image.open(path) as raw:
             base = raw.convert("L")
-            plans = [
+            cap_factor = _clamp_factor(base.width, base.height, 99.0)
+            plans = []
+            for name, factor, contrast, threshold in [
                 ("gray", scale, False, None),
                 ("sharp", scale + 1, True, None),
                 ("binary", scale, False, 165),
-            ]
+            ]:
+                factor = min(float(factor), cap_factor)
+                # 原图大到要压倍数（约 2MP 以上的手机长截图），更高倍的锐化版
+                # 只会更慢、还没 gray 版信息多 —— 直接跳过，省一半时间
+                if name == "sharp" and factor < 2:
+                    continue
+                plans.append((name, factor, contrast, threshold))
             for name, factor, contrast, threshold in plans:
                 im = base
                 if factor > 1:
-                    im = im.resize((im.width * factor, im.height * factor), Image.LANCZOS)
+                    im = im.resize(
+                        (max(int(round(im.width * factor)), 1), max(int(round(im.height * factor)), 1)),
+                        Image.LANCZOS,
+                    )
                 if contrast:
                     im = ImageOps.autocontrast(im)
                 if threshold is not None:
@@ -209,7 +245,8 @@ def _run_tesseract(target: Path, lang: str, extra: list[str]) -> str:
     if not exe:
         raise OcrError("未找到 tesseract 命令，请先安装：brew install tesseract")
     cmd = [exe, str(target), "stdout", "-l", lang, *extra]
-    out = subprocess.run(cmd, capture_output=True, timeout=180)
+    with _TESS_SEMAPHORE:  # 全局排队：并发 OCR 抢 CPU 会集体拖到超时
+        out = subprocess.run(cmd, capture_output=True, timeout=_timeout_of())
     if out.returncode != 0:
         raise OcrError(
             (out.stderr or b"").decode("utf-8", "replace").strip()[:300] or "tesseract 执行失败"
@@ -219,16 +256,32 @@ def _run_tesseract(target: Path, lang: str, extra: list[str]) -> str:
 
 
 def _ocr_tesseract(path: Path) -> str:
+    """多版本识别合并。**单个版本超时 / 崩溃不再连坐**：
+
+    以前任何一个预处理版本撞超时（大图 + 并发时很容易），整次 OCR 直接判 failed、
+    文本一个字都不留 —— 明明 gray 版已经能认出订单号。现在哪个版本失败就跳过它，
+    把剩下的版本结果合并；全部失败才报错。
+    """
     lang = settings.ocr_lang or "chi_sim+eng"
     variants = _prepare_variants(path)
+    parts: list[str] = []
+    errors: list[str] = []
     try:
-        parts = [_run_tesseract(target, lang, []) for target in variants]
+        for target in variants:
+            try:
+                parts.append(_run_tesseract(target, lang, []))
+            except Exception as exc:  # noqa: BLE001  单版本失败不连坐
+                errors.append(f"{target.stem}: {exc}")
+                logger.warning("OCR 预处理版本失败(%s): %s", target.name, exc)
     finally:
         for target in variants:
             if target != path:
                 shutil.rmtree(target.parent, ignore_errors=True)
                 break
-    return _merge_texts(parts)
+    merged = _merge_texts(parts)
+    if not merged.strip():
+        raise OcrError("；".join(errors) or "tesseract 没有识别出文字")
+    return merged
 
 
 # 订单号专项识别：只认数字（订单号是纯数字），用英文模型 + 白名单
@@ -654,7 +707,8 @@ def _tesseract_tsv(path: Path) -> list[dict]:
     target = _prepare_image(path)
     try:
         cmd = [exe, str(target), "stdout", "-l", settings.ocr_lang or "chi_sim+eng", "tsv"]
-        out = subprocess.run(cmd, capture_output=True, timeout=180)
+        with _TESS_SEMAPHORE:
+            out = subprocess.run(cmd, capture_output=True, timeout=_timeout_of())
         text = out.stdout.decode("utf-8", errors="replace")
     except Exception as exc:  # noqa: BLE001
         logger.warning("tesseract tsv 失败: %s", exc)

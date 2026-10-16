@@ -613,7 +613,10 @@ def publish(db, product: Product, actor: str = "") -> tuple[bool, str]:
     item.shipping_mode = (product.shipping_mode or "").strip() or None
     # 发货时效 / 售后：渔货栈这两列不能为空，渔枢系统没填就用默认值（与货源广场口径一致）
     item.delivery_days = _int_or_none(product.delivery_days) or 2
-    item.after_sale = (product.after_sale or "").strip() or "7天无理由退换"
+    # 售后默认口径与渔枢建档一致：非质量问题不退不换（2026-10-16 定的）
+    from .product import DEFAULT_AFTER_SALE
+
+    item.after_sale = (product.after_sale or "").strip() or DEFAULT_AFTER_SALE
     # —— 价格口径（与渔货栈一致）——
     # cost_price = 采购成本（内部，不对外展示）；fish_price = 渔货价（渔货栈看到的成本价）；
     # sale_price = 建议零售价（渔枢系统端售价）；market_price = 划线价
