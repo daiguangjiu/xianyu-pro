@@ -47,8 +47,15 @@
       <div class="field"><label>联系电话</label>
         <input type="text" name="phone" maxlength="64" placeholder="如：13800138000">
       </div>
-      <div class="field"><label>所在地区</label>
-        <input type="text" name="region" maxlength="128" placeholder="如：广东省 广州市 白云区">
+      <div class="field" data-region-picker>
+        <label>所在地区</label>
+        <div class="region-cascade" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;">
+          <select data-region-province aria-label="省份"><option value="">请选择省份</option></select>
+          <select data-region-city aria-label="城市" disabled><option value="">请选择城市</option></select>
+          <select data-region-area aria-label="区县" disabled><option value="">请选择区县</option></select>
+        </div>
+        <input type="hidden" name="region" value="">
+        <p class="help" data-region-help hidden>行政区划数据加载失败，请刷新页面后重试。</p>
       </div>
       <div class="field span-all"><label>详细地址</label>
         <input type="text" name="address" maxlength="255" placeholder="如：石井街道 xx 工业园 3 号仓">
@@ -106,8 +113,15 @@
           <div class="field"><label>联系电话</label>
             <input type="text" name="phone" value="{{ addr.phone }}" maxlength="64">
           </div>
-          <div class="field"><label>所在地区</label>
-            <input type="text" name="region" value="{{ addr.region }}" maxlength="128">
+          <div class="field" data-region-picker data-region-initial="{{ addr.region }}">
+            <label>所在地区</label>
+            <div class="region-cascade" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;">
+              <select data-region-province aria-label="省份"><option value="">请选择省份</option></select>
+              <select data-region-city aria-label="城市" disabled><option value="">请选择城市</option></select>
+              <select data-region-area aria-label="区县" disabled><option value="">请选择区县</option></select>
+            </div>
+            <input type="hidden" name="region" value="{{ addr.region }}">
+            <p class="help" data-region-help {% if not addr.region %}hidden{% endif %}>如原地区未能自动匹配，请重新选择省、市、区县。</p>
           </div>
           <div class="field span-all"><label>详细地址</label>
             <input type="text" name="address" value="{{ addr.address }}" maxlength="255">
@@ -196,6 +210,102 @@
 </div>
 
 <script>
+  // 省市区数据由本项目静态托管，交互按 xh-fish 的逐级联动选择方式实现。
+  // 区划选项来自本项目 docs/sql/xianyu_logistics_divisions.sql，同步保留其代码、名称和层级。
+  (function () {
+    var dataPromise = fetch('/static/china-region-cascade.json').then(function (response) {
+      if (!response.ok) throw new Error('行政区划数据加载失败');
+      return response.json();
+    });
+    function options(select, placeholder, values, selectedCode) {
+      select.innerHTML = '';
+      var first = document.createElement('option');
+      first.value = '';
+      first.textContent = placeholder;
+      select.appendChild(first);
+      values.forEach(function (item) {
+        var option = document.createElement('option');
+        option.value = item.code;
+        option.textContent = item.name;
+        select.appendChild(option);
+      });
+      select.disabled = values.length === 0;
+      if (selectedCode) select.value = selectedCode;
+    }
+    function init(box, provinces) {
+      var province = box.querySelector('[data-region-province]');
+      var city = box.querySelector('[data-region-city]');
+      var area = box.querySelector('[data-region-area]');
+      var region = box.querySelector('input[name="region"]');
+      var initial = box.getAttribute('data-region-initial') || region.value || '';
+      var selectedProvince = provinces.find(function (item) { return initial.indexOf(item.name) >= 0; });
+      var selectedCity = selectedProvince && selectedProvince.children.find(function (item) {
+        return item.name !== '市辖区' && initial.indexOf(item.name) >= 0;
+      });
+      var selectedArea = selectedCity && selectedCity.children.find(function (item) { return initial.indexOf(item.name) >= 0; });
+      // 直辖市数据以「市辖区」作为中间层，仍保留三级选择，并用省名显示城市。
+      if (selectedProvince && !selectedCity) {
+        selectedCity = selectedProvince.children.find(function (item) { return item.name === '市辖区'; });
+        selectedArea = selectedCity && selectedCity.children.find(function (item) { return initial.indexOf(item.name) >= 0; });
+      }
+      options(province, '请选择省份', provinces, selectedProvince && selectedProvince.code);
+      options(city, '请选择城市', selectedProvince ? selectedProvince.children : [], selectedCity && selectedCity.code);
+      if (selectedProvince && selectedCity && selectedCity.name === '市辖区') {
+        Array.prototype.forEach.call(city.options, function (option) {
+          if (option.value === selectedCity.code) option.textContent = selectedProvince.name;
+        });
+      }
+      options(area, '请选择区县', selectedCity ? selectedCity.children : [], selectedArea && selectedArea.code);
+      function updateRegion() {
+        var p = provinces.find(function (item) { return item.code === province.value; });
+        var c = p && p.children.find(function (item) { return item.code === city.value; });
+        if (p && c && !c.children.length) {
+          region.value = [p.name, c.name].join(' ');
+          var leafHelp = box.querySelector('[data-region-help]');
+          if (leafHelp) leafHelp.hidden = true;
+          return;
+        }
+        var a = c && c.children.find(function (item) { return item.code === area.value; });
+        if (!p || !c || !a) return;
+        var cityName = c.name === '市辖区' ? p.name : c.name;
+        region.value = [p.name, cityName, a.name].join(' ');
+        var help = box.querySelector('[data-region-help]');
+        if (help) help.hidden = true;
+      }
+      province.addEventListener('change', function () {
+        var p = provinces.find(function (item) { return item.code === province.value; });
+        options(city, '请选择城市', p ? p.children : []);
+        options(area, '请选择区县', []);
+        region.value = '';
+      });
+      city.addEventListener('change', function () {
+        var p = provinces.find(function (item) { return item.code === province.value; });
+        var c = p && p.children.find(function (item) { return item.code === city.value; });
+        options(area, '请选择区县', c ? c.children : []);
+        if (c && c.name === '市辖区') {
+          Array.prototype.forEach.call(city.options, function (option) {
+            if (option.value === c.code) option.textContent = p.name;
+          });
+        }
+        region.value = '';
+        if (c && !c.children.length) updateRegion();
+      });
+      area.addEventListener('change', updateRegion);
+      if (selectedProvince && selectedCity && selectedArea) updateRegion();
+    }
+    dataPromise.then(function (provinces) {
+      document.querySelectorAll('[data-region-picker]').forEach(function (box) { init(box, provinces); });
+    }).catch(function () {
+      document.querySelectorAll('[data-region-picker]').forEach(function (box) {
+        var help = box.querySelector('[data-region-help]');
+        if (help) {
+          help.textContent = '行政区划数据加载失败，请刷新页面后重试。';
+          help.hidden = false;
+        }
+      });
+    });
+  })();
+
   // 关联商品：搜索框实时过滤下拉里的选项（商品多的时候不用滚半天）
   (function () {
     document.querySelectorAll('.addr-pick').forEach(function (box) {
