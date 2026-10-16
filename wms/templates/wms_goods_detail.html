@@ -49,6 +49,9 @@
         <span class="muted" style="font-weight:400">（按等级系数算）</span>{% endif %}</span>
       <b class="price-hl">渔货价</b><span class="price-hl">¥{{ money(head.selling_price) }}</span>
       <b class="price-hl">进货价（参考）</b><span class="price-hl">¥{{ money(head.purchase_cost) }}</span>
+      {# 下单时间（2026-10-16 用户要求）：导入清单里沉淀的那列，商品维度聚合出这一款的值；
+         多台时间不一样时 order_time 本身就是「最早 ~ 最晚（N 个时间）」 #}
+      <b>下单时间</b><span>{{ order_time or '—' }}</span>
       <b>涉及批次</b><span>{% if facts.batches %}{% for b in facts.batches %}<span class="mono">{{ b }}</span>{% if not loop.last %} · {% endif %}{% endfor %}{% else %}—{% endif %}</span>
       <b>建档时间</b><span>{{ head.created_at | dt }}</span>
     </div>

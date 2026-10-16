@@ -59,6 +59,9 @@
   {% if cards %}
   <div class="table-wrap"><table>
     <thead><tr><th class="num">#</th><th>渔货号</th><th>产品名称</th>
+      {# 下单时间（2026-10-16 用户要求）：导入清单里那列沉淀在每台货的 extra 里，
+         商品维度把它聚合出来（多台不一样就给区间） #}
+      <th>下单时间</th>
       {# 条码商品数（2026-10-14）：这一款下面挂着几台物理的货 —— 台账的核心数字 #}
       <th class="num">条码商品</th><th class="num">合计台数</th><th class="num">可售台数</th>
       <th class="num">进货价</th><th class="num">渔货价</th><th class="num">建议售价</th><th>操作</th></tr></thead>
@@ -70,6 +73,8 @@
         <td class="wrap2" title="{{ (c.head.product_name or c.head.title) if c.head else '' }}">
           <span class="clamp2">{{ (c.head.product_name or c.head.title) if c.head else '—' }}</span>
           {% if c.head and c.head.brand %}<div class="loc-sub">{{ c.head.brand }}</div>{% endif %}</td>
+        {# 下单时间：没有就显示「—」（这台货的清单里没带这一列） #}
+        <td class="nowrap" title="{{ c.order_time or '这份清单里没有下单时间这一列' }}">{{ c.order_time or '—' }}</td>
         {# 条码商品（2026-10-15 显示优化）：台数胶囊 + 悬停列出这一款名下的显示编码，
             「N 条码 / M 台」一眼看清一款货的构成 #}
         <td class="num" title="{{ c.barcode_tip or '这一款名下还没有条码商品' }}">
@@ -105,7 +110,8 @@
       {% for it in c.split_rows %}
       <tr class="sub-row">
         <td></td>
-        <td colspan="3">└ <a class="mono" href="/wms/items/{{ it.id }}">{{ it.display_code }}</a>
+        {# colspan 跟着表头走：# / 渔货号 / 产品名称 / 下单时间 共 4 格 #}
+        <td colspan="4">└ <a class="mono" href="/wms/items/{{ it.id }}">{{ it.display_code }}</a>
           {% if it.spec %}<span class="muted">· {{ it.spec }}</span>{% endif %}
           {% if it.model %}<span class="muted">· {{ it.model }}</span>{% endif %}</td>
         <td class="num">{{ it.qty }}</td>

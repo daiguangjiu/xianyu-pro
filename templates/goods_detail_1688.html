@@ -1087,6 +1087,9 @@
                空着就显示「—」（渔集那边也还没填） #}
             <tr><th>型号</th><td class="mono-sm">{{ item.model or '—' }}</td></tr>
             <tr><th>规格</th><td>{{ item.spec or '—' }}</td></tr>
+            {# 下单时间（2026-10-16 用户要求）：渔集导入清单里沉淀的那列，随商品资料同步过来；
+               渔集那边一款多台时间不一样时，给的就是「最早 ~ 最晚（N 个时间）」 #}
+            <tr><th>下单时间</th><td class="mono-sm">{{ item.order_time or '—' }}</td></tr>
             <tr><th>类目</th><td>{{ category_text }}</td></tr>
             <tr><th>供应商</th><td class="mono-sm">{{ item.supplier_id or '—' }}</td></tr>
             {# 渔货价就是学员看到的进货价（渔货栈这边没有「成本价」这个概念），

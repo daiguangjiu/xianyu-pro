@@ -1331,6 +1331,22 @@ def _goods_sellable(db: Session, codes: list[str]) -> dict[str, int]:
     return {str(r[0] or ""): int(r[1] or 0) for r in rows}
 
 
+def _goods_order_time(db: Session, codes: list[str]) -> dict[str, str]:
+    """每个渔货号名下的「下单时间」（2026-10-16 用户要求商品维度显示）。
+
+    这个值是导入时按清单表头沉淀进 ``WmsItem.extra`` 的（不是货品的固定列），
+    所以只能从每台货的 extra 里聚合出「款」级的值 —— 多台不一样就给区间。
+    """
+    if not codes:
+        return {}
+    buckets: dict[str, list] = {}
+    for it in db.scalars(
+        select(WmsItem).where(WmsItem.fish_code.in_(codes)).order_by(WmsItem.id)
+    ).all():
+        buckets.setdefault(str(it.fish_code or ""), []).append(it)
+    return {code: intake.order_time_of(rows) for code, rows in buckets.items()}
+
+
 @router.get("/wms/goods", response_class=HTMLResponse)
 def wms_goods(request: Request, q: str = "", category: str = "", brand: str = "",
               priced: str = "", suggested: str = "",
@@ -1349,9 +1365,12 @@ def wms_goods(request: Request, q: str = "", category: str = "", brand: str = ""
     sellable = _goods_sellable(db, codes)
     barcodes = _goods_barcodes(db, codes)
     item_rows = _goods_item_rows(db, codes)
+    order_times = _goods_order_time(db, codes)
     cards = [
         {
             "fish_code": code,
+            # 下单时间（2026-10-16）：导入清单里那列，商品维度也要能一眼看到
+            "order_time": order_times.get(code, ""),
             # 别叫 items：Jinja 里 dict.items 是方法，{{ c.items }} 会渲染成方法对象
             "barcode_cnt": int(int(r[1] or 0)),
             "qty": int(r[2] or 0),
@@ -1431,6 +1450,8 @@ def wms_goods_detail(request: Request, fish_code: str, db: Session = Depends(get
         sub=f"渔货号 {code} · 这一款下面挂着 {len(rows)} 个条码商品",
         crumb_path="/wms/goods", crumb_leaf=code,
         fish_code=code, head=head, items=rows,
+        # 下单时间（2026-10-16）：这一款是哪天下的单（导入时沉淀在每台货的 extra 里）
+        order_time=intake.order_time_of(rows),
         total_qty=sum(int(i.qty or 0) or 1 for i in rows),
         sellable_qty=sum(int(i.qty or 0) or 1 for i in rows
                          if i.status == STATUS_SELLABLE),

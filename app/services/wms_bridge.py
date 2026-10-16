@@ -115,6 +115,9 @@ def lookup_item(code: str) -> dict[str, Any] | None:
             "brand": str(item.brand or ""),
             "model": str(item.model or ""),
             "spec": str(item.spec or ""),
+            # 下单时间（2026-10-16）：导入清单里沉淀的那列（存在 extra 里）；
+            # 渔枢商品档案没有这一列，详情页按「商家编码 == 渔货号」实时读它
+            "order_time": str(intake.order_time_of([item]) or ""),
             "serial_no": str(item.serial_no or ""),
             "category": str(item.category or ""),
             # 类目（2026-10-10）：渔集给两套三级路径 ——
@@ -252,11 +255,16 @@ def sync_profile_from_wms(
     brand: str = "",
     model: str = "",
     spec: str = "",
+    order_time: str = "",
 ) -> dict[str, Any]:
-    """渔集商品资料（品牌 / 型号 / 规格）→ 渔枢商品档案 + 渔货栈货源（2026-10-16）。
+    """渔集商品资料（品牌 / 型号 / 规格 / 下单时间）→ 渔枢商品档案 + 渔货栈货源（2026-10-16）。
 
     渔集把型号规格补出来（或人在「编辑商品信息」页改了）之后，这两边的商品详情页
     要跟着显示 —— 渔枢 ``/products/{code}`` 与渔货栈「规格参数」页签本来就有这两行。
+
+    ``order_time``（下单时间）只写渔货栈货源：它是导入清单沉淀下来的事实，
+    渔枢商品档案没有这一列，详情页按「商家编码 == 渔货号」实时从渔集读（见
+    :func:`lookup_item`），不用落库。
 
     口径与 :func:`sync_price_from_wms` 一致：**渔集是源头**，改了就跟着改；
     **传进来为空的那一项不动**（渔集那边也没填 → 别把渔枢已有的清掉）。
@@ -271,7 +279,8 @@ def sync_profile_from_wms(
         "model": str(model or "").strip(),
         "spec": str(spec or "").strip(),
     }
-    if not any(picked.values()):
+    time_text = str(order_time or "").strip()
+    if not any(picked.values()) and not time_text:
         return empty
 
     from ..db import SessionLocal
@@ -291,11 +300,11 @@ def sync_profile_from_wms(
                 continue
             setattr(product, col, value)
             changed.append(col)
-        if not changed:
-            return {**empty, "notes": ["渔枢这边已经是这个值了"]}
-        product.updated_at = now()
+        if changed:
+            product.updated_at = now()
 
-        # 渔货栈那条货源（hub-prd-<商品id>）一起改
+        # 渔货栈那条货源（hub-prd-<商品id>）一起改（多一个「下单时间」列）
+        time_changed = False
         try:
             from src.models import SupplierItem
 
@@ -304,16 +313,25 @@ def sync_profile_from_wms(
             )
             if src_item is not None:
                 for col, value in picked.items():
-                    if value:
+                    if value and str(getattr(src_item, col) or "").strip() != value:
                         setattr(src_item, col, value)
+                if time_text and str(src_item.order_time or "").strip() != time_text:
+                    src_item.order_time = time_text
+                    time_changed = True
         except Exception:  # noqa: BLE001  渔货栈表不在（分端部署）→ 只改渔枢
             logger.info("渔货栈货源资料同步跳过（表不可读）", exc_info=True)
 
+        if not changed and not time_changed:
+            return {**empty, "notes": ["渔枢与渔货栈这边已经是这个值了"]}
         db.commit()
-        label = {"brand": "品牌", "model": "型号", "spec": "规格"}
+        label = {"brand": "品牌", "model": "型号", "spec": "规格",
+                 "order_time": "下单时间"}
+        bits = [f"{label[c]}→{picked.get(c) or time_text}" for c in changed]
+        if time_changed:
+            bits.append(f"下单时间→{time_text}")
         return {
             "updated": True,
-            "notes": [f"{product.name}：" + "、".join(f"{label[c]}→{picked[c]}" for c in changed)],
+            "notes": [f"{product.name}：" + "、".join(bits)],
         }
 
 

@@ -111,6 +111,10 @@
             <span class="v">{{ product.model or (wms_profile or {}).get('model') or '—' }}</span></div>
           <div class="kv"><span class="k">规格</span>
             <span class="v">{{ product.spec or (wms_profile or {}).get('spec') or '—' }}</span></div>
+          {# 下单时间（2026-10-16 用户要求）：渔集导入清单里沉淀的那列（存在货品的扩展字段里），
+             渔枢商品档案不存这一列 —— 按「商家编码 == 渔货号」实时从渔集读 #}
+          <div class="kv"><span class="k">下单时间</span>
+            <span class="v">{{ (wms_profile or {}).get('order_time') or '—' }}</span></div>
           <div class="kv"><span class="k">商家编码</span><span class="v mono-sm">{{ product.code or '—' }}</span></div>
           <div class="kv"><span class="k">承诺发货时效</span><span class="v">{{ product.delivery_days or '—' }} 天</span></div>
         </div>

@@ -364,8 +364,9 @@ def push_profile_change(
     brand: str = "",
     model: str = "",
     spec: str = "",
+    order_time: str = "",
 ) -> dict:
-    """渔集商品资料（品牌 / 型号 / 规格）→ 渔枢商品档案 + 渔货栈货源（2026-10-16）。
+    """渔集商品资料（品牌 / 型号 / 规格 / 下单时间）→ 渔枢商品档案 + 渔货栈货源（2026-10-16）。
 
     边界照 ``push_price_change``：独立部署直接不推；桥断 / 同步失败只打日志，
     **绝不让渔集这边的保存动作失败**。
@@ -381,7 +382,8 @@ def push_profile_change(
         return empty
     try:
         return sync_profile_from_wms(
-            code, brand=str(brand or ""), model=str(model or ""), spec=str(spec or "")
+            code, brand=str(brand or ""), model=str(model or ""), spec=str(spec or ""),
+            order_time=str(order_time or ""),
         )
     except Exception:  # noqa: BLE001  同步失败不影响渔集保存
         logger.warning("渔枢 / 渔货栈商品资料同步失败（不影响渔集保存）", exc_info=True)

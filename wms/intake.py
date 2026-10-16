@@ -52,6 +52,41 @@ DEFAULT_SERIAL_SPAN = 500
 # 系统货号前缀（2026-10-12）：货上没贴清单号那种非扫码场景，由系统发号，YC = 渔集
 SKU_PREFIX = "YC"
 
+# 导入时沉淀进 extra 的「下单时间」列名（2026-10-16 用户要求商品维度显示）。
+# 各家清单的表头写法不一样（下单时间 / 订单时间 / 下单日期…），按顺序认第一个有值的。
+ORDER_TIME_KEYS = ("下单时间", "订单时间", "下单日期", "拍单时间", "采购时间")
+
+
+def extra_value(item, keys: tuple[str, ...] = ORDER_TIME_KEYS) -> str:
+    """从这台货的沉淀字段（``WmsItem.extra``）里按顺序取第一个有值的键。"""
+    extra = getattr(item, "extra", None)
+    if not isinstance(extra, dict):
+        return ""
+    for key in keys:
+        text = str(extra.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def order_time_of(rows) -> str:
+    """一款货的「下单时间」（2026-10-16 用户要求：商品维度要能看到它是哪天下的单）。
+
+    一款货挂着多台，每台各存一份；值不一样时给「最早 ~ 最晚（N 个时间）」，
+    不拿其中一台糊弄过去。全都没有就返回空串（页面显示「—」）。
+    """
+    values: list[str] = []
+    for row in rows or []:
+        text = extra_value(row)
+        if text and text not in values:
+            values.append(text)
+    if not values:
+        return ""
+    if len(values) == 1:
+        return values[0]
+    ordered = sorted(values)
+    return f"{ordered[0]} ~ {ordered[-1]}（{len(values)} 个时间）"
+
 
 def barcode_of(category: str, yymm: str, seq: int) -> str:
     """条码本体：QC + 品类（**只取一级码**）+ 年月 + 4 位流水。
@@ -931,6 +966,8 @@ def update_goods_profile(
             brand=str(head.brand or ""),
             model=str(head.model or ""),
             spec=str(head.spec or ""),
+            # 下单时间（2026-10-16）：导入时沉淀在每台货的 extra 里，跟着商品资料一起同步
+            order_time=order_time_of(rows),
         )
     except Exception:  # noqa: BLE001  同步是账，保存是现场 —— 失败不拖整款保存
         logger.warning("商品资料同步渔枢 / 渔货栈失败", exc_info=True)

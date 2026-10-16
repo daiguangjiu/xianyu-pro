@@ -143,6 +143,9 @@ class SupplierItem(Base):
     # （渔集里这两项是「一款货」的公共资料，不是规格维度），详情页「规格参数」里看
     model: Mapped[str | None] = mapped_column(String(128))
     spec: Mapped[str | None] = mapped_column(String(128))
+    # 下单时间（2026-10-16 用户要求）：渔集导入清单里沉淀的那列（一台一值，款级聚合后的文本），
+    # 随商品资料一起同步过来，详情页「规格参数」页签里看。
+    order_time: Mapped[str | None] = mapped_column(String(64))
     selling_points: Mapped[str | None] = mapped_column(String(512))  # 卖点
     # 自营定价：sale_price 售价 / market_price 划线价
     sale_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
