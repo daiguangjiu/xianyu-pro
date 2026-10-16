@@ -16,6 +16,8 @@ from src.deps import get_db
 from src.goods.catalog import category_path
 from src.models import SkuMapping, SupplierItem
 from src.schemas import SupplierItemOut
+from app.models import Product
+from app.services import return_addr
 
 router = APIRouter(prefix="/openapi/v1/xh-fish/products", tags=["openapi"])
 _MAX_CLOCK_SKEW_SECONDS = 300
@@ -53,6 +55,41 @@ def _authorized(request: Request, x_client_id: str | None, x_timestamp: str | No
                       get_settings().xianmou_identity_sync_secret, raw_body, signed_path)
 
 
+def _address_out(address: Any | None) -> dict[str, str]:
+    if address is None:
+        return {"name": "", "contact": "", "phone": "", "region": "", "address": ""}
+    return {
+        "name": address.name or "",
+        "contact": address.contact or "",
+        "phone": address.phone or "",
+        "region": address.region or "",
+        "address": address.address or "",
+    }
+
+
+def _product_addresses(item: SupplierItem, db: Session) -> tuple[dict[str, str], dict[str, str]]:
+    raw_json = item.raw_json if isinstance(item.raw_json, dict) else {}
+    hub_product_id = raw_json.get("hub_product_id")
+    product = db.get(Product, hub_product_id) if hub_product_id else None
+    product_id = int(product.id) if product else None
+    category_text = product.category if product else None
+    supplier_id = int(product.supplier_id or 0) if product else None
+
+    addresses = []
+    for kind in (return_addr.KIND_SHIP, return_addr.KIND_RETURN):
+        selected = return_addr.pick(
+            db,
+            product_id=product_id,
+            category_text=category_text,
+            supplier_id=supplier_id,
+            kind=kind,
+        )
+        if selected is None:
+            selected = return_addr.default_address(db, kind=kind)
+        addresses.append(_address_out(selected))
+    return addresses[0], addresses[1]
+
+
 def _product_out(item: SupplierItem, db: Session) -> dict[str, Any]:
     data = SupplierItemOut.model_validate(item).model_dump(mode="json")
     raw_skus = (item.sku_list or {}).get("skus") or []
@@ -85,6 +122,7 @@ def _product_out(item: SupplierItem, db: Session) -> dict[str, Any]:
     image_materials = [{"url": url, "tags": ["主图"] if index == 0 else []}
                        for index, url in enumerate(images)]
     image_materials.extend({"url": url, "tags": ["详情图"]} for url in details if url)
+    shipping_address, return_address = _product_addresses(item, db)
     data.update({
         "id": item.id,
         "sourceItemId": item.item_id,
@@ -107,6 +145,8 @@ def _product_out(item: SupplierItem, db: Session) -> dict[str, Any]:
         "shippingProvinceCode": "",
         "shippingCity": "",
         "shippingCityCode": "",
+        "shippingAddress": shipping_address,
+        "returnAddress": return_address,
         "skus": skus,
     })
     return data
